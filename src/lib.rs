@@ -37,7 +37,7 @@ impl KeyManager {
     }
 
     pub fn import_private_key(&mut self, label: &str, private_key: &str) {
-        let private_key = PrivateKey::from_str(&private_key).unwrap();
+        let private_key = PrivateKey::from_str(private_key).unwrap();
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
         self.storage.store_entry(label, private_key, public_key);
@@ -71,9 +71,7 @@ impl KeyManager {
 
     fn generate_private_key(&self, network: Network) -> PrivateKey {
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
-        let private_key = PrivateKey::new(secret_key, network);
-
-        private_key
+        PrivateKey::new(secret_key, network)
     }
 
     pub fn sign_ecdsa_message(&self, message: &Message, public_key: PublicKey) -> secp256k1::ecdsa::Signature {
@@ -82,7 +80,7 @@ impl KeyManager {
             None => panic!("Failed to find key"),
         };
 
-        self.secp.sign_ecdsa(&message, &sk.inner)
+        self.secp.sign_ecdsa(message, &sk.inner)
     }
 
     pub fn sign_ecdsa_messages(&self, messages: Vec<Message>, public_keys: Vec<PublicKey>) -> Vec<secp256k1::ecdsa::Signature> {
@@ -114,7 +112,7 @@ impl KeyManager {
                 let kp = tweaked.to_inner();
                 (self.secp.sign_schnorr(message, &kp), Some(PublicKey::new(kp.public_key())))
             },
-            false => (self.secp.sign_schnorr(&message, &keypair), None)
+            false => (self.secp.sign_schnorr(message, &keypair), None)
         };        
 
         (signature, tweaked_pk)
@@ -136,6 +134,12 @@ impl KeyManager {
     }
 }
 
+impl Default for SignatureVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SignatureVerifier {
     pub fn new() -> Self {
         let secp = secp256k1::Secp256k1::new();
@@ -144,13 +148,15 @@ impl SignatureVerifier {
         }
     }
 
+
+
     pub fn veriy_ecdsa_signature(&self, signature: &secp256k1::ecdsa::Signature, message: &secp256k1::Message, public_key: PublicKey) -> bool {
-        self.secp.verify_ecdsa(message, &signature,&public_key.inner).is_ok()
+        self.secp.verify_ecdsa(message, signature,&public_key.inner).is_ok()
     }
 
     pub fn veriy_schnorr_signature(&self, signature: &secp256k1::schnorr::Signature, message: &secp256k1::Message, public_key: PublicKey) -> bool {
         let xonly_public_key = public_key.into();
-        self.secp.verify_schnorr(&signature,&message, &xonly_public_key).is_ok()
+        self.secp.verify_schnorr(signature, message, &xonly_public_key).is_ok()
     }
 }
 
@@ -176,9 +182,6 @@ mod tests {
      
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, pk);
-
-        println!("Message: {}", message);
-        println!("Signature: {}", signature);
 
         assert!(signature_verifier.veriy_ecdsa_signature(&signature, &message, pk));
     }

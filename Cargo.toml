@@ -1,0 +1,9 @@
+[package]
+name = "bitvmx-key-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcoin = { version = "0.32.1", features = ["std", "rand-std"]}
+itertools = "0.13.0"
+cocoon = "0.4.2"

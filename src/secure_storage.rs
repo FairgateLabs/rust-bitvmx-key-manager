@@ -8,6 +8,9 @@ const ENTRY_SIZE: u32 = 157;
 
 // Size in bytes of the encrypted key count in storage
 const KEY_COUNT_SIZE: u32 = 64;
+
+// Size in bytes of the encrypted winternitz secret in storage
+const WINTER_SIZE: u32 = 32 + 60; 
 pub struct SecureStorage {
     path: String, 
     network: Network,
@@ -35,13 +38,50 @@ impl SecureStorage {
     pub fn store_entry(&mut self, label: &str, private_key: PrivateKey, public_key: PublicKey) {
         let label_bytes = label.as_bytes();
         let encoded = self.encode_entry(label_bytes, private_key, public_key);  
-        let entry = self.encrypt_entry(encoded);
+        let entry = self.encrypt_entry(encoded, ENTRY_SIZE);
 
         self.write_entry(&entry);
         self.update_indexes(label_bytes, public_key, self.key_count);
 
         self.key_count += 1;
         self.update_key_count();
+    }
+
+    pub fn store_winternitz_secret(&mut self, master_secret: [u8; 32]) {
+        let entry = self.encrypt_entry(master_secret.to_vec(), WINTER_SIZE);
+        self.write_winternitz_secret(&entry);
+    }
+
+    fn write_winternitz_secret(&mut self, entry: &[u8]) {
+        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
+    
+        let mut storage = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&self.path)
+            .expect("Failed to open file in write mode");
+    
+        storage.seek(SeekFrom::Start(pos)).expect("Failed to seek file");
+        storage.write(entry).expect("Failed to write to file");
+    }
+
+    pub fn load_winternitz_secret(&self) -> Option<[u8; 32]> {
+        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
+    
+        let mut storage = OpenOptions::new()
+            .read(true)
+            .open(&self.path)
+            .expect("Failed to open file in read mode");
+    
+        storage.seek(SeekFrom::Start(pos)).expect("Failed to seek file");
+    
+        let mut entry: [u8; WINTER_SIZE as usize] = [0; WINTER_SIZE as usize];
+        storage.read(&mut entry).expect("Failed to read from file");
+    
+        let encoded = self.decrypt_entry(entry.to_vec());
+
+        Some(encoded.try_into().expect("Failed to convert winternitz secret to array"))
     }
 
     pub fn entry_by_label(&self, label: &str) -> Option<(String, PrivateKey, PublicKey)> {
@@ -90,7 +130,7 @@ impl SecureStorage {
     }
 
     fn read_entry(&self, entry_index: u32) -> Vec<u8>{
-        let position = (KEY_COUNT_SIZE + entry_index * ENTRY_SIZE) as u64;
+        let position = (KEY_COUNT_SIZE + WINTER_SIZE + entry_index * ENTRY_SIZE) as u64;      //TODO:
 
         let mut storage = File::open(&self.path).expect("Failed to open file");
         storage.seek(SeekFrom::Start(position)).expect("Failed to seek file");
@@ -162,8 +202,8 @@ impl SecureStorage {
         (label_hash.to_string(), private_key, public_key)
     }
 
-    fn encrypt_entry(&self, entry: Vec<u8>) -> Vec<u8>{
-        let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; ENTRY_SIZE as usize]);
+    fn encrypt_entry(&self, entry: Vec<u8>, size:u32) -> Vec<u8>{
+        let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; size as usize]);
         let mut cocoon = Cocoon::new(self.password.as_slice());
         cocoon.dump(entry, &mut entry_cursor).expect("Failed to store data");
         entry_cursor.into_inner()

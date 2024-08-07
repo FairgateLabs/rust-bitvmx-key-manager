@@ -47,12 +47,12 @@ impl SecureStorage {
         self.update_key_count();
     }
 
-    pub fn store_winternitz_secret(&mut self, master_secret: [u8; 32]) {
+    pub fn store_winternitz_secret(&self, master_secret: [u8; 32]) {
         let entry = self.encrypt_entry(master_secret.to_vec(), WINTER_SIZE);
         self.write_winternitz_secret(&entry);
     }
 
-    fn write_winternitz_secret(&mut self, entry: &[u8]) {
+    fn write_winternitz_secret(&self, entry: &[u8]) {
         let pos = KEY_COUNT_SIZE as u64; // Position for the second row
     
         let mut storage = OpenOptions::new()

@@ -1,3 +1,19 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)] //TODO: Pasarlo al helper
+pub enum KeyManagerError {
+    #[error("Invalid private key: {0}")]
+    PrivKeySliceError(#[from] bitcoin::key::FromWifError),
+    #[error("Failed to create DerivationPath, Xpriv or ChildNumber: {0}")]
+    Bip32Error(#[from] bitcoin::bip32::Error),
+    #[error("Storage error: {0}")]
+    StorageError(String),
+    #[error("Index overflow: cannot generate more keys")]
+    IndexOverflow,
+    #[error("Entry not found for public key")]
+    EntryNotFound,
+}
+
 pub fn add_checksum(message: &[u8], w: usize) -> Vec<u8> {
     let mut message = message.to_vec();
     let checksum = calculate_checksum(&message, w);

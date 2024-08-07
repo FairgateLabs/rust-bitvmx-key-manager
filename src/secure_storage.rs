@@ -130,7 +130,7 @@ impl SecureStorage {
     }
 
     fn read_entry(&self, entry_index: u32) -> Vec<u8>{
-        let position = (KEY_COUNT_SIZE + WINTER_SIZE + entry_index * ENTRY_SIZE) as u64;      //TODO:
+        let position = (KEY_COUNT_SIZE + WINTER_SIZE + entry_index * ENTRY_SIZE) as u64;
 
         let mut storage = File::open(&self.path).expect("Failed to open file");
         storage.seek(SeekFrom::Start(position)).expect("Failed to seek file");

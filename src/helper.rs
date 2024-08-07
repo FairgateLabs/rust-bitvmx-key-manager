@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Error, Debug)] //TODO: Pasarlo al helper
+#[derive(Error, Debug)]
 pub enum KeyManagerError {
     #[error("Invalid private key: {0}")]
     PrivKeySliceError(#[from] bitcoin::key::FromWifError),

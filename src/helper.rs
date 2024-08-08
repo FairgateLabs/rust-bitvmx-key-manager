@@ -43,9 +43,7 @@ pub fn calculate_checksum(message: &[u8], w: usize) -> Vec<u8> {
 pub fn calculate_checksum_length(message_length_bytes: usize, w: usize) -> usize {
     let l1 = 2 * message_length_bytes;
     let l2 = ((l1 * (w-1)) as f64).log2() / 4.0; //log16(x) = log2(x) / 4
-    let checksum_length_bytes = (l2 / 2.0).ceil() as usize;
-
-    checksum_length_bytes
+    (l2 / 2.0).ceil() as usize //checksum length in bytes
 }
 
 pub fn split_byte(byte: u8) -> (u8, u8) {

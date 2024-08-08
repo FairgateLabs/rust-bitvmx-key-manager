@@ -59,6 +59,7 @@ impl SecureStorage {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&self.path)
             .expect("Failed to open file in write mode");
     
@@ -86,22 +87,12 @@ impl SecureStorage {
 
     pub fn entry_by_label(&self, label: &str) -> Option<(String, PrivateKey, PublicKey)> {
         let key = hashes::sha256::Hash::hash(label.as_bytes()).to_string();
-        let entry = match self.index_by_label.get(&key) {
-            Some(index) => Some(self.load_entry(index.to_owned())),
-            None => None,
-        };
-
-        entry
+        self.index_by_label.get(&key).map(|index| self.load_entry(index.to_owned()))
     }
 
     pub fn entry_by_key(&self, public_key: &PublicKey) -> Option<(String, PrivateKey, PublicKey)> {
         let key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
-        let entry =  match self.index_by_public_key.get(&key) {
-            Some(index) => Some(self.load_entry(index.to_owned())),
-            None => None,    
-        };
-
-        entry
+        self.index_by_public_key.get(&key).map(|index| self.load_entry(index.to_owned()))
     }
 
     fn update_key_count(&mut self) {
@@ -170,6 +161,7 @@ impl SecureStorage {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&self.path)
             .expect("Failed to open file in write mode");
 
@@ -213,8 +205,7 @@ impl SecureStorage {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        let encoded = cocoon.parse(&mut entry_cursor).expect("Failed to decrypt data");
-        encoded
+        cocoon.parse(&mut entry_cursor).expect("Failed to decrypt data")
     } 
 
     fn encrypt_key_count(&self, count: Vec<u8>) -> Vec<u8>{ 

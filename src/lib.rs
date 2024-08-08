@@ -67,19 +67,19 @@ impl KeyManager {
         Ok(KeyManager { 
             secp,
             network,
-            master_xpriv: master_xpriv,
+            master_xpriv,
             next_normal: ChildNumber::Normal { index: 0 },
             key_derivation_path: key_derivation_path.to_string(),
-            storage: storage,
+            storage,
         })
     }
 
     pub fn import_private_key(&mut self, label: &str, private_key: &str)-> Result<(), KeyManagerError> {
-        let private_key = PrivateKey::from_str(&private_key)?;
+        let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.storage.store_entry(&label, private_key, public_key);
+            self.storage.store_entry(label, private_key, public_key);
         })).map_err(|_| KeyManagerError::StorageError("Failed to store entry".to_string()))?;
 
         Ok(())
@@ -168,7 +168,7 @@ impl KeyManager {
 
     fn get_multiple_child_keys(&self, key_size: usize, num_keys: usize, index: u32)-> Result<Vec<Vec<u8>>, KeyManagerError>{
 
-        index.checked_add(num_keys as u32).ok_or(KeyManagerError::IndexOverflow)?;
+        index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
         let master_secret = self.storage.load_winternitz_secret().unwrap();
 
         let mut keys = Vec::new();
@@ -187,7 +187,7 @@ impl KeyManager {
         let (_, sk, _) = self.storage.entry_by_key(&public_key)
             .ok_or(KeyManagerError::EntryNotFound)?;
 
-        Ok(self.secp.sign_ecdsa(&message, &sk.inner))
+        Ok(self.secp.sign_ecdsa(message, &sk.inner))
     }
 
     pub fn sign_ecdsa_messages(&self, messages: Vec<Message>, public_keys: Vec<PublicKey>) -> Result<Vec<secp256k1::ecdsa::Signature>, KeyManagerError> {
@@ -206,7 +206,7 @@ impl KeyManager {
 
     // Use key_spend = true for taproot key spend, false for taproot script spend
     pub fn sign_schnorr_message(&self, message: &Message, public_key: &PublicKey, key_spend: bool) -> Result<(secp256k1::schnorr::Signature, Option<PublicKey>), KeyManagerError>{
-        let (_, sk, _) = self.storage.entry_by_key(&public_key)
+        let (_, sk, _) = self.storage.entry_by_key(public_key)
             .ok_or(KeyManagerError::EntryNotFound)?;
         
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -217,7 +217,7 @@ impl KeyManager {
                 let kp = tweaked.to_inner();
                 (self.secp.sign_schnorr(message, &kp), Some(PublicKey::new(kp.public_key())))
             },
-            false => (self.secp.sign_schnorr(&message, &keypair), None)
+            false => (self.secp.sign_schnorr(message, &keypair), None)
         };        
 
         Ok((signature, tweaked_pk))
@@ -278,6 +278,13 @@ impl KeyManager {
     
 }
 
+
+impl Default for SignatureVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SignatureVerifier {
     pub fn new() -> Self {
         let secp = secp256k1::Secp256k1::new();
@@ -287,12 +294,12 @@ impl SignatureVerifier {
     }
 
     pub fn verify_ecdsa_signature(&self, signature: &secp256k1::ecdsa::Signature, message: &secp256k1::Message, public_key: PublicKey) -> bool {
-        self.secp.verify_ecdsa(message, &signature,&public_key.inner).is_ok()
+        self.secp.verify_ecdsa(message, signature,&public_key.inner).is_ok()
     }
 
     pub fn verify_schnorr_signature(&self, signature: &secp256k1::schnorr::Signature, message: &secp256k1::Message, public_key: PublicKey) -> bool {
         let xonly_public_key = public_key.into();
-        self.secp.verify_schnorr(&signature,&message, &xonly_public_key).is_ok()
+        self.secp.verify_schnorr(signature,message, &xonly_public_key).is_ok()
     }
 
     pub fn verify_winternitz_signature(&self, signature: &[Vec<u8>], msg_with_checksum: &[u8], msg_len_bytes: usize, public_key: &[Vec<u8>], key_type: WinternitzType) -> bool {
@@ -331,10 +338,10 @@ impl SignatureVerifier {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, panic};
+    use std::{env, panic, str::FromStr};
 
     use bitcoin::{hashes::{self, Hash}, key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}, Network, PrivateKey, PublicKey};
-    use crate::{add_checksum, calculate_checksum_length, secure_storage::SecureStorage, KeyManager, SignatureVerifier, WinternitzType, W};
+    use crate::{add_checksum, calculate_checksum_length, secure_storage::SecureStorage, KeyManager, KeyManagerError, SignatureVerifier, WinternitzType, W};
 
     use rand::Rng;
 
@@ -555,6 +562,39 @@ mod tests {
         };
 
         assert_eq!(recovered_public_key_2.to_string(), public_key.to_string());
+    }
+
+    #[test]
+    fn test_error_handling() {
+        let seed = random_seed();
+        let storage_password = b"secret password".to_vec();
+        let message = random_message();
+
+        let mut key_manager = KeyManager::new(REGTEST, DERIVATION_PATH,&temp_storage(), storage_password.clone(), &seed, None).unwrap();
+
+        // Case 1: Invalid private key string
+        let result = key_manager.import_private_key("test_label", "invalid_key");
+        assert!(matches!(result, Err(KeyManagerError::PrivKeySliceError(_))));
+
+        // Case 2: Invalid derivation path
+        let invalid_derivation_path = "m/44'/invalid'";
+        key_manager.key_derivation_path = invalid_derivation_path.to_string();
+        let result = key_manager.derive_bip32(None);
+        assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
+
+        // Case 3: Storage error when creating storage (invalid path)
+        let invalid_storage_path = "/invalid/path";
+        let result = KeyManager::new(Network::Regtest, "m/44'/0'/0'", invalid_storage_path, storage_password, &seed, None);
+        assert!(matches!(result, Err(KeyManagerError::StorageError(_))));
+
+        // Case 4: Index overflow when generating keys
+        let result = key_manager.generate_winternitz_key( message[..].len(), WinternitzType::WRIPEMD160, u32::MAX);
+        assert!(matches!(result, Err(KeyManagerError::IndexOverflow)));
+
+        // Case 5: Entry not found for public key
+        let fake_public_key = PublicKey::from_str("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").unwrap();
+        let result = key_manager.sign_ecdsa_message(&random_message(), fake_public_key);
+        assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
     }
 
     fn random_message() -> Message {

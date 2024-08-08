@@ -127,7 +127,9 @@ impl SecureStorage {
         storage.seek(SeekFrom::Start(position)).expect("Failed to seek file");
 
         let mut entry: [u8; ENTRY_SIZE as usize] = [0; ENTRY_SIZE as usize];
-        storage.read(&mut entry).expect("Failed to read from file");
+        let read_amount = storage.read(&mut entry).expect("Failed to read from file");
+
+        assert_eq!(read_amount, ENTRY_SIZE as usize);
 
         entry.to_vec()
     }
@@ -139,7 +141,9 @@ impl SecureStorage {
             .open(&self.path)
             .expect("Failed to open file in append mode");
 
-        storage.write(entry).expect("Failed to write to file"); 
+        let write_amount = storage.write(entry).expect("Failed to write to file"); 
+
+        assert_eq!(write_amount, entry.len());
     }
 
     fn read_key_count(&self) -> Vec<u8> {
@@ -151,7 +155,9 @@ impl SecureStorage {
         storage.seek(SeekFrom::Start(0)).expect("Failed to seek file");
 
         let mut entry: [u8; KEY_COUNT_SIZE as usize] = [0; KEY_COUNT_SIZE as usize];
-        storage.read(&mut entry).expect("Failed to read from file");
+        let read_amount = storage.read(&mut entry).expect("Failed to read from file");
+
+        assert_eq!(read_amount, KEY_COUNT_SIZE as usize);
 
         entry.to_vec()
     }
@@ -166,7 +172,9 @@ impl SecureStorage {
             .expect("Failed to open file in write mode");
 
         storage.seek(SeekFrom::Start(0)).expect("Failed to seek file");
-        storage.write(&count).expect("Failed to write to file"); 
+        let write_amount = storage.write(&count).expect("Failed to write to file"); 
+
+        assert_eq!(write_amount, count.len());
     } 
 
     fn encode_entry(&self, label_bytes: &[u8], sk: PrivateKey, pk: PublicKey) -> Vec<u8> {

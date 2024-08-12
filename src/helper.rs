@@ -1,17 +1,50 @@
+use bitcoin::{hashes::FromSliceError, secp256k1};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
+    #[error("Secure storage error")]
+    SecureStorageError(#[from] SecureStorageError),
+
     #[error("Invalid private key: {0}")]
     PrivKeySliceError(#[from] bitcoin::key::FromWifError),
+
     #[error("Failed to create DerivationPath, Xpriv or ChildNumber: {0}")]
     Bip32Error(#[from] bitcoin::bip32::Error),
-    #[error("Storage error: {0}")]
-    StorageError(String),
+
     #[error("Index overflow: cannot generate more keys")]
     IndexOverflow,
+
     #[error("Entry not found for public key")]
     EntryNotFound,
+}
+
+#[derive(Error, Debug)]
+pub enum SecureStorageError {
+    #[error("Failed to access secure storage")]
+    StorageError(#[from] std::io::Error),
+
+    #[error("Failed to decode data")]
+    FailedToDecodeData(#[from] FromSliceError),
+
+    #[error("Failed to decode private key")]
+    FailedToDecodePrivateKey(#[from] secp256k1::Error),
+
+    #[error("Failed to decode public key")]
+    FailedToDecodePublicKey(#[from] bitcoin::key::FromSliceError),
+
+    #[error("Failed to encrypt data")]
+    FailedToEncryptData {
+        error: cocoon::Error,
+    },
+
+    #[error("Failed to decrypt data")]
+    FailedToDecryptData {
+        error: cocoon::Error,
+    },
+
+    #[error("Failed to convert data to byte array")]
+    CorruptedData
 }
 
 pub fn add_checksum(message: &[u8], w: usize) -> Vec<u8> {

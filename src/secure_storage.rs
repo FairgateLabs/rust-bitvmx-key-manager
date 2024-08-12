@@ -1,7 +1,9 @@
-use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Cursor, Read, Seek, SeekFrom, Write}, path::Path};
+use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Cursor, Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
 
 use bitcoin::{hashes::{self, Hash}, Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
+
+use crate::helper::{SecureStorageError, SecureStorageError::*};
 
 // Size in bytes of each encrypted entry in storage
 const ENTRY_SIZE: u32 = 157;
@@ -12,7 +14,7 @@ const KEY_COUNT_SIZE: u32 = 64;
 // Size in bytes of the encrypted winternitz secret in storage
 const WINTER_SIZE: u32 = 32 + 60; 
 pub struct SecureStorage {
-    path: String, 
+    path: PathBuf, 
     network: Network,
     index_by_label: HashMap<String, u32>,
     index_by_public_key: HashMap<String, u32>,
@@ -21,9 +23,9 @@ pub struct SecureStorage {
 }
 
 impl SecureStorage {
-    pub fn new(path: &str, password: Vec<u8>, network: Network) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, SecureStorageError> {
         let mut secure_storage = SecureStorage { 
-            path: path.to_string(), 
+            path: path.as_ref().to_path_buf(), 
             network, 
             index_by_label: HashMap::new(),
             index_by_public_key: HashMap::new(),
@@ -31,154 +33,159 @@ impl SecureStorage {
             password: password.to_vec(),
         };
         
-        secure_storage.restore();
-        secure_storage
+        secure_storage.restore()?;
+        Ok(secure_storage)
     }
 
-    pub fn store_entry(&mut self, label: &str, private_key: PrivateKey, public_key: PublicKey) {
-        let label_bytes = label.as_bytes();
-        let encoded = self.encode_entry(label_bytes, private_key, public_key);  
-        let entry = self.encrypt_entry(encoded, ENTRY_SIZE);
+    pub fn store_keypair(&mut self, label: &str, private_key: PrivateKey, public_key: PublicKey) -> Result<(), SecureStorageError>{
+        let encoded = self.encode_entry(label, private_key, public_key);  
+        let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
-        self.write_entry(&entry);
-        self.update_indexes(label_bytes, public_key, self.key_count);
+        self.write_entry(&entry)?;
+        self.update_indexes(label, public_key, self.key_count);
 
         self.key_count += 1;
-        self.update_key_count();
+        self.update_key_count()?;
+
+        Ok(())
     }
 
-    pub fn store_winternitz_secret(&self, master_secret: [u8; 32]) {
-        let entry = self.encrypt_entry(master_secret.to_vec(), WINTER_SIZE);
-        self.write_winternitz_secret(&entry);
+    pub fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<(), SecureStorageError>{
+        let entry = self.encrypt_entry(master_secret.to_vec(), WINTER_SIZE)?;
+        self.update_entry_at(&entry, KEY_COUNT_SIZE as u64)?;
+        Ok(())
     }
 
-    fn write_winternitz_secret(&self, entry: &[u8]) {
+    pub fn load_winternitz_secret(&self) -> Result<[u8; 32], SecureStorageError> {
         let pos = KEY_COUNT_SIZE as u64; // Position for the second row
     
         let mut storage = OpenOptions::new()
             .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&self.path)
-            .expect("Failed to open file in write mode");
+            .open(&self.path)?;
     
-        storage.seek(SeekFrom::Start(pos)).expect("Failed to seek file");
-        storage.write(entry).expect("Failed to write to file");
-    }
-
-    pub fn load_winternitz_secret(&self) -> Option<[u8; 32]> {
-        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
-    
-        let mut storage = OpenOptions::new()
-            .read(true)
-            .open(&self.path)
-            .expect("Failed to open file in read mode");
-    
-        storage.seek(SeekFrom::Start(pos)).expect("Failed to seek file");
+        storage.seek(SeekFrom::Start(pos))?;
     
         let mut entry: [u8; WINTER_SIZE as usize] = [0; WINTER_SIZE as usize];
-        storage.read(&mut entry).expect("Failed to read from file");
+        let read_amount = storage.read(&mut entry)?;
+
+        assert_eq!(read_amount, WINTER_SIZE as usize);
     
-        let encoded = self.decrypt_entry(entry.to_vec());
+        let encoded = self.decrypt_entry(entry.to_vec())?;
 
-        Some(encoded.try_into().expect("Failed to convert winternitz secret to array"))
+        encoded.try_into().map_err(|_| CorruptedData)
     }
 
-    pub fn entry_by_label(&self, label: &str) -> Option<(String, PrivateKey, PublicKey)> {
-        let key = hashes::sha256::Hash::hash(label.as_bytes()).to_string();
-        self.index_by_label.get(&key).map(|index| self.load_entry(index.to_owned()))
-    }
-
-    pub fn entry_by_key(&self, public_key: &PublicKey) -> Option<(String, PrivateKey, PublicKey)> {
+    pub fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(String, PrivateKey, PublicKey)>, SecureStorageError> {
         let key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
-        self.index_by_public_key.get(&key).map(|index| self.load_entry(index.to_owned()))
+        let index = self.index_by_public_key.get(&key);
+
+        let entry = match index {
+            Some(index) => self.read_entry(index.to_owned())?,
+            None => return Ok(None),
+        };
+
+        Ok(Some(entry))
     }
 
-    fn update_key_count(&mut self) {
-        let encoded = self.key_count.to_be_bytes().to_vec();
-        let count = self.encrypt_key_count(encoded);
-        self.write_key_count(count);
+    pub fn load_keypair_by_label(&self, label: &str) -> Result<Option<(String, PrivateKey, PublicKey)>, SecureStorageError> {
+        let key = hashes::sha256::Hash::hash(label.as_bytes()).to_string();
+        let index = self.index_by_label.get(&key);
+
+        let entry = match index {
+            Some(index) => self.read_entry(index.to_owned())?,
+            None => return Ok(None),
+        };
+
+        Ok(Some(entry))
     }
 
-    fn restore_key_count(&mut self) {
-        let entry = self.read_key_count();
-        let encoded = self.decrypt_key_count(entry);
+    fn restore_from_file(&mut self) -> Result<(), SecureStorageError> {
+        let entry = self.read_key_count()?;
+        let encoded = self.decrypt_key_count(entry)?;
         let index: u32 = u32::from_be_bytes(encoded);
 
         self.key_count = index;
 
         for i in 0..self.key_count {
-            self.restore_indexes(i);
+            self.restore_indexes(i)?;
         }
+
+        Ok(())
     }
 
-    fn load_entry(&self, entry_index: u32) -> (String, PrivateKey, PublicKey) {
-        let entry = self.read_entry(entry_index);
-        let encoded = self.decrypt_entry(entry);
+    fn read_entry(&self, entry_index: u32) -> Result<(String, PrivateKey, PublicKey), SecureStorageError> {
+        let entry = self.read_encrypted(entry_index)?;
+        let encoded = self.decrypt_entry(entry)?;
 
         self.decode_entry(encoded.to_vec())
     }
 
-    fn read_entry(&self, entry_index: u32) -> Vec<u8>{
+    fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, SecureStorageError>{
         let position = (KEY_COUNT_SIZE + WINTER_SIZE + entry_index * ENTRY_SIZE) as u64;
 
-        let mut storage = File::open(&self.path).expect("Failed to open file");
-        storage.seek(SeekFrom::Start(position)).expect("Failed to seek file");
+        let mut storage = File::open(&self.path)?;
+        storage.seek(SeekFrom::Start(position))?;
 
         let mut entry: [u8; ENTRY_SIZE as usize] = [0; ENTRY_SIZE as usize];
-        let read_amount = storage.read(&mut entry).expect("Failed to read from file");
+        let read_amount = storage.read(&mut entry)?;
 
         assert_eq!(read_amount, ENTRY_SIZE as usize);
 
-        entry.to_vec()
+        Ok(entry.to_vec())
     }
 
-    fn write_entry(&mut self, entry: &[u8]) {
+    fn write_entry(&mut self, entry: &[u8]) -> Result<(), SecureStorageError> {
         let mut storage = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&self.path)
-            .expect("Failed to open file in append mode");
+            .open(&self.path)?;
 
-        let write_amount = storage.write(entry).expect("Failed to write to file"); 
+        let write_amount = storage.write(entry)?;
 
         assert_eq!(write_amount, entry.len());
+
+        Ok(())
     }
 
-    fn read_key_count(&self) -> Vec<u8> {
+    fn read_key_count(&self) -> Result<Vec<u8>, SecureStorageError> {
         let mut storage = OpenOptions::new()
             .read(true)
-            .open(&self.path)
-            .expect("Failed to open file in read mode"); 
+            .open(&self.path)?;
 
-        storage.seek(SeekFrom::Start(0)).expect("Failed to seek file");
+        storage.seek(SeekFrom::Start(0))?;
 
         let mut entry: [u8; KEY_COUNT_SIZE as usize] = [0; KEY_COUNT_SIZE as usize];
-        let read_amount = storage.read(&mut entry).expect("Failed to read from file");
+        let read_amount = storage.read(&mut entry)?;
 
         assert_eq!(read_amount, KEY_COUNT_SIZE as usize);
 
-        entry.to_vec()
+        Ok(entry.to_vec())
     }
 
-    fn write_key_count(&self, count: Vec<u8>) {
+    fn update_key_count(&mut self) -> Result<(), SecureStorageError> {
+        let encoded = self.key_count.to_be_bytes().to_vec();
+        let count = self.encrypt_entry(encoded, KEY_COUNT_SIZE)?;
+        self.update_entry_at(&count, 0)?;
+        Ok(())
+    }
+
+    fn update_entry_at(&self, entry: &[u8], position: u64) -> Result<(), SecureStorageError>{
         let mut storage = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&self.path)
-            .expect("Failed to open file in write mode");
+            .open(&self.path)?;
 
-        storage.seek(SeekFrom::Start(0)).expect("Failed to seek file");
-        let write_amount = storage.write(&count).expect("Failed to write to file"); 
+        storage.seek(SeekFrom::Start(position))?;
+        let write_amount = storage.write(entry)?; 
 
-        assert_eq!(write_amount, count.len());
+        assert_eq!(write_amount, entry.len());
+        Ok(())
     } 
 
-    fn encode_entry(&self, label_bytes: &[u8], sk: PrivateKey, pk: PublicKey) -> Vec<u8> {
-        let label_hash_bytes = hashes::sha256::Hash::hash(label_bytes).as_byte_array().to_vec();
+    fn encode_entry(&self, label: &str, sk: PrivateKey, pk: PublicKey) -> Vec<u8> {
+        let label_hash_bytes = hashes::sha256::Hash::hash(label.as_bytes()).as_byte_array().to_vec();
         let private_key_bytes = sk.to_bytes();
         let public_key_bytes = pk.to_bytes();
 
@@ -190,69 +197,64 @@ impl SecureStorage {
         encoded
     }   
 
-    fn decode_entry(&self, data: Vec<u8>) -> (String, PrivateKey, PublicKey) {
+    fn decode_entry(&self, data: Vec<u8>) -> Result<(String, PrivateKey, PublicKey), SecureStorageError> {
         let label_hash_bytes = &data[0..32];
         let public_key_bytes = &data[32..65];
         let private_key_bytes = &data[65..];
 
-        let label_hash = hashes::sha256::Hash::from_slice(label_hash_bytes).expect("Failed to decode label hash");
-        let private_key = PrivateKey::from_slice(private_key_bytes, self.network).expect("Failed to decode private key");
-        let public_key = PublicKey::from_slice(public_key_bytes).expect("Failed to decode public key");
+        let label_hash = hashes::sha256::Hash::from_slice(label_hash_bytes)?;
+        let private_key = PrivateKey::from_slice(private_key_bytes, self.network)?;
+        let public_key = PublicKey::from_slice(public_key_bytes)?;
 
-        (label_hash.to_string(), private_key, public_key)
+        Ok((label_hash.to_string(), private_key, public_key))
     }
 
-    fn encrypt_entry(&self, entry: Vec<u8>, size:u32) -> Vec<u8>{
+    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, SecureStorageError>{
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; size as usize]);
         let mut cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.dump(entry, &mut entry_cursor).expect("Failed to store data");
-        entry_cursor.into_inner()
+        cocoon.dump(entry, &mut entry_cursor).map_err( |error| FailedToEncryptData{ error })?;
+        Ok(entry_cursor.into_inner())
     }
 
-    fn decrypt_entry(&self, entry: Vec<u8>) -> Vec<u8> {
+    fn decrypt_entry(&self, entry: Vec<u8>) -> Result<Vec<u8>, SecureStorageError> {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.parse(&mut entry_cursor).expect("Failed to decrypt data")
-    } 
-
-    fn encrypt_key_count(&self, count: Vec<u8>) -> Vec<u8>{ 
-        let mut cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; KEY_COUNT_SIZE as usize]);
-
-        let mut cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.dump(count, &mut cursor).expect("Failed to store data");
-
-        cursor.into_inner()
+        cocoon.parse(&mut entry_cursor).map_err( |error| FailedToDecryptData{ error })
     }
 
-    fn decrypt_key_count(&self, count: Vec<u8>) -> [u8; 4]{
+    fn decrypt_key_count(&self, count: Vec<u8>) -> Result<[u8; 4], SecureStorageError> {
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(count);
         let cocoon = Cocoon::new(self.password.as_slice());
-        let encoded: [u8; 4] = cocoon.parse(&mut entry_cursor).expect("Failed to decrypt key count").try_into().expect("Failed to convert key count to array");
-        encoded
+        let encoded = cocoon.parse(&mut entry_cursor).map_err( |error| FailedToDecryptData{ error })?;
+        
+        encoded.try_into().map_err(|_| CorruptedData)
     }
 
-    fn update_indexes(&mut self, label_bytes: &[u8], public_key: PublicKey, position: u32) {
-        let label_key = hashes::sha256::Hash::hash(label_bytes).to_string();
+    fn update_indexes(&mut self, label: &str, public_key: PublicKey, position: u32) {
+        let label_key = hashes::sha256::Hash::hash(label.as_bytes()).to_string();
         self.index_by_label.insert(label_key, position);
 
         let pk_key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
         self.index_by_public_key.insert(pk_key, position);
     }
 
-    fn restore_indexes(&mut self, entry_index: u32) {
-        let (label_key, _, public_key) = self.load_entry(entry_index);
+    fn restore_indexes(&mut self, entry_index: u32) -> Result<(), SecureStorageError> {
+        let (label_key, _, public_key) = self.read_entry(entry_index)?;
         self.index_by_label.insert(label_key, entry_index);
 
         let pk_key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
         self.index_by_public_key.insert(pk_key, entry_index);
+        Ok(())
     }
 
-    fn restore(&mut self) {
+    fn restore(&mut self) -> Result<(), SecureStorageError> {
         if Path::new(&self.path).exists() {
-            self.restore_key_count();
+            self.restore_from_file()?;
         } else {
-            self.update_key_count();
+            self.update_key_count()?;
         }
+
+        Ok(())
     }
 }

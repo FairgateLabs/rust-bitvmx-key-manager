@@ -3,9 +3,11 @@ name = "bitvmx-key-manager"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "key_manager"
+
 [dependencies]
 bitcoin = { version = "0.32.1", features = ["std", "rand-std"]}
 itertools = "0.13.0"
 cocoon = "0.4.2"
-rand = "0.8.4"
 thiserror = "1.0.30"

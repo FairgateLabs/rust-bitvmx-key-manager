@@ -3,16 +3,11 @@ use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Cursor, Read, Seek
 use bitcoin::{hashes::{self, Hash}, Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
 
-use crate::helper::{SecureStorageError, SecureStorageError::*};
+use crate::errors::{SecureStorageError, SecureStorageError::*};
 
-// Size in bytes of each encrypted entry in storage
-const ENTRY_SIZE: u32 = 157;
-
-// Size in bytes of the encrypted key count in storage
-const KEY_COUNT_SIZE: u32 = 64;
-
-// Size in bytes of the encrypted winternitz secret in storage
-const WINTER_SIZE: u32 = 32 + 60; 
+const ENTRY_SIZE: u32 = 157; // Size in bytes of each encrypted entry in storage
+const KEY_COUNT_SIZE: u32 = 64; // Size in bytes of the encrypted key count in storage
+const WINTER_SIZE: u32 = 32 + 60; // Size in bytes of the encrypted winternitz secret in storage
 pub struct SecureStorage {
     path: PathBuf, 
     network: Network,

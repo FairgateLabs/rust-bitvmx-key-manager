@@ -4,13 +4,11 @@ A Rust library for managing a collection of keys for BitVMX transactions. This p
 
 ## Features
 
-- Generate new keys
+- Generate new keys and securely store them
 - Import existing private keys
 - Derive keys using BIP32
-- Sign messages using ECDSA
-- Sign messages using Schnorr
-- Verify ECDSA signatures
-- Verify Schnorr signatures
+- Sign messages using ECDSA, Schnorr and Winternitz
+- Verify ECDSA, Schnorr and Winternitz signatures
 
 ## Usage
 

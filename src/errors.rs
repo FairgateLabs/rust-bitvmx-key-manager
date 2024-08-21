@@ -57,6 +57,10 @@ pub enum CliError {
     UnexpectedError(String),
     #[error("Invalid network: {0}")]
     InvalidNetwork(String),
+    #[error("Invalid Winternitz Type: {0}")]
+    InvalidWinternitzType(String),
+    #[error("Invalid Configuration File: {0}")]
+    InvalidConfigFile(String),
 }
 
 #[derive(Error, Debug)]

@@ -1,12 +1,11 @@
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, str::FromStr};
 
 use anyhow::{Ok, Result};
 
-use bitcoin::{key::rand::RngCore, secp256k1, Network};
+use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-
-use crate::{errors::CliError, key_manager::KeyManager};
+use crate::{errors::CliError, key_manager::KeyManager, winternitz, config::Config};
 
 pub struct Cli {
 }
@@ -25,15 +24,67 @@ enum Commands {
         #[arg(value_name = "label", short = 'l', long = "label")]
         label: String,
 
-        #[arg(value_name = "network", short = 'n', long = "network")]
-        network: String,
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
 
-        #[arg(value_name = "password", short = 'p', long = "password")]
-        storage_password: String,
+    NewWinternitzKey {
+        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
+        winternitz_type: String,
 
-        #[arg(value_name = "storage_path", short = 's', long = "storage")]
-        storage_path: Option<String>,
-    }
+        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
+        message_length: usize,
+
+        #[arg(value_name = "index", short = 'i', long = "index")]
+        index: u32,
+
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
+
+    SignECDSA {
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        public_key: String,
+
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
+
+    SignSchnorr{
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        public_key: String,
+
+        #[arg(value_name = "key_spent", short = 'k', long = "key_spent")]
+        key_spent: bool,
+
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
+
+    SignWinternitz{
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
+        winternitz_type: String,
+
+        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
+        message_length: usize,
+
+        #[arg(value_name = "index", short = 'i', long = "index")]
+        index: u32,
+
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
+
+    RandomMessage,
 }
 
 impl Cli {
@@ -46,8 +97,34 @@ impl Cli {
         let menu = Menu::parse();
 
         match &menu.command {
-            Commands::NewKey { label, network, storage_password, storage_path }=> {
-                self.generate_key(label, network, storage_password, storage_path)?;
+            Commands::NewKey { label, config_file_path }=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.generate_key(label, key_manager_config)?;
+            }
+
+            Commands::NewWinternitzKey { winternitz_type, message_length, index, config_file_path}=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.generate_winternitz_key(&winternitz_type, *message_length, *index,key_manager_config)?;
+            }
+
+            Commands::SignECDSA {message, public_key,config_file_path }=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.sign_ecdsa(message, public_key, key_manager_config)?;
+            }
+
+            Commands::SignSchnorr {message, public_key,key_spent,config_file_path }=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.sign_schnorr(message, public_key, *key_spent, key_manager_config)?;
+            }
+
+            Commands::SignWinternitz {message, winternitz_type, message_length, index, config_file_path}=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.sign_winternitz(message, winternitz_type, *message_length, *index, key_manager_config)?;
+            }
+
+            Commands::RandomMessage => {
+                let message = self.get_random_bytes();
+                info!("Random message: {:?}", message);
             }
         }
 
@@ -57,8 +134,9 @@ impl Cli {
     // 
     // Commands
     //
-    fn generate_key(&self, label: &str, network: &str, storage_password: &str, storage_path: &Option<String>) -> Result<()>{
-        let mut key_manager = self.key_manager(network, storage_path, storage_password)?;
+    fn generate_key(&self, label: &str, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
         let mut rng = secp256k1::rand::thread_rng();
         
         let pk = key_manager.generate_key(Some(label.to_string()), &mut rng).unwrap();
@@ -67,6 +145,63 @@ impl Cli {
 
         Ok(())
     }
+
+    fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize, index: u32, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let key_type = self.get_witnernitz_type(winternitz_type)?;
+        
+        let pk = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index).unwrap();
+
+        info!("New key pair created of Winternitz Key. Public key is: {:?}", pk);
+
+        Ok(())
+    }
+
+    fn sign_ecdsa(&self, message: &str, public_key: &str, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        if message.len() > 32 {
+            return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
+        }
+        let message: [u8; 32] = message.to_string().as_bytes().try_into().unwrap();
+        
+        let signature = key_manager.sign_ecdsa_message(&Message::from_digest(message), PublicKey::from_str(public_key).unwrap()).unwrap();
+
+        info!("ECDSA Message signed. Signature is: {:?}", signature);
+
+        Ok(())
+    }
+
+    fn sign_winternitz(&self, message: &str, winternitz_type: &str, msg_len_bytes: usize, index: u32, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let key_type = self.get_witnernitz_type(winternitz_type)?;
+
+        let message_bytes = message.as_bytes();
+        
+        let signature = key_manager.sign_winternitz_message(message_bytes, msg_len_bytes, index, key_type).unwrap();
+
+        info!("Winternitz Message signed. Signature is: {:?}", signature);
+
+        Ok(())
+    }
+
+    fn sign_schnorr(&self, message: &str, public_key: &str, key_spent:bool, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        if message.len() > 32 {
+            return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
+        }
+        let message: [u8; 32] = message.to_string().as_bytes().try_into().unwrap();
+        
+        let signature = key_manager.sign_schnorr_message(&Message::from_digest(message), &PublicKey::from_str(public_key).unwrap(),key_spent).unwrap();
+
+        info!("Schnorr Message signed. Signature is: {:?}", signature);
+
+        Ok(())
+    }
+
 
     fn key_manager(&self, network: &str, storage_path: &Option<String>, storage_password: &str) -> Result<KeyManager> {
         let key_derivation_path: &str = "101/1/0/0/";
@@ -95,7 +230,15 @@ impl Cli {
             "regtest" => Ok(Network::Regtest),
             _ => Err(CliError::InvalidNetwork(network.to_string()).into()),
         }
-    }   
+    }
+
+    fn get_witnernitz_type(&self, winternitz_type: &str) -> Result<winternitz::WinternitzType> {
+        match winternitz_type {
+            "wsha256" => Ok(winternitz::WinternitzType::WSHA256),
+            "wripemd160" => Ok(winternitz::WinternitzType::WRIPEMD160),
+            _ => Err(CliError::InvalidWinternitzType(winternitz_type.to_string()).into()),
+        }
+    }
 
     fn get_storage_path(&self, storage_path: &Option<String>) -> Result<PathBuf> {
         let path = match storage_path {

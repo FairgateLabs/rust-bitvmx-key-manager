@@ -10,7 +10,9 @@ static CONFIG_PATH: &str = "config";
 
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
-    pub path: String,
+    pub network: String,
+    pub storage_password: String,
+    pub storage_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -20,9 +22,15 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new() -> Result<Config, ConfigError> {
-        let env = Config::get_env();
-        Config::parse_config(env)
+    pub fn new(path: Option<String>) -> Result<Config, ConfigError> {
+        match path {
+            Some(p) => Config::parse_config(p),
+            None => {
+                let env = Config::get_env();
+                Config::parse_config(env)
+            }
+        }
+        
     }
 
     fn get_env() -> String {

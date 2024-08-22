@@ -42,6 +42,14 @@ enum Commands {
         config_file_path: String,
     },
 
+    NewDeterministicKey {
+        #[arg(value_name = "label", short = 'l', long = "label")]
+        label: String,
+
+        #[arg(value_name = "config_path_file", short = 'c', long = "config_path_file")]
+        config_file_path: String,
+    },
+
     SignECDSA {
         #[arg(value_name = "message", short = 'm', long = "message")]
         message: String,
@@ -100,6 +108,11 @@ impl Cli {
             Commands::NewKey { label, config_file_path }=> {
                 let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
                 self.generate_key(label, key_manager_config)?;
+            }
+
+            Commands::NewDeterministicKey { label, config_file_path }=> {
+                let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
+                self.generate_deterministic_key(label, key_manager_config)?;
             }
 
             Commands::NewWinternitzKey { winternitz_type, message_length, index, config_file_path}=> {
@@ -198,6 +211,17 @@ impl Cli {
         let signature = key_manager.sign_schnorr_message(&Message::from_digest(message), &PublicKey::from_str(public_key).unwrap(),key_spent).unwrap();
 
         info!("Schnorr Message signed. Signature is: {:?}", signature);
+
+        Ok(())
+    }
+
+    fn generate_deterministic_key(&self, label: &str, key_manager_config: Config) -> Result<()>{
+        let configuration = key_manager_config.storage;
+        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        
+        let pk = key_manager.derive_bip32(Some(label.to_string())).unwrap();
+
+        info!("New deterministic key pair created and stored with label '{}'. Public key is: {}", label, pk.to_string());
 
         Ok(())
     }

@@ -26,6 +26,15 @@ pub enum SecureStorageError {
     #[error("Failed to access secure storage")]
     StorageError(#[from] std::io::Error),
 
+    #[error("Failed to open secure storage")]
+    OpenError,
+
+    #[error("Failed to write secure storage")]
+    WriteError(#[from] rocksdb::Error),
+
+    #[error("Failed to read secure storage")]
+    ReadError(rocksdb::Error),
+
     #[error("Failed to decode data")]
     FailedToDecodeData(#[from] FromSliceError),
 

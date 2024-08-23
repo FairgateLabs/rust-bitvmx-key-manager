@@ -5,3 +5,4 @@ pub mod key_manager;
 pub mod storage;
 pub mod verifier;
 pub mod winternitz;
+pub mod storagedb;

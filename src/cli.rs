@@ -5,7 +5,8 @@ use anyhow::{Ok, Result};
 use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-use crate::{errors::CliError, key_manager::KeyManager, winternitz, config::Config};
+use crate::{config::Config, errors::CliError, key_manager::KeyManager, verifier::SignatureVerifier, winternitz};
+use hex;
 
 pub struct Cli {
 }
@@ -92,6 +93,45 @@ enum Commands {
         config_file_path: String,
     },
 
+    VerifyEcdsaSignature{
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        public_key: String,
+
+        #[arg(value_name = "signature", short = 's', long = "signature")]
+        signature: String,
+    },
+
+    VerifySchnorrSignature{
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        public_key: String,
+
+        #[arg(value_name = "signature", short = 's', long = "signature")]
+        signature: String,
+    },
+
+    VerifyWinternitzSignature{
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
+        winternitz_type: String,
+
+        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
+        message_length: usize,
+
+        #[arg(value_name = "signature", short = 's', long = "signature")]
+        signature: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        public_key: String,
+    },
+
     RandomMessage,
 }
 
@@ -135,6 +175,18 @@ impl Cli {
                 self.sign_winternitz(message, winternitz_type, *message_length, *index, key_manager_config)?;
             }
 
+            Commands::VerifyEcdsaSignature { message, public_key, signature } => {
+                self.verify_ecdsa_signature(signature, message, public_key)?;
+            }
+
+            Commands::VerifySchnorrSignature { message, public_key, signature } => {
+                self.verify_schnorr_signature(signature, message, public_key)?;
+            }
+
+            Commands::VerifyWinternitzSignature {message, winternitz_type, message_length, signature, public_key} => {
+                self.verify_winternitz_signature(signature, message, *message_length, public_key, winternitz_type)?;
+            }
+
             Commands::RandomMessage => {
                 let message = self.get_random_bytes();
                 info!("Random message: {:?}", message);
@@ -164,7 +216,7 @@ impl Cli {
         let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
         
-        let pk = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index).unwrap();
+        let pk = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
 
         info!("New key pair created of Winternitz Key. Public key is: {:?}", pk);
 
@@ -177,7 +229,7 @@ impl Cli {
         if message.len() > 32 {
             return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
         }
-        let message: [u8; 32] = message.to_string().as_bytes().try_into().unwrap();
+        let message: [u8; 32] = message.to_string().as_bytes().try_into()?;
         
         let signature = key_manager.sign_ecdsa_message(&Message::from_digest(message), PublicKey::from_str(public_key).unwrap()).unwrap();
 
@@ -226,6 +278,47 @@ impl Cli {
         Ok(())
     }
 
+    fn verify_ecdsa_signature(&self, signature: &String, message: &String, public_key: &String) -> Result<()> {
+        let verifier = SignatureVerifier::new();
+        let signature = secp256k1::ecdsa::Signature::from_str(signature)?;
+        let message = Message::from_digest(message.to_string().as_bytes().try_into()?);
+        let public_key = PublicKey::from_str(public_key)?;
+        match verifier.verify_ecdsa_signature(&signature, &message, public_key){
+            true => info!("ECDSA Signature is valid"),
+            false => info!("ECDSA Signature is invalid"),
+        };
+        Ok(())
+    }
+
+    fn verify_schnorr_signature(&self, signature: &String, message: &String, public_key: &String) -> Result<()> {
+        let verifier = SignatureVerifier::new();
+        let signature = secp256k1::schnorr::Signature::from_str(signature)?;
+        let message = Message::from_digest(message.to_string().as_bytes().try_into()?);
+        let public_key = PublicKey::from_str(public_key)?;
+        match verifier.verify_schnorr_signature(&signature, &message, public_key){
+            true => info!("Schnorr Signature is valid"),
+            false => info!("Schnorr Signature is invalid"),
+        };
+        Ok(())
+    }
+    
+    fn verify_winternitz_signature(&self, signature: &String, message: &String, msg_len_bytes: usize, public_key: &String, winternitz_type: &str) -> Result<()> {
+        let verifier = SignatureVerifier::new();
+        let signature = [self.hex_string_to_bytes(signature)?];
+        let message = message.as_bytes();
+        let public_key = [self.hex_string_to_bytes(public_key)?];
+        let key_type = self.get_witnernitz_type(winternitz_type)?;
+        match verifier.verify_winternitz_signature(&signature, message, msg_len_bytes, &public_key, key_type){
+            true => info!("Winternitz Signature is valid"),
+            false => info!("Winternitz Signature is invalid"),
+        };
+        Ok(())
+    }
+
+    fn hex_string_to_bytes(&self, hex_string: &str) -> Result<Vec<u8>> {
+        let bytes = hex::decode(hex_string).map_err(|_| CliError::InvalidHexString(hex_string.to_string()))?;
+        Ok(bytes)
+    }
 
     fn key_manager(&self, network: &str, storage_path: &Option<String>, storage_password: &str) -> Result<KeyManager> {
         let key_derivation_path: &str = "101/1/0/0/";
@@ -282,3 +375,4 @@ impl Cli {
         seed
     }
 }
+

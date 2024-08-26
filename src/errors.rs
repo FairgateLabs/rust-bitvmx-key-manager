@@ -61,6 +61,8 @@ pub enum CliError {
     InvalidWinternitzType(String),
     #[error("Invalid Configuration File: {0}")]
     InvalidConfigFile(String),
+    #[error("Invalid Hex String: {0}")]
+    InvalidHexString(String),
 }
 
 #[derive(Error, Debug)]

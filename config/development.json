@@ -1,0 +1,9 @@
+{
+    "key_manager": {
+        "network": "regtest"
+    },
+    "storage": {
+        "password": "secret_password",
+        "path": "/tmp/storage.db"
+    }
+}

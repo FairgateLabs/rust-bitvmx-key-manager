@@ -34,7 +34,7 @@ impl SecureStorage {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
-        self.db.put(key, entry).map_err(|e| WriteError(e))?;
+        self.db.put(key, entry).map_err(WriteError)?;
 
         Ok(())
     }
@@ -42,7 +42,7 @@ impl SecureStorage {
     pub fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(String, PrivateKey, PublicKey)>> { 
         let key = public_key.to_string();
 
-        let entry = match self.db.get(key).map_err(|e| ReadError(e))?{
+        let entry = match self.db.get(key).map_err(ReadError)?{
             Some(entry) => {
                 let encoded = self.decrypt_entry(entry)?;
                 self.decode_entry(encoded.to_vec())
@@ -55,12 +55,12 @@ impl SecureStorage {
 
     pub fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<()>{
         let entry = self.encrypt_entry(master_secret.to_vec(), ENTRY_SIZE)?;
-        self.db.put("Winternitz".to_string(), entry).map_err(|e| WriteError(e))?;
+        self.db.put("winternitz", entry).map_err(WriteError)?;
         Ok(())
     }
 
     pub fn load_winternitz_secret(&self) -> Result<[u8; 32]> {
-        let entry = self.db.get("winternitz".to_string()).map_err(|e| ReadError(e))?.unwrap();
+        let entry = self.db.get("winternitz").map_err(ReadError)?.unwrap();
         let encoded = self.decrypt_entry(entry)?;
         Ok(encoded.try_into().map_err(|_| CorruptedData)?)
     }

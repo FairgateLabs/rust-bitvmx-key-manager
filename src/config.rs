@@ -8,17 +8,19 @@ use crate::errors::ConfigError;
 static DEFAULT_ENV: &str = "development";
 static CONFIG_PATH: &str = "config";
 
-#[derive(Debug, Deserialize)]
-pub struct StorageConfig {
-    pub network: String,
-    pub storage_password: String,
-    pub storage_path: Option<String>,
-}
+// #[derive(Debug, Deserialize)]
+// pub struct StorageConfig {
+//     pub network: String,
+//     pub storage_password: String,
+//     pub storage_path: Option<String>,
+// }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)] // enforce strict field compliance
 pub struct Config {
-    pub storage: StorageConfig,
+    pub network: String,
+    pub storage_password: String,
+    pub storage_path: Option<String>,
 }
 
 impl Config {

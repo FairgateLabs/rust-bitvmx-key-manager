@@ -157,7 +157,7 @@ impl Cli {
 
             Commands::NewWinternitzKey { winternitz_type, message_length, index, config_file_path}=> {
                 let key_manager_config = Config::new(Some(config_file_path.to_string()))?;
-                self.generate_winternitz_key(&winternitz_type, *message_length, *index,key_manager_config)?;
+                self.generate_winternitz_key(winternitz_type, *message_length, *index,key_manager_config)?;
             }
 
             Commands::SignECDSA {message, public_key,config_file_path }=> {
@@ -200,8 +200,7 @@ impl Cli {
     // Commands
     //
     fn generate_key(&self, label: &str, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let mut key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         let mut rng = secp256k1::rand::thread_rng();
         
         let pk = key_manager.generate_key(Some(label.to_string()), &mut rng).unwrap();
@@ -212,8 +211,7 @@ impl Cli {
     }
 
     fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize, index: u32, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let mut key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
         
         let pk = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
@@ -224,8 +222,7 @@ impl Cli {
     }
 
     fn sign_ecdsa(&self, message: &str, public_key: &str, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         if message.len() > 32 {
             return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
         }
@@ -239,8 +236,7 @@ impl Cli {
     }
 
     fn sign_winternitz(&self, message: &str, winternitz_type: &str, msg_len_bytes: usize, index: u32, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
 
         let message_bytes = message.as_bytes();
@@ -253,8 +249,7 @@ impl Cli {
     }
 
     fn sign_schnorr(&self, message: &str, public_key: &str, key_spent:bool, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         if message.len() > 32 {
             return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
         }
@@ -268,8 +263,7 @@ impl Cli {
     }
 
     fn generate_deterministic_key(&self, label: &str, key_manager_config: Config) -> Result<()>{
-        let configuration = key_manager_config.storage;
-        let mut key_manager = self.key_manager(&configuration.network, &configuration.storage_path, &configuration.storage_password)?;
+        let mut key_manager = self.key_manager(&key_manager_config.network, &key_manager_config.storage_path, &key_manager_config.storage_password)?;
         
         let pk = key_manager.derive_bip32(Some(label.to_string())).unwrap();
 
@@ -278,7 +272,7 @@ impl Cli {
         Ok(())
     }
 
-    fn verify_ecdsa_signature(&self, signature: &String, message: &String, public_key: &String) -> Result<()> {
+    fn verify_ecdsa_signature(&self, signature: &str, message: &str, public_key: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
         let signature = secp256k1::ecdsa::Signature::from_str(signature)?;
         let message = Message::from_digest(message.to_string().as_bytes().try_into()?);
@@ -290,7 +284,7 @@ impl Cli {
         Ok(())
     }
 
-    fn verify_schnorr_signature(&self, signature: &String, message: &String, public_key: &String) -> Result<()> {
+    fn verify_schnorr_signature(&self, signature: &str, message: &str, public_key: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
         let signature = secp256k1::schnorr::Signature::from_str(signature)?;
         let message = Message::from_digest(message.to_string().as_bytes().try_into()?);
@@ -302,7 +296,7 @@ impl Cli {
         Ok(())
     }
     
-    fn verify_winternitz_signature(&self, signature: &String, message: &String, msg_len_bytes: usize, public_key: &String, winternitz_type: &str) -> Result<()> {
+    fn verify_winternitz_signature(&self, signature: &str, message: &str, msg_len_bytes: usize, public_key: &str, winternitz_type: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
         let signature = [self.hex_string_to_bytes(signature)?];
         let message = message.as_bytes();
@@ -361,7 +355,7 @@ impl Cli {
         let path = match storage_path {
             Some(path) => PathBuf::from(path),
             None => {
-                let path = PathBuf::from(env::current_dir()?);
+                let path = env::current_dir()?;
                 path.join("secure_storage.db")
             },
         };

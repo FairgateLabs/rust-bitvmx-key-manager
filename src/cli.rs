@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-use crate::{config::Config, errors::CliError, key_manager::KeyManager, verifier::SignatureVerifier, winternitz};
+use crate::{config::Config, errors::CliError, key_manager::KeyManager, verifier::SignatureVerifier, winternitz::{self, add_checksum, W}};
 use hex;
 
 pub struct Cli {
@@ -225,10 +225,10 @@ impl Cli {
 
         let message_bytes = message.as_bytes();
         
-        let signature = key_manager.sign_winternitz_message(message_bytes, message_bytes.len(), index, key_type).unwrap();
+        let checksumed_message = add_checksum(message_bytes, W);
+        let signature = key_manager.sign_winternitz_message(checksumed_message.as_slice(), message_bytes.len(), index, key_type).unwrap();
 
         let hex_signature: Vec<String> = signature.iter().map(|s| hex::encode(s)).collect();
-
 
         info!("Winternitz Message signed. Signature is: {:?}", hex_signature.join(""));
 
@@ -312,10 +312,11 @@ impl Cli {
         let signature = self.hex_string_to_bytes(signature)?.chunks(chunk_size).map(|s| s.to_vec()).collect::<Vec<Vec<u8>>>();
         let message_bytes = message.as_bytes();
         
+        let checksumed_message = add_checksum(message_bytes, W);
 
         let public_key = self.key_manager()?.generate_winternitz_key(message_bytes.len(), key_type, key_index)?;
 
-        match verifier.verify_winternitz_signature(&signature, message_bytes, message_bytes.len(), &public_key, key_type){
+        match verifier.verify_winternitz_signature(&signature, checksumed_message.as_slice(), message_bytes.len(), &public_key, key_type){
             true => info!("Winternitz Signature is valid"),
             false => info!("Winternitz Signature is invalid"),
         };
@@ -380,8 +381,8 @@ impl Cli {
         seed
     }
 
-    fn get_random_bytes_for_winternitz(&self) -> [u8; 8] {
-        let mut seed = [0u8; 8];
+    fn get_random_bytes_for_winternitz(&self) -> [u8; 4] {
+        let mut seed = [0u8; 4];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
     }

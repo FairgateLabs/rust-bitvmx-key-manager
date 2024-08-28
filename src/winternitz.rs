@@ -3,7 +3,7 @@ pub const W: usize = 2usize.pow(NBITS as u32); // Winternitz parameter (times to
 pub const SHA256_SIZE: usize = 32;
 pub const RIPEMD160_SIZE: usize = 20;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum WinternitzType {
     WSHA256,
     WRIPEMD160,

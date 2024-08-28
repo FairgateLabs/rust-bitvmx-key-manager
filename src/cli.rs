@@ -1,10 +1,10 @@
-use std::{env, path::PathBuf, str::FromStr};
+use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Ok, Result};
 
 use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
-use tracing::{info, debug};
+use tracing::info;
 use crate::{config::Config, errors::CliError, key_manager::KeyManager, verifier::SignatureVerifier, winternitz};
 use hex;
 
@@ -34,8 +34,8 @@ enum Commands {
         #[arg(value_name = "message_length", short = 'm', long = "message_length")]
         message_length: usize,
 
-        #[arg(value_name = "index", short = 'i', long = "index")]
-        index: u32,
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
     },
 
     NewDeterministicKey {
@@ -69,11 +69,8 @@ enum Commands {
         #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
         winternitz_type: String,
 
-        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
-        message_length: usize,
-
-        #[arg(value_name = "index", short = 'i', long = "index")]
-        index: u32,
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
     },
 
     VerifyEcdsaSignature{
@@ -105,17 +102,16 @@ enum Commands {
         #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
         winternitz_type: String,
 
-        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
-        message_length: usize,
-
         #[arg(value_name = "signature", short = 's', long = "signature")]
         signature: String,
 
-        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
-        public_key: String,
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
     },
 
     RandomMessage,
+
+    RandomWinternitzMessage,
 }
 
 impl Cli {
@@ -138,8 +134,8 @@ impl Cli {
                 self.generate_deterministic_key(label)?;
             }
 
-            Commands::NewWinternitzKey { winternitz_type, message_length, index }=> {
-                self.generate_winternitz_key(winternitz_type, *message_length, *index)?;
+            Commands::NewWinternitzKey { winternitz_type, message_length, key_index }=> {
+                self.generate_winternitz_key(winternitz_type, *message_length, *key_index)?;
             }
 
             Commands::SignECDSA {message, public_key }=> {
@@ -150,8 +146,8 @@ impl Cli {
                 self.sign_schnorr(message, public_key, *key_spent)?;
             }
 
-            Commands::SignWinternitz {message, winternitz_type, message_length, index }=> {
-                self.sign_winternitz(message, winternitz_type, *message_length, *index)?;
+            Commands::SignWinternitz {message, winternitz_type, key_index }=> {
+                self.sign_winternitz(message, winternitz_type, *key_index)?;
             }
 
             Commands::VerifyEcdsaSignature { message, public_key, signature } => {
@@ -162,13 +158,18 @@ impl Cli {
                 self.verify_schnorr_signature(signature, message, public_key)?;
             }
 
-            Commands::VerifyWinternitzSignature {message, winternitz_type, message_length, signature, public_key} => {
-                self.verify_winternitz_signature(signature, message, *message_length, public_key, winternitz_type)?;
+            Commands::VerifyWinternitzSignature {message, winternitz_type, signature, key_index} => {
+                self.verify_winternitz_signature(signature, message, *key_index, winternitz_type)?;
             }
 
             Commands::RandomMessage => {
                 let message = hex::encode(self.get_random_bytes());
                 info!("Random message: {:?}", message);
+            }
+
+            Commands::RandomWinternitzMessage => {
+                let message = hex::encode(self.get_random_bytes_for_winternitz());
+                info!("Random Winternitz message: {:?}", message);
             }
         }
 
@@ -193,9 +194,11 @@ impl Cli {
         let mut key_manager = self.key_manager()?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
         
-        let pk = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
+        let public_key = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
 
-        info!("New key pair created of Winternitz Key. Public key is: {:?}", pk);
+        let hex_public_key: Vec<String> = public_key.iter().map(|s| hex::encode(s)).collect();
+
+        info!("New key pair created of Winternitz Key. Public key is: {:?}", hex_public_key.join(""));
 
         Ok(())
     }
@@ -205,7 +208,7 @@ impl Cli {
         let bytes = hex::decode(message)?;
         
         if bytes.len() > 32 {
-            return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
+            return Err(CliError::BadArgument { msg: "Message length must be than 32 bytes".to_string() }.into());
         }
     
         let digest: [u8; 32] = bytes.as_slice().try_into()?;
@@ -216,15 +219,18 @@ impl Cli {
         Ok(())
     }
 
-    fn sign_winternitz(&self, message: &str, winternitz_type: &str, msg_len_bytes: usize, index: u32) -> Result<()>{
+    fn sign_winternitz(&self, message: &str, winternitz_type: &str, index: u32) -> Result<()>{
         let key_manager = self.key_manager()?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
 
         let message_bytes = message.as_bytes();
         
-        let signature = key_manager.sign_winternitz_message(message_bytes, msg_len_bytes, index, key_type).unwrap();
+        let signature = key_manager.sign_winternitz_message(message_bytes, message_bytes.len(), index, key_type).unwrap();
 
-        info!("Winternitz Message signed. Signature is: {:?}", signature);
+        let hex_signature: Vec<String> = signature.iter().map(|s| hex::encode(s)).collect();
+
+
+        info!("Winternitz Message signed. Signature is: {:?}", hex_signature.join(""));
 
         Ok(())
     }
@@ -281,7 +287,7 @@ impl Cli {
         let bytes = hex::decode(message)?;
 
         if bytes.len() > 32 {
-            return Err(CliError::BadArgument { msg: "Message length must be less than 32 bytes".to_string() }.into());
+            return Err(CliError::BadArgument { msg: "Message length must be than 32 bytes".to_string() }.into());
         }
 
         let digest: [u8; 32] = bytes.as_slice().try_into()?;
@@ -295,13 +301,21 @@ impl Cli {
         Ok(())
     }
     
-    fn verify_winternitz_signature(&self, signature: &str, message: &str, msg_len_bytes: usize, public_key: &str, winternitz_type: &str) -> Result<()> {
+    fn verify_winternitz_signature(&self, signature: &str, message: &str, key_index: u32, winternitz_type: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
-        let signature = [self.hex_string_to_bytes(signature)?];
-        let message = message.as_bytes();
-        let public_key = [self.hex_string_to_bytes(public_key)?];
         let key_type = self.get_witnernitz_type(winternitz_type)?;
-        match verifier.verify_winternitz_signature(&signature, message, msg_len_bytes, &public_key, key_type){
+        let chunk_size = match key_type {
+            winternitz::WinternitzType::WSHA256 => winternitz::SHA256_SIZE,
+            winternitz::WinternitzType::WRIPEMD160 => winternitz::RIPEMD160_SIZE,
+
+        };
+        let signature = self.hex_string_to_bytes(signature)?.chunks(chunk_size).map(|s| s.to_vec()).collect::<Vec<Vec<u8>>>();
+        let message_bytes = message.as_bytes();
+        
+
+        let public_key = self.key_manager()?.generate_winternitz_key(message_bytes.len(), key_type, key_index)?;
+
+        match verifier.verify_winternitz_signature(&signature, message_bytes, message_bytes.len(), &public_key, key_type){
             true => info!("Winternitz Signature is valid"),
             false => info!("Winternitz Signature is invalid"),
         };
@@ -315,8 +329,14 @@ impl Cli {
 
     fn key_manager(&self) -> Result<KeyManager> {
         let key_derivation_path: &str = "101/1/0/0/";
-        let key_derivation_seed = self.get_random_bytes();
-        let winternitz_secret = self.get_random_bytes();
+        let key_derivation_seed: [u8; 32] = self.get_random_bytes();
+        let winternitz_secret = hex::decode(self.config.key_manager.winternitz_seed.clone())?;
+
+        if winternitz_secret.len() > 32 {
+            return Err(CliError::BadArgument { msg: "Winternitz Secret length must be than 32 bytes".to_string() }.into());
+        }
+
+        let winternitz_secret: [u8; 32] = winternitz_secret.as_slice().try_into()?;
         let network = self.get_network(&self.config.key_manager.network)?;
         let storage_path = self.get_storage_path(&self.config.storage.path)?;
         let storage_password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
@@ -356,6 +376,12 @@ impl Cli {
 
     fn get_random_bytes(&self) -> [u8; 32] {
         let mut seed = [0u8; 32];
+        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+        seed
+    }
+
+    fn get_random_bytes_for_winternitz(&self) -> [u8; 8] {
+        let mut seed = [0u8; 8];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
     }

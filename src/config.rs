@@ -18,6 +18,7 @@ static CONFIG_PATH: &str = "config";
 #[derive(Debug, Deserialize)]
 pub struct KeyManagerConfig {
     pub network: String,
+    pub winternitz_seed: String,
 }
 
 #[derive(Debug, Deserialize)]

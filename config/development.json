@@ -1,0 +1,10 @@
+{
+    "key_manager": {
+        "network": "regtest",
+        "winternitz_seed": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" 
+    },
+    "storage": {
+        "password": "secret_password",
+        "path": "/tmp/storage.db"
+    }
+}

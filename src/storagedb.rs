@@ -1,6 +1,6 @@
 use std::{path::Path, io::Cursor};
 use anyhow::{Ok, Result};
-use bitcoin::{hashes::{self, Hash}, Network, PrivateKey, PublicKey};
+use bitcoin::{Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
 use rocksdb::Options;
 use crate::errors::SecureStorageError::*;
@@ -29,8 +29,8 @@ impl SecureStorage {
         Ok(secure_storage)
     }
 
-    pub fn store_keypair(&mut self, label: &str, private_key: PrivateKey, public_key: PublicKey) -> Result<()>{
-        let encoded = self.encode_entry(label, private_key, public_key);  
+    pub fn store_keypair(&mut self, private_key: PrivateKey, public_key: PublicKey) -> Result<()>{
+        let encoded = self.encode_entry(private_key, public_key);  
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
@@ -39,7 +39,7 @@ impl SecureStorage {
         Ok(())
     }
 
-    pub fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(String, PrivateKey, PublicKey)>> { 
+    pub fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>> { 
         let key = public_key.to_string();
 
         let entry = match self.db.get(key).map_err(ReadError)?{
@@ -66,13 +66,11 @@ impl SecureStorage {
     }
 
 
-    fn encode_entry(&self, label: &str, sk: PrivateKey, pk: PublicKey) -> Vec<u8> {
-        let label_hash_bytes = hashes::sha256::Hash::hash(label.as_bytes()).as_byte_array().to_vec();
+    fn encode_entry(&self, sk: PrivateKey, pk: PublicKey) -> Vec<u8> {
         let private_key_bytes = sk.to_bytes();
         let public_key_bytes = pk.to_bytes();
 
         let mut encoded: Vec<u8> = Vec::new();
-        encoded.extend_from_slice(&label_hash_bytes);
         encoded.extend_from_slice(&public_key_bytes);
         encoded.extend_from_slice(&private_key_bytes);
 
@@ -93,15 +91,13 @@ impl SecureStorage {
         Ok(cocoon.parse(&mut entry_cursor).map_err( |error| FailedToDecryptData{ error })?)
     }
 
-    fn decode_entry(&self, data: Vec<u8>) -> Result<(String, PrivateKey, PublicKey)> {
-        let label_hash_bytes = &data[0..32];
+    fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey)> {
         let public_key_bytes = &data[32..65];
         let private_key_bytes = &data[65..];
 
-        let label_hash = hashes::sha256::Hash::from_slice(label_hash_bytes)?;
         let private_key = PrivateKey::from_slice(private_key_bytes, self.network)?;
         let public_key = PublicKey::from_slice(public_key_bytes)?;
 
-        Ok((label_hash.to_string(), private_key, public_key))
+        Ok((private_key, public_key))
     }
 }

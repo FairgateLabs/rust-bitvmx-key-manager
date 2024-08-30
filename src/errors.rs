@@ -5,9 +5,6 @@ use config as settings;
 
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
-    #[error("Secure storage error")]
-    SecureStorageError(#[from] SecureStorageError),
-
     #[error("Invalid private key: {0}")]
     PrivKeySliceError(#[from] bitcoin::key::FromWifError),
 
@@ -17,14 +14,26 @@ pub enum KeyManagerError {
     #[error("Failed to create new Winternitz key")]
     WinternitzGenerationError(#[from] WinternitzError),
 
+    #[error("Failed to access secure storage")]
+    KeyStorageError(#[from] KeyStoreError),
+
     #[error("Entry not found for public key")]
     EntryNotFound,
 }
 
 #[derive(Error, Debug)]
-pub enum SecureStorageError {
+pub enum KeyStoreError {
     #[error("Failed to access secure storage")]
     StorageError(#[from] std::io::Error),
+
+    #[error("Failed to open secure storage")]
+    OpenError,
+
+    #[error("Failed to write secure storage")]
+    WriteError(#[from] rocksdb::Error),
+
+    #[error("Failed to read secure storage")]
+    ReadError(rocksdb::Error),
 
     #[error("Failed to decode data")]
     FailedToDecodeData(#[from] FromSliceError),
@@ -46,7 +55,7 @@ pub enum SecureStorageError {
     },
 
     #[error("Failed to convert data to byte array")]
-    CorruptedData
+    CorruptedData,
 }
 
 #[derive(Error, Debug)]

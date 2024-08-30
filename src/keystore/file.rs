@@ -3,12 +3,15 @@ use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Cursor, Read, Seek
 use bitcoin::{hashes::{self, Hash}, Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
 
-use crate::errors::{SecureStorageError, SecureStorageError::*};
+use crate::errors::KeyStoreError;
+
+use super::keystore::KeyStore;
 
 const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry in storage
 const KEY_COUNT_SIZE: u32 = 64; // Size in bytes of the encrypted key count in storage
-const WINTER_SIZE: u32 = 92; // Size in bytes of the encrypted winternitz secret in storage
-pub struct SecureStorage {
+const WINTERNITZ_ENTRY_SIZE: u32 = 92; // Size in bytes of the encrypted winternitz secret in storage
+
+pub struct FileKeyStore {
     path: PathBuf, 
     network: Network,
     index: HashMap<String, u32>,
@@ -16,21 +19,8 @@ pub struct SecureStorage {
     password: Vec<u8>,
 }
 
-impl SecureStorage {
-    pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, SecureStorageError> {
-        let mut secure_storage = SecureStorage { 
-            path: path.as_ref().to_path_buf(), 
-            network, 
-            index: HashMap::new(),
-            key_count: 0,
-            password: password.to_vec(),
-        };
-        
-        secure_storage.restore()?;
-        Ok(secure_storage)
-    }
-
-    pub fn store_keypair(&mut self, private_key: PrivateKey, public_key: PublicKey) -> Result<(), SecureStorageError>{
+impl KeyStore for FileKeyStore {
+    fn store_keypair(&mut self, private_key: PrivateKey, public_key: PublicKey) -> Result<(), KeyStoreError> {
         let encoded = self.encode_entry(private_key, public_key);  
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
@@ -43,33 +33,7 @@ impl SecureStorage {
         Ok(())
     }
 
-    pub fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<(), SecureStorageError>{
-        let entry = self.encrypt_entry(master_secret.to_vec(), WINTER_SIZE)?;
-        self.update_entry_at(&entry, KEY_COUNT_SIZE as u64)?;       
-
-        Ok(())
-    }
-
-    pub fn load_winternitz_secret(&self) -> Result<[u8; 32], SecureStorageError> {
-        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
-    
-        let mut storage = OpenOptions::new()
-            .read(true)
-            .open(&self.path)?;
-    
-        storage.seek(SeekFrom::Start(pos))?;
-    
-        let mut entry: [u8; WINTER_SIZE as usize] = [0; WINTER_SIZE as usize];
-        let read_amount = storage.read(&mut entry)?;
-
-        assert_eq!(read_amount, WINTER_SIZE as usize);
-    
-        let encoded = self.decrypt_entry(entry.to_vec())?;
-
-        encoded.try_into().map_err(|_| CorruptedData)
-    }
-
-    pub fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, SecureStorageError> {
+    fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> {
         let key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
         let index = self.index.get(&key);
 
@@ -81,7 +45,48 @@ impl SecureStorage {
         Ok(Some(entry))
     }
 
-    fn restore_from_file(&mut self) -> Result<(), SecureStorageError> {
+    fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError>{
+        let entry = self.encrypt_entry(master_secret.to_vec(), WINTERNITZ_ENTRY_SIZE)?;
+        self.update_entry_at(&entry, KEY_COUNT_SIZE as u64)?;       
+
+        Ok(())
+    }
+
+    fn load_winternitz_secret(&self) -> Result<[u8; 32], KeyStoreError> {
+        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
+    
+        let mut storage = OpenOptions::new()
+            .read(true)
+            .open(&self.path)?;
+    
+        storage.seek(SeekFrom::Start(pos))?;
+    
+        let mut entry: [u8; WINTERNITZ_ENTRY_SIZE as usize] = [0; WINTERNITZ_ENTRY_SIZE as usize];
+        let read_amount = storage.read(&mut entry)?;
+
+        assert_eq!(read_amount, WINTERNITZ_ENTRY_SIZE as usize);
+    
+        let encoded = self.decrypt_entry(entry.to_vec())?;
+
+        encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
+    }
+}
+
+impl FileKeyStore {
+    pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, KeyStoreError> {
+        let mut key_storage = FileKeyStore { 
+            path: path.as_ref().to_path_buf(), 
+            network, 
+            index: HashMap::new(),
+            key_count: 0,
+            password: password.to_vec(),
+        };
+        
+        key_storage.restore()?;
+        Ok(key_storage)
+    }
+    
+    fn restore_from_file(&mut self) -> Result<(), KeyStoreError> {
         let entry = self.read_key_count()?;
         let encoded = self.decrypt_key_count(entry)?;
         let index: u32 = u32::from_be_bytes(encoded);
@@ -95,15 +100,15 @@ impl SecureStorage {
         Ok(())
     }
 
-    fn read_entry(&self, entry_index: u32) -> Result<(PrivateKey, PublicKey), SecureStorageError> {
+    fn read_entry(&self, entry_index: u32) -> Result<(PrivateKey, PublicKey), KeyStoreError> {
         let entry = self.read_encrypted(entry_index)?;
         let encoded = self.decrypt_entry(entry)?;
 
         self.decode_entry(encoded.to_vec())
     }
 
-    fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, SecureStorageError>{
-        let position = (KEY_COUNT_SIZE + WINTER_SIZE + entry_index * ENTRY_SIZE) as u64;
+    fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, KeyStoreError>{
+        let position = (KEY_COUNT_SIZE + WINTERNITZ_ENTRY_SIZE + entry_index * ENTRY_SIZE) as u64;
 
         let mut storage = File::open(&self.path)?;
         storage.seek(SeekFrom::Start(position))?;
@@ -116,7 +121,7 @@ impl SecureStorage {
         Ok(entry.to_vec())
     }
 
-    fn write_entry(&mut self, entry: &[u8]) -> Result<(), SecureStorageError> {
+    fn write_entry(&mut self, entry: &[u8]) -> Result<(), KeyStoreError> {
         let mut storage = OpenOptions::new()
             .append(true)
             .create(true)
@@ -129,7 +134,7 @@ impl SecureStorage {
         Ok(())
     }
 
-    fn read_key_count(&self) -> Result<Vec<u8>, SecureStorageError> {
+    fn read_key_count(&self) -> Result<Vec<u8>, KeyStoreError> {
         let mut storage = OpenOptions::new()
             .read(true)
             .open(&self.path)?;
@@ -144,14 +149,14 @@ impl SecureStorage {
         Ok(entry.to_vec())
     }
 
-    fn update_key_count(&mut self) -> Result<(), SecureStorageError> {
+    fn update_key_count(&mut self) -> Result<(), KeyStoreError> {
         let encoded = self.key_count.to_be_bytes().to_vec();
         let count = self.encrypt_entry(encoded, KEY_COUNT_SIZE)?;
         self.update_entry_at(&count, 0)?;
         Ok(())
     }
 
-    fn update_entry_at(&self, entry: &[u8], position: u64) -> Result<(), SecureStorageError>{
+    fn update_entry_at(&self, entry: &[u8], position: u64) -> Result<(), KeyStoreError>{
         let mut storage = OpenOptions::new()
             .read(true)
             .write(true)
@@ -177,7 +182,7 @@ impl SecureStorage {
         encoded
     }   
 
-    fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey), SecureStorageError> {
+    fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey), KeyStoreError> {
         let public_key_bytes = &data[0..33];
         let private_key_bytes = &data[33..];
 
@@ -187,26 +192,26 @@ impl SecureStorage {
         Ok((private_key, public_key))
     }
 
-    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, SecureStorageError>{
+    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, KeyStoreError>{
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; size as usize]);
         let mut cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.dump(entry, &mut entry_cursor).map_err( |error| FailedToEncryptData{ error })?;
+        cocoon.dump(entry, &mut entry_cursor).map_err( |error| KeyStoreError::FailedToEncryptData{ error })?;
         Ok(entry_cursor.into_inner())
     }
 
-    fn decrypt_entry(&self, entry: Vec<u8>) -> Result<Vec<u8>, SecureStorageError> {
+    fn decrypt_entry(&self, entry: Vec<u8>) -> Result<Vec<u8>, KeyStoreError> {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.parse(&mut entry_cursor).map_err( |error| FailedToDecryptData{ error })
+        cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })
     }
 
-    fn decrypt_key_count(&self, count: Vec<u8>) -> Result<[u8; 4], SecureStorageError> {
+    fn decrypt_key_count(&self, count: Vec<u8>) -> Result<[u8; 4], KeyStoreError> {
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(count);
         let cocoon = Cocoon::new(self.password.as_slice());
-        let encoded = cocoon.parse(&mut entry_cursor).map_err( |error| FailedToDecryptData{ error })?;
+        let encoded = cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })?;
         
-        encoded.try_into().map_err(|_| CorruptedData)
+        encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 
     fn update_index(&mut self, public_key: PublicKey, position: u32) {
@@ -214,7 +219,7 @@ impl SecureStorage {
         self.index.insert(pk_key, position);
     }
 
-    fn restore_index(&mut self, entry_index: u32) -> Result<(), SecureStorageError> {
+    fn restore_index(&mut self, entry_index: u32) -> Result<(), KeyStoreError> {
         let (_, public_key) = self.read_entry(entry_index)?;
 
         let pk_key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
@@ -222,7 +227,7 @@ impl SecureStorage {
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<(), SecureStorageError> {
+    fn restore(&mut self) -> Result<(), KeyStoreError> {
         if Path::new(&self.path).exists() {
             self.restore_from_file()?;
         } else {

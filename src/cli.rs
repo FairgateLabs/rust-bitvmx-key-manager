@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-use crate::{config::Config, errors::CliError, key_manager::KeyManager, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
+use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystore::file::FileKeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
 use hex;
 
 pub struct Cli {
@@ -304,21 +304,22 @@ impl Cli {
         Ok(())
     }
 
-    fn key_manager(&self) -> Result<KeyManager> {
+    fn key_manager(&self) -> Result<KeyManager<FileKeyStore>> {
         let key_derivation_seed = self.get_key_derivation_seed()?;
         let key_derivation_path = &self.config.key_manager.key_derivation_path;
         let winternitz_secret = self.get_winternitz_secret()?;
         let network = self.get_network()?;
-        let storage_path = self.get_storage_path()?;
-        let storage_password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
+        let path = self.get_storage_path()?;
+        let password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
+
+        let keystore = FileKeyStore::new(path, password, Network::Regtest)?;
 
         let key_manager = KeyManager::new(
             network, 
             key_derivation_path, 
             key_derivation_seed, 
             winternitz_secret,
-            storage_path.to_str().unwrap(), 
-            storage_password, 
+            keystore,
         )?;
 
         Ok(key_manager)

@@ -70,6 +70,12 @@ pub struct WinternitzSignature {
     hashes: Vec<WinternitzHash>,
 }
 
+impl Default for WinternitzSignature {
+    fn default() -> Self {
+        WinternitzSignature::new()
+    }
+}
+
 impl WinternitzSignature {
     pub fn new() -> Self {
         WinternitzSignature {
@@ -234,6 +240,12 @@ impl WinternitzPrivateKey {
 }
 
 pub struct Winternitz {
+}
+
+impl Default for Winternitz {
+    fn default() -> Self {
+        Winternitz::new()
+    }
 }
 
 impl Winternitz {

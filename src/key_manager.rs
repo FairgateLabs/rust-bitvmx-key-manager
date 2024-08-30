@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{bip32::{ChildNumber, DerivationPath, Xpriv}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
 use itertools::izip;
 
-use crate::{errors::KeyManagerError, keystore::keystore::KeyStore, winternitz::{self, add_checksum, calculate_checksum_length, WinternitzSignature, WinternitzType, W}};
+use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, add_checksum, calculate_checksum_length, WinternitzSignature, WinternitzType, W}};
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages 
@@ -157,7 +157,7 @@ impl <K: KeyStore> KeyManager<K> {
     pub fn sign_winternitz_message(&self, message_bytes : &[u8], index:u32, key_type: WinternitzType) -> Result<WinternitzSignature, KeyManagerError> {
         let message_len = message_bytes.len();
 
-        let msg_with_checksum = add_checksum(&message_bytes, W);
+        let msg_with_checksum = add_checksum(message_bytes, W);
         let msg_pad_len = calculate_checksum_length(message_len, W) + message_len - msg_with_checksum.len();
         let msg_with_checksum_pad = [msg_with_checksum.as_slice(), &vec![0u8; msg_pad_len]].concat(); 
 
@@ -178,7 +178,7 @@ mod tests {
     use std::{env, panic, str::FromStr};
     use bitcoin::{key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}, Network, PrivateKey, PublicKey};
 
-    use crate::{errors::{KeyManagerError, KeyStoreError, WinternitzError}, keystore::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore}, verifier::SignatureVerifier, winternitz::{add_checksum, calculate_checksum_length, WinternitzType, W}};
+    use crate::{errors::{KeyManagerError, KeyStoreError, WinternitzError}, keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore}, verifier::SignatureVerifier, winternitz::{add_checksum, calculate_checksum_length, WinternitzType, W}};
 
     use super::KeyManager;
 
@@ -248,7 +248,7 @@ mod tests {
         let pk = key_manager.generate_winternitz_key( message[..].len(), WinternitzType::SHA256, 0).unwrap();
         let signature = key_manager.sign_winternitz_message(&message[..], 0, WinternitzType::SHA256).unwrap();
 
-        assert!(signature_verifier.verify_winternitz_signature(&signature, &&message[..], &pk));
+        assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
         Ok(())
     }
@@ -449,13 +449,11 @@ mod tests {
     }
 
     fn file_keystore(storage_path: &str) -> Result<FileKeyStore, KeyStoreError> {
-        let keystore = FileKeyStore::new(storage_path, b"secret password".to_vec(), Network::Regtest);
-        keystore
+        FileKeyStore::new(storage_path, b"secret password".to_vec(), Network::Regtest)
     }
 
     fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreError> {
-        let keystore = DatabaseKeyStore::new(storage_path, b"secret password".to_vec(), Network::Regtest);
-        keystore
+        DatabaseKeyStore::new(storage_path, b"secret password".to_vec(), Network::Regtest)
     }
 
     fn random_message() -> Message {

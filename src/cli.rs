@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystore::file::FileKeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
+use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
 use hex;
 
 pub struct Cli {
@@ -183,7 +183,7 @@ impl Cli {
         
         let public_key = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
 
-        info!("New key pair created of Winternitz Key. Public key is: {:?}", hex::encode(&public_key.to_bytes()));
+        info!("New key pair created of Winternitz Key. Public key is: {:?}", hex::encode(public_key.to_bytes()));
 
         Ok(())
     }
@@ -212,7 +212,7 @@ impl Cli {
     
         let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_index, key_type).unwrap();
 
-        info!("Winternitz Message signed. Signature is: {:?}", hex::encode(&signature.to_bytes()));
+        info!("Winternitz Message signed. Signature is: {:?}", hex::encode(signature.to_bytes()));
 
         Ok(())
     }

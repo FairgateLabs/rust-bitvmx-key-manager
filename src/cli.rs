@@ -181,7 +181,7 @@ impl Cli {
         let mut key_manager = self.key_manager()?;
         let key_type = self.get_witnernitz_type(winternitz_type)?;
         
-        let public_key = key_manager.generate_winternitz_key(msg_len_bytes, key_type, index)?;
+        let public_key = key_manager.derive_winternitz(msg_len_bytes, key_type, index)?;
 
         info!("New key pair created of Winternitz Key. Public key is: {:?}", hex::encode(public_key.to_bytes()));
 
@@ -210,7 +210,7 @@ impl Cli {
 
         let message_bytes = hex::decode(message)?;
     
-        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_index, key_type).unwrap();
+        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_type, key_index).unwrap();
 
         info!("Winternitz Message signed. Signature is: {:?}", hex::encode(signature.to_bytes()));
 
@@ -294,7 +294,7 @@ impl Cli {
 
         let message_bytes = hex::decode(message)?;
 
-        let public_key = self.key_manager()?.generate_winternitz_key(message_bytes.len(), key_type, key_index)?;
+        let public_key = self.key_manager()?.derive_winternitz(message_bytes.len(), key_type, key_index)?;
 
         match verifier.verify_winternitz_signature(&signature, &message_bytes, &public_key){
             true => info!("Winternitz Signature is valid"),
@@ -307,7 +307,7 @@ impl Cli {
     fn key_manager(&self) -> Result<KeyManager<FileKeyStore>> {
         let key_derivation_seed = self.get_key_derivation_seed()?;
         let key_derivation_path = &self.config.key_manager.key_derivation_path;
-        let winternitz_secret = self.get_winternitz_secret()?;
+        let winternitz_seed = self.get_winternitz_seed()?;
         let network = self.get_network()?;
         let path = self.get_storage_path()?;
         let password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
@@ -318,7 +318,7 @@ impl Cli {
             network, 
             key_derivation_path, 
             key_derivation_seed, 
-            winternitz_secret,
+            winternitz_seed,
             keystore,
         )?;
 
@@ -348,14 +348,14 @@ impl Cli {
         Ok(PathBuf::from(&self.config.storage.path))
     }
 
-    fn get_winternitz_secret(&self) -> Result<[u8; 32]> {
-        let winternitz_secret = hex::decode(self.config.key_manager.winternitz_seed.clone())?;
+    fn get_winternitz_seed(&self) -> Result<[u8; 32]> {
+        let winternitz_seed = hex::decode(self.config.key_manager.winternitz_seed.clone())?;
 
-        if winternitz_secret.len() > 32 {
+        if winternitz_seed.len() > 32 {
             return Err(CliError::BadArgument { msg: "Winternitz secret length must be 32 bytes".to_string() }.into());
         }
 
-        Ok(winternitz_secret.as_slice().try_into()?)
+        Ok(winternitz_seed.as_slice().try_into()?)
     }
 
     fn get_key_derivation_seed(&self) -> Result<[u8; 32]> {

@@ -45,14 +45,14 @@ impl KeyStore for FileKeyStore {
         Ok(Some(entry))
     }
 
-    fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError>{
+    fn store_winternitz_seed(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError>{
         let entry = self.encrypt_entry(master_secret.to_vec(), WINTERNITZ_ENTRY_SIZE)?;
         self.update_entry_at(&entry, KEY_COUNT_SIZE as u64)?;       
 
         Ok(())
     }
 
-    fn load_winternitz_secret(&self) -> Result<[u8; 32], KeyStoreError> {
+    fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
         let pos = KEY_COUNT_SIZE as u64; // Position for the second row
     
         let mut storage = OpenOptions::new()

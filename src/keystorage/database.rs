@@ -10,7 +10,7 @@ use super::keystore::KeyStore;
 
 const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry in storage
 const WINTERNITZ_ENTRY_SIZE: u32 = 92; // Size in bytes of the encrypted winternitz secret in storage
-const WINTERNITZ_KEY: &str = "winternitz_secret"; // Key to use in the database for the winternitz secret
+const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the winternitz seed
 
 pub struct DatabaseKeyStore {
     db: rocksdb::DB,
@@ -42,13 +42,13 @@ impl KeyStore for DatabaseKeyStore {
         Ok(Some(entry?))
     }
 
-    fn store_winternitz_secret(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError> {
+    fn store_winternitz_seed(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(master_secret.to_vec(), WINTERNITZ_ENTRY_SIZE)?;
         self.db.put(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
-    fn load_winternitz_secret(&self) -> Result<[u8; 32], KeyStoreError> {
+    fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
         let entry = self.db.get(WINTERNITZ_KEY)?.unwrap();
         let encoded = self.decrypt_entry(entry)?;
         Ok(encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)?)

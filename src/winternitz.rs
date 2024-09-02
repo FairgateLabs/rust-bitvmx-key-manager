@@ -1,4 +1,5 @@
 use core::fmt;
+use std::vec;
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 
@@ -128,6 +129,8 @@ impl WinternitzSignature {
 pub struct WinternitzPublicKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
+    message_size: usize,
+    checksum_size: usize,
 }
 
 impl WinternitzPublicKey {
@@ -135,10 +138,12 @@ impl WinternitzPublicKey {
         private_key.public_key()
     }
 
-    fn new(hash_type: WinternitzType) -> Self {
+    fn new(hash_type: WinternitzType, message_size: usize, checksum_size: usize) -> Self {
         WinternitzPublicKey {
             hashes: Vec::new(),
             hash_type,
+            message_size,
+            checksum_size,
         }
     }
 
@@ -162,6 +167,16 @@ impl WinternitzPublicKey {
         bytes
     }
 
+    pub fn to_hashes(&self) -> Vec<Vec<u8>> {
+        let mut hashes = vec![];
+
+        for hash in self.hashes.iter() {
+            hashes.push(hash.to_bytes());
+        }
+
+        hashes
+    }
+
     pub fn len(&self) -> usize {
         self.hashes.len()
     }
@@ -173,23 +188,35 @@ impl WinternitzPublicKey {
     pub fn key_type(&self) -> WinternitzType {
         self.hash_type
     }
+
+    pub fn message_size(&self) -> usize {
+        self.message_size
+    }
+
+    pub fn checksum_size(&self) -> usize {
+        self.checksum_size
+    }
 }
 
 pub struct WinternitzPrivateKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
+    message_size: usize,
+    checksum_size: usize,
 }
 
 impl WinternitzPrivateKey {
-    pub fn new(hash_type: WinternitzType) -> Self {
+    pub fn new(hash_type: WinternitzType, message_size: usize, checksum_size: usize) -> Self {
         WinternitzPrivateKey {
             hashes: Vec::new(),
             hash_type,
+            message_size,
+            checksum_size,
         }
     }
 
     pub fn public_key(&self) -> Result<WinternitzPublicKey, WinternitzError> {
-        let mut public_key = WinternitzPublicKey::new(self.hash_type);
+        let mut public_key = WinternitzPublicKey::new(self.hash_type, self.message_size, self.checksum_size);
 
         for h in self.hashes.iter() {
             let mut hashed_pk = h.clone(); // Start with sks as hashed_pk
@@ -255,14 +282,14 @@ impl Winternitz {
     }
 
     pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, index: u32) -> Result<WinternitzPublicKey, WinternitzError> {
-        let checksum_size = calculate_checksum_length(message_size, W);
-        let private_key = self.generate_private_key(master_secret, key_type, message_size + checksum_size, index)?;
+        let private_key = self.generate_private_key(master_secret, key_type, message_size, index)?;
         
         WinternitzPublicKey::from(private_key)
     }
 
     pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
-        let private_key = self.generate_hashes(master_secret, key_type, 2 * message_size, index)?;
+        let checksum_size = calculate_checksum_length(message_size, W);
+        let private_key = self.generate_hashes(master_secret, key_type, message_size, checksum_size, index)?;
         
         Ok(private_key)
     }
@@ -293,7 +320,7 @@ impl Winternitz {
     }
 
     pub fn verify_signature(&self, msg_with_checksum_pad: &[u8], signature: &WinternitzSignature, public_key: &WinternitzPublicKey) -> Result<bool, WinternitzError> {
-        let mut generated_public_key: WinternitzPublicKey = WinternitzPublicKey::new(public_key.key_type());
+        let mut generated_public_key: WinternitzPublicKey = WinternitzPublicKey::new(public_key.key_type(), public_key.message_size(), public_key.checksum_size());
 
         let key_type = public_key.key_type();
         
@@ -318,12 +345,14 @@ impl Winternitz {
         Ok(generated_public_key == *public_key)
     }
 
-    fn generate_hashes(&self, master_secret: &[u8], key_type: WinternitzType, num_keys: usize, index: u32)-> Result<WinternitzPrivateKey, WinternitzError>{
+    fn generate_hashes(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32)-> Result<WinternitzPrivateKey, WinternitzError>{
         index.checked_add(1).ok_or(WinternitzError::IndexOverflow)?;
 
-        let mut private_key = WinternitzPrivateKey::new(key_type);
+        let num_hashes = 2 * (message_size + checksum_size);
 
-        for i in 0..num_keys {
+        let mut private_key = WinternitzPrivateKey::new(key_type, message_size, checksum_size);
+
+        for i in 0..num_hashes {
             let privk = self.generate_hash(master_secret, key_type.hash_size(), index, i as u32);
             private_key.push_hash(privk)?;
         }

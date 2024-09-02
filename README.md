@@ -12,43 +12,107 @@ A Rust library for managing a collection of keys for BitVMX transactions. This p
 
 ## Usage
 
-### Generating a key
-
+### Creating a KeyManager 
 ```rust
-const DERIVATION_PATH: &str = "101/1/0/0/";
-const STORAGE_PATH: &str = "secure_storage.db";
+let network = Network::Regtest;
+let keystore_path = "/some_path/keystore.db"
+let keystore_password =  b"secret password".to_vec();
+let key_derivation_seed = random_bytes();
+let key_derivation_path = "m/101/1/0/0/";
+let winternitz_seed = random_bytes();
 
-let mut seed = [0u8; 32];
-secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+// A key manager can use a file based keystore:
+// let keystore = FileKeyStore::new(keystore_path, keystore_password, network);
 
-let storage_password = b"secret password".to_vec();
+// Or a database based keystore:
+let keystore = DatabaseKeyStore::new(keystore_path, keystore_password, network);
 
-let mut key_manager = KeyManager::new(Network::Regtest, DERIVATION_PATH.to_string(), STORAGE_PATH.to_string(), storage_password, &seed);
-
-// Internally the key manager generates a key pair, stores the private key in an encrypted storage along the "my_key" 
-// label and the corresponding public key to allow selecting the private key for signing by using the label or the 
-// public key.
-let public_key = key_manager.generate_key("my_key");
+let key_manager = KeyManager::new(
+    network, 
+    key_derivation_path, 
+    key_derivation_seed, 
+    winternitz_seed, 
+    keystore, 
+)?;
 ```
 
-### Signing a message
+### Generating an ECDSA key
+Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.
+
+```rust
+let mut rng = secp256k1::rand::thread_rng();
+let pk = key_manager.generate_key(&mut rng).unwrap();
+```
+
+### Deriving ECDSA keys using BIP32
+
+```rust
+let public_key_1 = key_manager.derive_bip32().unwrap();
+let public_key_2 = key_manager.derive_bip32().unwrap();
+```
+
+### Deriving Winternitz OTS keys
+The key manager supports Winternitz one-time keys. Winternitz keys can ge generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
+
+```rust
+// Key size in bytes. A Winternitz key needs to be of the same size as the message that will be signed with it.
+let key_size = 32;
+let winternitz_key = key_manager.derive_winternitz(key_size, WinternitzType::SHA256, 0).unwrap();
+```
+
+### Signing and verifying a message using ECDSA
 
 ```rust
 // Create a random Message.
 let mut digest = [0u8; 32];
-secp256k1::rand::thread_rng().fill_bytes(&mut digest);
-Message::from_digest(digest);
+rng.fill_bytes(&mut digest);
+let message = Message::from_digest(digest);
 
-// Create an ECDSA signature of the  Message by selecting the private associated to the public key passed as parameter 
-// to the sign_ecdsa_message() function.
+// Create a key pair
+let public_key = key_manager.generate_key(&mut rng).unwrap();
+
+// Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter 
 let signature = key_manager.sign_ecdsa_message(&message, public_key);
+
+// Verify the signature
+let signature_verifier = SignatureVerifier::new();
+signature_verifier.verify_ecdsa_signature(&signature, &message, pk);
 ```
 
-### Verify a signature
-
+### Signing and verifying a message using Schnorr
 ```rust
+// Create a random Message.
+let mut digest = [0u8; 32];
+rng.fill_bytes(&mut digest);
+let message = Message::from_digest(digest);
+
+// Create a key pair
+let public_key = key_manager.generate_key(&mut rng).unwrap();
+
+// Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter 
+let signature = key_manager.sign_schnorr_message(&message, &pk).unwrap();
+
+// Verify the signature
 let signature_verifier = SignatureVerifier::new();
-signature_verifier.veriy_ecdsa_signature(&signature, &message, public_key);
+signature_verifier.verify_schnorr_signature(&signature, &message, pk);
+```
+
+### Signing and verifying a message using Winternitz
+```rust
+// Create a random Message.
+let mut digest = [0u8; 32];
+rng.fill_bytes(&mut digest);
+let message = Message::from_digest(digest);
+
+// Create a Winternitz signature. Internally a Winternitz key pair for the derivation index 0 is created using the SHA-256 hash function
+let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0).unwrap();
+
+// Get the Winternitz public key for the index 0 using the SHA-256 hash function
+let winternitz_key = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0).unwrap();
+
+// Verify the signature
+let signature_verifier = SignatureVerifier::new();
+signature_verifier.verify_winternitz_signature(&signature, &message[..], &winternitz_key);
 ```
 
 ## Contributing

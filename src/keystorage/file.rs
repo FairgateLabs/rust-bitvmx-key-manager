@@ -7,9 +7,15 @@ use crate::errors::KeyStoreError;
 
 use super::keystore::KeyStore;
 
-const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry in storage
-const KEY_COUNT_SIZE: u32 = 64; // Size in bytes of the encrypted key count in storage
-const WINTERNITZ_ENTRY_SIZE: u32 = 92; // Size in bytes of the encrypted winternitz secret in storage
+const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry
+const KEY_COUNT_SIZE: u32 = 64; // Size in bytes of the encrypted key count
+const WINTERNITZ_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted Winternitz seed
+const KEY_DERIVATION_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted bip32 key derivation seed
+
+const KEY_COUNT_POSITION: u64 = 0; // Position for the key count
+const WINTERNITZ_SEED_POSITION: u64 = KEY_COUNT_SIZE as u64; // Position for the Winternitz seed
+const KEY_DERIVATION_SEED_POSITION: u64 = (KEY_COUNT_SIZE + WINTERNITZ_SEED_SIZE) as u64; // Position for the bip32 key derivation seed
+const ENTRIES_START_POSITION: u64 = (KEY_COUNT_SIZE + WINTERNITZ_SEED_SIZE + KEY_DERIVATION_SEED_SIZE) as u64; // Position for the first entry
 
 pub struct FileKeyStore {
     path: PathBuf, 
@@ -45,26 +51,48 @@ impl KeyStore for FileKeyStore {
         Ok(Some(entry))
     }
 
-    fn store_winternitz_seed(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError>{
-        let entry = self.encrypt_entry(master_secret.to_vec(), WINTERNITZ_ENTRY_SIZE)?;
-        self.update_entry_at(&entry, KEY_COUNT_SIZE as u64)?;       
+    fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError>{
+        let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
+        self.update_entry_at(&entry, WINTERNITZ_SEED_POSITION)?;       
+
+        Ok(())
+    }
+
+    fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError>{
+        let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
+        self.update_entry_at(&entry, KEY_DERIVATION_SEED_POSITION)?;       
 
         Ok(())
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let pos = KEY_COUNT_SIZE as u64; // Position for the second row
-    
         let mut storage = OpenOptions::new()
             .read(true)
             .open(&self.path)?;
     
-        storage.seek(SeekFrom::Start(pos))?;
+        storage.seek(SeekFrom::Start(WINTERNITZ_SEED_POSITION))?;
     
-        let mut entry: [u8; WINTERNITZ_ENTRY_SIZE as usize] = [0; WINTERNITZ_ENTRY_SIZE as usize];
+        let mut entry: [u8; WINTERNITZ_SEED_SIZE as usize] = [0; WINTERNITZ_SEED_SIZE as usize];
         let read_amount = storage.read(&mut entry)?;
 
-        assert_eq!(read_amount, WINTERNITZ_ENTRY_SIZE as usize);
+        assert_eq!(read_amount, WINTERNITZ_SEED_SIZE as usize);
+    
+        let encoded = self.decrypt_entry(entry.to_vec())?;
+
+        encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
+    }
+
+    fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
+        let mut storage = OpenOptions::new()
+            .read(true)
+            .open(&self.path)?;
+    
+        storage.seek(SeekFrom::Start(KEY_DERIVATION_SEED_POSITION))?;
+    
+        let mut entry: [u8; KEY_DERIVATION_SEED_SIZE as usize] = [0; KEY_DERIVATION_SEED_SIZE as usize];
+        let read_amount = storage.read(&mut entry)?;
+
+        assert_eq!(read_amount, KEY_DERIVATION_SEED_SIZE as usize);
     
         let encoded = self.decrypt_entry(entry.to_vec())?;
 
@@ -108,7 +136,7 @@ impl FileKeyStore {
     }
 
     fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, KeyStoreError>{
-        let position = (KEY_COUNT_SIZE + WINTERNITZ_ENTRY_SIZE + entry_index * ENTRY_SIZE) as u64;
+        let position = ENTRIES_START_POSITION + (entry_index * ENTRY_SIZE) as u64;
 
         let mut storage = File::open(&self.path)?;
         storage.seek(SeekFrom::Start(position))?;
@@ -139,7 +167,7 @@ impl FileKeyStore {
             .read(true)
             .open(&self.path)?;
 
-        storage.seek(SeekFrom::Start(0))?;
+        storage.seek(SeekFrom::Start(KEY_COUNT_POSITION))?;
 
         let mut entry: [u8; KEY_COUNT_SIZE as usize] = [0; KEY_COUNT_SIZE as usize];
         let read_amount = storage.read(&mut entry)?;
@@ -152,7 +180,7 @@ impl FileKeyStore {
     fn update_key_count(&mut self) -> Result<(), KeyStoreError> {
         let encoded = self.key_count.to_be_bytes().to_vec();
         let count = self.encrypt_entry(encoded, KEY_COUNT_SIZE)?;
-        self.update_entry_at(&count, 0)?;
+        self.update_entry_at(&count, KEY_COUNT_POSITION)?;
         Ok(())
     }
 

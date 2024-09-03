@@ -45,7 +45,7 @@ impl fmt::Display for WinternitzType {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinternitzHash {
     hash: Vec<u8>,
 }
@@ -59,6 +59,10 @@ impl WinternitzHash {
 
     pub fn len(&self) -> usize {
         self.hash.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.hash.is_empty()
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -117,6 +121,10 @@ impl WinternitzSignature {
         self.hashes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
     fn push_hash(&mut self, hash: WinternitzHash) {
         self.hashes.push(hash);
     }
@@ -125,7 +133,7 @@ impl WinternitzSignature {
         self.hashes[index].clone()
     }
 }
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinternitzPublicKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
@@ -179,6 +187,10 @@ impl WinternitzPublicKey {
 
     pub fn len(&self) -> usize {
         self.hashes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
     }
 
     pub fn hash_size(&self) -> usize {
@@ -241,6 +253,10 @@ impl WinternitzPrivateKey {
 
     pub fn len(&self) -> usize {
         self.hashes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
     }
 
     pub fn hash_size(&self) -> usize {

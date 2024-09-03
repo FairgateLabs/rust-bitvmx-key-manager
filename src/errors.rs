@@ -1,4 +1,4 @@
-use bitcoin::{hashes::FromSliceError, secp256k1};
+use bitcoin::{hashes::FromSliceError, key::ParsePublicKeyError, secp256k1};
 use thiserror::Error;
 
 use config as settings;
@@ -6,7 +6,10 @@ use config as settings;
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
     #[error("Invalid private key: {0}")]
-    PrivKeySliceError(#[from] bitcoin::key::FromWifError),
+    FailedToParsePublicKey(#[from] ParsePublicKeyError),
+
+    #[error("Invalid private key: {0}")]
+    FailedToParsePrivateKey(#[from] bitcoin::key::FromWifError),
 
     #[error("Failed to create DerivationPath, Xpriv or ChildNumber: {0}")]
     Bip32Error(#[from] bitcoin::bip32::Error),
@@ -53,6 +56,12 @@ pub enum KeyStoreError {
     FailedToDecryptData {
         error: cocoon::Error,
     },
+
+    #[error("Failed to load Winternitz seed from key store")]
+    WinternitzSeedNotFound,
+
+    #[error("Failed to load the BIP32 key derivation seed from key store")]
+    KeyDerivationSeedNotFound,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,

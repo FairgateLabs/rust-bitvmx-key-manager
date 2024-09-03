@@ -12,7 +12,6 @@ use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz:
 pub struct KeyManager<K: KeyStore> {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    master_xpriv: Xpriv, 
     next_normal: ChildNumber,
     key_derivation_path: String,
     keystore: K,
@@ -23,13 +22,11 @@ impl <K: KeyStore> KeyManager<K> {
         let secp = secp256k1::Secp256k1::new();
 
         keystore.store_winternitz_seed(winternitz_seed)?;
-
-        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        keystore.store_key_derivation_seed(key_derivation_seed)?;
 
         Ok(KeyManager { 
             secp,
             network,
-            master_xpriv,
             next_normal: ChildNumber::Normal { index: 0 },
             key_derivation_path: key_derivation_path.to_string(),
             keystore,
@@ -57,9 +54,11 @@ impl <K: KeyStore> KeyManager<K> {
         Ok(public_key)
     }
 
-    pub fn derive_bip32(& mut self) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_bip32(&mut self) -> Result<PublicKey, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
         let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, self.next_normal))?;
-        let xpriv = self.master_xpriv.derive_priv(&self.secp, &derivation_path)?;
+        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
         let public_key = PublicKey::new(internal_keypair.public_key());
@@ -73,7 +72,7 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     pub fn derive_winternitz(&mut self, message_size: usize, key_type: WinternitzType, index: u32) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
-        let master_secret = self.keystore.load_winternitz_seed().unwrap();
+        let master_secret = self.keystore.load_winternitz_seed()?;
         
         let winternitz = winternitz::Winternitz::new();
         let public_key = winternitz.generate_public_key(&master_secret, key_type, message_size, index)?;
@@ -161,7 +160,7 @@ impl <K: KeyStore> KeyManager<K> {
         let msg_pad_len = calculate_checksum_length(message_len, W) + message_len - msg_with_checksum.len();
         let msg_with_checksum_pad = [msg_with_checksum.as_slice(), &vec![0u8; msg_pad_len]].concat(); 
 
-        let master_secret = self.keystore.load_winternitz_seed().unwrap();
+        let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(&master_secret, key_type, msg_with_checksum_pad.len(), index)?;
 
@@ -193,10 +192,10 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng).unwrap();
+        let pk = key_manager.generate_key(&mut rng)?;
      
         let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, pk).unwrap();
+        let signature = key_manager.sign_ecdsa_message(&message, pk)?;
         
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
@@ -210,10 +209,10 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng).unwrap();
+        let pk = key_manager.generate_key(&mut rng)?;
      
         let message = random_message();
-        let signature = key_manager.sign_schnorr_message(&message, &pk).unwrap();
+        let signature = key_manager.sign_schnorr_message(&message, &pk)?;
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));  
 
@@ -227,10 +226,10 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng).unwrap();
+        let pk = key_manager.generate_key(&mut rng)?;
      
         let message = random_message();
-        let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tweak(&message, &pk).unwrap();
+        let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tweak(&message, &pk)?;
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
@@ -245,8 +244,8 @@ mod tests {
 
         let message = random_message();
 
-        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::SHA256, 0).unwrap();
-        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0).unwrap();
+        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::SHA256, 0)?;
+        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
@@ -263,8 +262,8 @@ mod tests {
         let digest: [u8; 32] = [0xFE; 32];
         let message = Message::from_digest(digest);
         
-        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::RIPEMD160, 0).unwrap();
-        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::RIPEMD160, 0).unwrap();
+        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::RIPEMD160, 0)?;
+        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::RIPEMD160, 0)?;
 
         println!("Pk size: {:?}", pk.len());
         println!("Msg: {:?}", &message[..]);
@@ -282,14 +281,14 @@ mod tests {
         let mut key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let pk_1 = key_manager.derive_bip32().unwrap();
-        let pk_2 = key_manager.derive_bip32().unwrap();
+        let pk_1 = key_manager.derive_bip32()?;
+        let pk_2 = key_manager.derive_bip32()?;
 
         assert_ne!(pk_1.to_string(), pk_2.to_string());
      
         let message = random_message();
-        let signature_1 = key_manager.sign_ecdsa_message(&message, pk_1).unwrap();
-        let signature_2 = key_manager.sign_ecdsa_message(&message, pk_2).unwrap();
+        let signature_1 = key_manager.sign_ecdsa_message(&message, pk_1)?;
+        let signature_2 = key_manager.sign_ecdsa_message(&message, pk_2)?;
 
         assert_ne!(signature_1.to_string(), signature_2.to_string());
 
@@ -306,12 +305,12 @@ mod tests {
         let mut rng = secp256k1::rand::thread_rng();
 
         let message = random_message();
-        let pk1 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0).unwrap();
-        let pk2 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8).unwrap();
-        let pk3 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8).unwrap();
-        let pk4 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 8).unwrap();
-        let pk5 = key_manager.generate_key(&mut rng).unwrap();
-        let pk6 = key_manager.generate_key(&mut rng).unwrap();
+        let pk1 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0)?;
+        let pk2 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8)?;
+        let pk3 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8)?;
+        let pk4 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 8)?;
+        let pk5 = key_manager.generate_key(&mut rng)?;
+        let pk6 = key_manager.generate_key(&mut rng)?;
 
         assert!(pk1.len() == (calculate_checksum_length(message[..].len(), W) + message[..].len())*2);
         assert!(pk2.len() == (calculate_checksum_length(message[..].len(), W) + message[..].len())*2);
@@ -325,7 +324,6 @@ mod tests {
         assert!(pk5 != pk6);
 
         Ok(())
-        
     }
 
     #[test]
@@ -333,10 +331,12 @@ mod tests {
         let path = temp_storage();
         let password = b"secret password".to_vec();
         let secp = secp256k1::Secp256k1::new();
-        let secret = random_bytes();
+        let winternitz_seed = random_bytes();
+        let key_derivation_seed = random_bytes();
 
         let mut keystore = FileKeyStore::new(path, password, Network::Regtest)?;
-        keystore.store_winternitz_seed(secret)?;
+        keystore.store_winternitz_seed(winternitz_seed)?;
+        keystore.store_key_derivation_seed(key_derivation_seed)?;
 
         for _ in 0..10 {
             let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -352,10 +352,13 @@ mod tests {
 
             assert_eq!(restored_sk.to_string(), private_key.to_string());
             assert_eq!(restored_pk.to_string(), public_key.to_string());
-
         }
-        let loaded_secret = keystore.load_winternitz_seed().unwrap();
-        assert!(loaded_secret == secret);
+
+        let loaded_winternitz_seed = keystore.load_winternitz_seed()?;
+        assert!(loaded_winternitz_seed == winternitz_seed);
+
+        let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
+        assert!(loaded_key_derivation_seed == key_derivation_seed);
 
         Ok(())
     }
@@ -365,10 +368,12 @@ mod tests {
         let path = temp_storage();
         let password = b"secret password".to_vec();
         let secp = secp256k1::Secp256k1::new();
-        let secret = random_bytes();
+        let winternitz_seed = random_bytes();
+        let key_derivation_seed = random_bytes();
 
         let mut keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
-        keystore.store_winternitz_seed(secret)?;
+        keystore.store_winternitz_seed(winternitz_seed)?;
+        keystore.store_key_derivation_seed(key_derivation_seed)?;
 
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         let private_key = PrivateKey::new(secret_key, Network::Regtest);
@@ -406,7 +411,7 @@ mod tests {
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
-        assert!(matches!(result, Err(KeyManagerError::PrivKeySliceError(_))));
+        assert!(matches!(result, Err(KeyManagerError::FailedToParsePrivateKey(_))));
 
         // Case 2: Invalid derivation path
         let invalid_derivation_path = "m/44'/invalid'";
@@ -427,7 +432,7 @@ mod tests {
         assert!(matches!(result, Err(KeyManagerError::WinternitzGenerationError(WinternitzError::IndexOverflow))));
 
         // Case 5: Entry not found for public key
-        let fake_public_key = PublicKey::from_str("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798").unwrap();
+        let fake_public_key = PublicKey::from_str("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")?;
         let result = key_manager.sign_ecdsa_message(&random_message(), fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
@@ -451,14 +456,12 @@ mod tests {
 
     fn file_keystore(storage_path: &str) -> Result<FileKeyStore, KeyStoreError> {
         let password =  b"secret password".to_vec();
-        let keystore = FileKeyStore::new(storage_path, password, Network::Regtest);
-        keystore
+        FileKeyStore::new(storage_path, password, Network::Regtest)
     }
 
     fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreError> {
         let password =  b"secret password".to_vec();
-        let keystore = DatabaseKeyStore::new(storage_path, password, Network::Regtest);
-        keystore
+        DatabaseKeyStore::new(storage_path, password, Network::Regtest)
     }
 
     fn random_message() -> Message {

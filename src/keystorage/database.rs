@@ -8,9 +8,12 @@ use crate::errors::KeyStoreError;
 
 use super::keystore::KeyStore;
 
-const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry in storage
-const WINTERNITZ_ENTRY_SIZE: u32 = 92; // Size in bytes of the encrypted winternitz secret in storage
-const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the winternitz seed
+const ENTRY_SIZE: u32 = 125; // Size in bytes of each encrypted entry
+const WINTERNITZ_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted Winternitz secret
+const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
+const KEY_DERIVATION_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted bip32 key derivation seed
+const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
+
 
 pub struct DatabaseKeyStore {
     db: rocksdb::DB,
@@ -42,16 +45,36 @@ impl KeyStore for DatabaseKeyStore {
         Ok(Some(entry?))
     }
 
-    fn store_winternitz_seed(&self, master_secret: [u8; 32]) -> Result<(), KeyStoreError> {
-        let entry = self.encrypt_entry(master_secret.to_vec(), WINTERNITZ_ENTRY_SIZE)?;
+    fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
+        let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
         self.db.put(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = self.db.get(WINTERNITZ_KEY)?.unwrap();
+        let entry = match self.db.get(WINTERNITZ_KEY)? {
+            Some(entry) => entry,
+            None => return Err(KeyStoreError::WinternitzSeedNotFound),
+        };
+
         let encoded = self.decrypt_entry(entry)?;
-        Ok(encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)?)
+        encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
+    }
+
+    fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
+        let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
+        self.db.put(KEY_DERIVATION_SEED_KEY, entry)?;
+        Ok(())
+    }
+
+    fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
+        let entry = match self.db.get(KEY_DERIVATION_SEED_KEY)? {
+            Some(entry) => entry,
+            None => return Err(KeyStoreError::KeyDerivationSeedNotFound),
+        };
+        
+        let encoded = self.decrypt_entry(entry)?;
+        encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 }
 
@@ -93,7 +116,7 @@ impl DatabaseKeyStore {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        Ok(cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })?)
+        cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })
     }
 
     fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey), KeyStoreError> {

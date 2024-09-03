@@ -170,7 +170,7 @@ impl Cli {
         let mut key_manager = self.key_manager()?;
         let mut rng = secp256k1::rand::thread_rng();
         
-        let pk = key_manager.generate_key(&mut rng).unwrap();
+        let pk = key_manager.generate_key(&mut rng)?;
 
         info!("New key pair created and stored. Public key is: {}", pk.to_string());
 
@@ -197,7 +197,7 @@ impl Cli {
         }
     
         let digest: [u8; 32] = bytes.as_slice().try_into()?;
-        let signature = key_manager.sign_ecdsa_message(&Message::from_digest(digest), PublicKey::from_str(public_key).unwrap()).unwrap();
+        let signature = key_manager.sign_ecdsa_message(&Message::from_digest(digest), PublicKey::from_str(public_key)?)?;
 
         info!("ECDSA Message signed. Signature is: {:?}", signature);
 
@@ -210,7 +210,7 @@ impl Cli {
 
         let message_bytes = hex::decode(message)?;
     
-        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_type, key_index).unwrap();
+        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_type, key_index)?;
 
         info!("Winternitz Message signed. Signature is: {:?}", hex::encode(signature.to_bytes()));
 
@@ -226,7 +226,7 @@ impl Cli {
         }
 
         let digest: [u8; 32] = bytes.as_slice().try_into()?;
-        let signature = key_manager.sign_schnorr_message(&Message::from_digest(digest), &PublicKey::from_str(public_key).unwrap()).unwrap();
+        let signature = key_manager.sign_schnorr_message(&Message::from_digest(digest), &PublicKey::from_str(public_key)?)?;
 
         info!("Schnorr Message signed. Signature is: {:?}", signature);
 
@@ -236,7 +236,7 @@ impl Cli {
     fn generate_deterministic_key(&self) -> Result<()>{
         let mut key_manager = self.key_manager()?;
         
-        let pk = key_manager.derive_bip32().unwrap();
+        let pk = key_manager.derive_bip32()?;
 
         info!("New deterministic key pair created and stored. Public key is: {}", pk.to_string());
 

@@ -2,7 +2,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Ok, Result};
 
-use bitcoin::{key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
+use bitcoin::{bip32::Xpub, key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
 use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
@@ -24,7 +24,17 @@ pub struct Menu {
 enum Commands {
     NewKey,
 
-    NewDeterministicKey {
+    NewMasterXpub,
+
+    DerivePublicKey {
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
+
+        #[arg(value_name = "master_xpub", short = 'm', long = "master_xpub")]
+        master_xpub: String,
+    },
+
+    DeriveKeypair {
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
     },
@@ -125,8 +135,18 @@ impl Cli {
                 self.generate_key()?;
             }
 
-            Commands::NewDeterministicKey { key_index } => {
-                self.generate_deterministic_key(*key_index)?;
+            Commands::NewMasterXpub => {
+                let mut key_manager = self.key_manager()?;
+                let xpub = key_manager.generate_master_xpub()?;
+                info!("Master Xpub: {}", xpub);
+            }
+
+            Commands::DerivePublicKey { key_index, master_xpub } => {
+                self.derive_public_key(master_xpub, key_index)?;
+            }
+
+            Commands::DeriveKeypair { key_index } => {
+                self.derive_keypair(*key_index)?;
             }
 
             Commands::NewWinternitzKey { winternitz_type, message_length, key_index }=> {
@@ -159,13 +179,14 @@ impl Cli {
 
             Commands::RandomMessage { size } => {
                 let message = hex::encode(self.get_random_bytes(*size));
-                info!("Random message: {:?}", message);
+                info!("Random message: {}", message);
             }
         }
 
         Ok(())
     }
 
+    
     // 
     // Commands
     //
@@ -186,7 +207,7 @@ impl Cli {
         
         let public_key = key_manager.derive_winternitz(msg_len_bytes, key_type, index)?;
 
-        info!("New key pair created of Winternitz Key. Public key is: {:?}", hex::encode(public_key.to_bytes()));
+        info!("New key pair created of Winternitz Key. Public key is: {}", hex::encode(public_key.to_bytes()));
 
         Ok(())
     }
@@ -215,7 +236,7 @@ impl Cli {
     
         let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_type, key_index)?;
 
-        info!("Winternitz Message signed. Signature is: {:?}", hex::encode(signature.to_bytes()));
+        info!("Winternitz Message signed. Signature is: {}", hex::encode(signature.to_bytes()));
 
         Ok(())
     }
@@ -236,12 +257,12 @@ impl Cli {
         Ok(())
     }
 
-    fn generate_deterministic_key(&self, key_index: u32) -> Result<()>{
+    fn derive_keypair(&self, key_index: u32) -> Result<()>{
         let mut key_manager = self.key_manager()?;
         
         let pk = key_manager.derive_keypair(key_index)?;
 
-        info!("New deterministic key pair created and stored. Public key is: {}", pk.to_string());
+        info!("New Keypair created. Public key is: {}", pk.to_string());
 
         Ok(())
     }
@@ -304,6 +325,14 @@ impl Cli {
             false => info!("Winternitz Signature is invalid"),
         };
 
+        Ok(())
+    }
+
+    fn derive_public_key(&self, master_xpub: &String, key_index: &u32) -> Result<(), anyhow::Error> {
+        let mut key_manager = self.key_manager()?;
+        let master_xpub = Xpub::from_str(&master_xpub)?;
+        let public_key = key_manager.derive_public_key(master_xpub, *key_index)?;
+        info!("Derived public key: {}", public_key);
         Ok(())
     }
 

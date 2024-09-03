@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitcoin::{bip32::{ChildNumber, DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
 use itertools::izip;
 
 use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, add_checksum, calculate_checksum_length, WinternitzSignature, WinternitzType, W}};
@@ -12,7 +12,6 @@ use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz:
 pub struct KeyManager<K: KeyStore> {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    next_normal: ChildNumber,
     key_derivation_path: String,
     keystore: K,
 }
@@ -27,7 +26,6 @@ impl <K: KeyStore> KeyManager<K> {
         Ok(KeyManager { 
             secp,
             network,
-            next_normal: ChildNumber::Normal { index: 0 },
             key_derivation_path: key_derivation_path.to_string(),
             keystore,
         })
@@ -45,7 +43,7 @@ impl <K: KeyStore> KeyManager<K> {
     /*********************************/
     /******* Key Generation **********/
     /*********************************/
-    pub fn generate_key<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Result<PublicKey, KeyManagerError> {
+    pub fn generate_keypair<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Result<PublicKey, KeyManagerError> {
         let private_key = self.generate_private_key(self.network, rng);
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);    
         
@@ -53,27 +51,19 @@ impl <K: KeyStore> KeyManager<K> {
 
         Ok(public_key)
     }
-
-    pub fn derive_xpub(&self, xpub: Xpub) -> PublicKey{
-        xpub.to_pub().into()
-    }
-
-    pub fn derive_xpriv(&mut self, xpriv: Xpriv) -> Result<PublicKey, KeyManagerError>{
-        let secp = secp256k1::Secp256k1::new();
-        let internal_keypair = xpriv.to_keypair(&secp);
-        let public_key = PublicKey::new(internal_keypair.public_key());
-        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
-        
-        self.keystore.store_keypair(private_key, public_key)?;
-
-        Ok(public_key)
-
-    }
     
-    pub fn derive_bip32(&mut self) -> Result<PublicKey, KeyManagerError> {
+    pub fn generate_master_xpub(&mut self) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, self.next_normal))?;
+        let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
+
+        Ok(master_xpub)
+    }
+
+    pub fn derive_keypair(&mut self, index: u32) -> Result<PublicKey, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -82,9 +72,14 @@ impl <K: KeyStore> KeyManager<K> {
         
         self.keystore.store_keypair(private_key, public_key)?;
 
-        self.next_normal = self.next_normal.increment()?;
-
         Ok(public_key)
+    }
+
+    pub fn derive_public_key(&mut self, master_xpub: Xpub, index: u32) -> Result<PublicKey, KeyManagerError> {
+        let secp = secp256k1::Secp256k1::new();
+        let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
+        Ok(xpub.to_pub().into())
     }
 
     pub fn derive_winternitz(&mut self, message_size: usize, key_type: WinternitzType, index: u32) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
@@ -191,7 +186,7 @@ impl <K: KeyStore> KeyManager<K> {
 #[cfg(test)]
 mod tests {
     use std::{env, panic, str::FromStr};
-    use bitcoin::{key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}, Network, PrivateKey, PublicKey, bip32::{DerivationPath, Xpriv, Xpub}};
+    use bitcoin::{key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}, Network, PrivateKey, PublicKey};
 
     use crate::{errors::{KeyManagerError, KeyStoreError, WinternitzError}, keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore}, verifier::SignatureVerifier, winternitz::{add_checksum, calculate_checksum_length, WinternitzType, W}};
 
@@ -208,7 +203,7 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng)?;
+        let pk = key_manager.generate_keypair(&mut rng)?;
      
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, pk)?;
@@ -225,7 +220,7 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng)?;
+        let pk = key_manager.generate_keypair(&mut rng)?;
      
         let message = random_message();
         let signature = key_manager.sign_schnorr_message(&message, &pk)?;
@@ -242,7 +237,7 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_key(&mut rng)?;
+        let pk = key_manager.generate_keypair(&mut rng)?;
      
         let message = random_message();
         let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tweak(&message, &pk)?;
@@ -297,8 +292,8 @@ mod tests {
         let mut key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let pk_1 = key_manager.derive_bip32()?;
-        let pk_2 = key_manager.derive_bip32()?;
+        let pk_1 = key_manager.derive_keypair(0)?;
+        let pk_2 = key_manager.derive_keypair(1)?;
 
         assert_ne!(pk_1.to_string(), pk_2.to_string());
      
@@ -325,8 +320,8 @@ mod tests {
         let pk2 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8)?;
         let pk3 = key_manager.derive_winternitz(message[..].len(), WinternitzType::RIPEMD160, 8)?;
         let pk4 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 8)?;
-        let pk5 = key_manager.generate_key(&mut rng)?;
-        let pk6 = key_manager.generate_key(&mut rng)?;
+        let pk5 = key_manager.generate_keypair(&mut rng)?;
+        let pk6 = key_manager.generate_keypair(&mut rng)?;
 
         assert!(pk1.len() == (calculate_checksum_length(message[..].len(), W) + message[..].len())*2);
         assert!(pk2.len() == (calculate_checksum_length(message[..].len(), W) + message[..].len())*2);
@@ -432,7 +427,7 @@ mod tests {
         // Case 2: Invalid derivation path
         let invalid_derivation_path = "m/44'/invalid'";
         key_manager.key_derivation_path = invalid_derivation_path.to_string();
-        let result = key_manager.derive_bip32();
+        let result = key_manager.derive_keypair(0);
         assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
 
         // Case 3 a: Storage error when creating file keystore (invalid path)
@@ -456,34 +451,64 @@ mod tests {
     }
 
     #[test]
-    fn test_signature_with_bip_derivation(){
+    fn test_signature_with_bip_derivation() {
         let keystore = database_keystore(&temp_storage()).unwrap();
         let mut key_manager = test_key_manager(keystore).unwrap();
 
-        let (xpub, xpriv) = obtain_xpub_xpriv(&key_manager);
-        let pk1 = key_manager.derive_xpriv(xpriv).unwrap();
-        let pk2 = key_manager.derive_xpub(xpub);
-        
+        let master_xpub = key_manager.generate_master_xpub().unwrap();
+
+        for i in 0..5 {
+            let pk1 = key_manager.derive_keypair(i).unwrap();
+            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            
+            let signature_verifier = SignatureVerifier::new();
+            let message = random_message();
+            let signature = key_manager.sign_ecdsa_message(&message, pk1).unwrap();
+            
+            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+        }
+
+
+        let pk1 = key_manager.derive_keypair(10).unwrap();
+        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, pk1).unwrap();
         
-        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
-    }
-
-    fn obtain_xpub_xpriv(key_manager: &KeyManager<DatabaseKeyStore>) -> (Xpub, Xpriv){
-        let secp1 = secp256k1::Secp256k1::new();
-        let secp2 = secp256k1::Secp256k1::new();
-        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed().unwrap();
-        let master_xpriv = Xpriv::new_master(key_manager.network, &key_derivation_seed).unwrap();
-        let derivation_path = DerivationPath::from_str(format!("{}{}", key_manager.key_derivation_path, 0).as_str()).unwrap();
-        let xpriv = master_xpriv.derive_priv(&secp1, &derivation_path).unwrap();
-    
-        let xpub = Xpub::from_priv(&secp2,&xpriv);
-
-        (xpub, xpriv)
+        assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
     }
     
+
+    #[test]
+    fn test_schnorr_signature_with_bip_derivation() {
+        let keystore = database_keystore(&temp_storage()).unwrap();
+        let mut key_manager = test_key_manager(keystore).unwrap();
+
+        let master_xpub = key_manager.generate_master_xpub().unwrap();
+
+        for i in 0..5 {
+            let pk1 = key_manager.derive_keypair(i).unwrap();
+            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            
+            let signature_verifier = SignatureVerifier::new();
+            let message = random_message();
+            let signature = key_manager.sign_schnorr_message(&message, &pk1).unwrap();
+            
+            assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
+        }
+
+        let pk1 = key_manager.derive_keypair(10).unwrap();
+        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+
+        let signature_verifier = SignatureVerifier::new();
+        let message = random_message();
+        let signature = key_manager.sign_schnorr_message(&message, &pk1).unwrap();
+        
+        assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
+    }
+    
+
     fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();

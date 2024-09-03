@@ -24,7 +24,10 @@ pub struct Menu {
 enum Commands {
     NewKey,
 
-    NewDeterministicKey,
+    NewDeterministicKey {
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
+    },
 
     NewWinternitzKey {
         #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
@@ -122,8 +125,8 @@ impl Cli {
                 self.generate_key()?;
             }
 
-            Commands::NewDeterministicKey => {
-                self.generate_deterministic_key()?;
+            Commands::NewDeterministicKey { key_index } => {
+                self.generate_deterministic_key(*key_index)?;
             }
 
             Commands::NewWinternitzKey { winternitz_type, message_length, key_index }=> {
@@ -170,7 +173,7 @@ impl Cli {
         let mut key_manager = self.key_manager()?;
         let mut rng = secp256k1::rand::thread_rng();
         
-        let pk = key_manager.generate_key(&mut rng)?;
+        let pk = key_manager.generate_keypair(&mut rng)?;
 
         info!("New key pair created and stored. Public key is: {}", pk.to_string());
 
@@ -233,10 +236,10 @@ impl Cli {
         Ok(())
     }
 
-    fn generate_deterministic_key(&self) -> Result<()>{
+    fn generate_deterministic_key(&self, key_index: u32) -> Result<()>{
         let mut key_manager = self.key_manager()?;
         
-        let pk = key_manager.derive_bip32()?;
+        let pk = key_manager.derive_keypair(key_index)?;
 
         info!("New deterministic key pair created and stored. Public key is: {}", pk.to_string());
 

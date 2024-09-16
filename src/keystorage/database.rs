@@ -2,7 +2,7 @@ use std::{io::Cursor, path::Path};
 
 use bitcoin::{Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
-use storage_backend::storage::Storage;
+use storage_backend::storage::{Storage, KeyValueStore};
 
 use crate::errors::KeyStoreError;
 
@@ -27,16 +27,16 @@ impl KeyStore for DatabaseKeyStore {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
-        self.db.write(key, entry)?;
+        self.db.set(key, entry)?;
 
         Ok(())
     }
 
     fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> { 
         let key = public_key.to_string();
-        let entry = match self.db.read(key)?{
+        let entry = match self.db.get::<String, Vec<u8>>(key)?{
             Some(entry) => {
-                let encoded = self.decrypt_entry(entry.as_bytes().to_vec())?;
+                let encoded = self.decrypt_entry(entry)?;
                 self.decode_entry(encoded.to_vec())
             }
             None => return Ok(None),
@@ -47,7 +47,7 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
-        self.db.write(WINTERNITZ_KEY, entry)?;
+        self.db.set(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
@@ -63,13 +63,13 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
-        self.db.write(KEY_DERIVATION_SEED_KEY, entry)?;
+        self.db.set(KEY_DERIVATION_SEED_KEY, entry)?;
         Ok(())
     }
 
     fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.read(KEY_DERIVATION_SEED_KEY)? {
-            Some(entry) => entry.as_bytes().to_vec(),
+        let entry = match self.db.get::<&str, Vec<u8>>(KEY_DERIVATION_SEED_KEY)? {
+            Some(entry) => entry,
             None => return Err(KeyStoreError::KeyDerivationSeedNotFound),
         };
         
@@ -80,7 +80,7 @@ impl KeyStore for DatabaseKeyStore {
 
 impl DatabaseKeyStore {
     pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, KeyStoreError> {
-        let db = Storage::new_with_path(path)?;
+        let db = Storage::new_with_path(&path.as_ref().to_path_buf())?;
         
         let key_storage = DatabaseKeyStore { 
             db, 

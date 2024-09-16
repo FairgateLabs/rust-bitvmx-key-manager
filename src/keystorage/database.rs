@@ -2,7 +2,7 @@ use std::{io::Cursor, path::Path};
 
 use bitcoin::{Network, PrivateKey, PublicKey};
 use cocoon::Cocoon;
-use rocksdb::Options;
+use storage_backend::storage::Storage;
 
 use crate::errors::KeyStoreError;
 
@@ -16,7 +16,7 @@ const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the databas
 
 
 pub struct DatabaseKeyStore {
-    db: rocksdb::DB,
+    db: Storage,
     network: Network,
     password: Vec<u8>,
 }
@@ -27,16 +27,16 @@ impl KeyStore for DatabaseKeyStore {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
-        self.db.put(key, entry)?;
+        self.db.write(key, entry)?;
 
         Ok(())
     }
 
     fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> { 
         let key = public_key.to_string();
-        let entry = match self.db.get(key)?{
+        let entry = match self.db.read(key)?{
             Some(entry) => {
-                let encoded = self.decrypt_entry(entry)?;
+                let encoded = self.decrypt_entry(entry.as_bytes().to_vec())?;
                 self.decode_entry(encoded.to_vec())
             }
             None => return Ok(None),
@@ -47,13 +47,13 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
-        self.db.put(WINTERNITZ_KEY, entry)?;
+        self.db.write(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.get(WINTERNITZ_KEY)? {
-            Some(entry) => entry,
+        let entry = match self.db.read(WINTERNITZ_KEY)? {
+            Some(entry) => entry.as_bytes().to_vec(),
             None => return Err(KeyStoreError::WinternitzSeedNotFound),
         };
 
@@ -63,13 +63,13 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
-        self.db.put(KEY_DERIVATION_SEED_KEY, entry)?;
+        self.db.write(KEY_DERIVATION_SEED_KEY, entry)?;
         Ok(())
     }
 
     fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.get(KEY_DERIVATION_SEED_KEY)? {
-            Some(entry) => entry,
+        let entry = match self.db.read(KEY_DERIVATION_SEED_KEY)? {
+            Some(entry) => entry.as_bytes().to_vec(),
             None => return Err(KeyStoreError::KeyDerivationSeedNotFound),
         };
         
@@ -80,10 +80,7 @@ impl KeyStore for DatabaseKeyStore {
 
 impl DatabaseKeyStore {
     pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, KeyStoreError> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-
-        let db = rocksdb::DB::open(&opts, path.as_ref())?;
+        let db = Storage::new_with_path(path)?;
         
         let key_storage = DatabaseKeyStore { 
             db, 

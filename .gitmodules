@@ -1,4 +1,4 @@
-[submodule "storage"]
+[submodule "key_storage"]
 	path = key_storage
 	url = git@github.com:FairgateLabs/rust-bitvmx-storage-backend.git
 	branch = integration

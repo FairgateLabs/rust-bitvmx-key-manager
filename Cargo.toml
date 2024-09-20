@@ -20,7 +20,7 @@ thiserror = "1.0.63"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 hex = "0.4.3"
-rust-bitvmx-storage-backend = { path = "key_storage" }
+rust-bitvmx-storage-backend = { path = "storage" }
 
 [[bin]]
 name = "key-manager"

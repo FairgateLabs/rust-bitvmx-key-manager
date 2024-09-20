@@ -117,6 +117,16 @@ impl WinternitzSignature {
         Ok(signature)
     }
 
+    pub fn to_hashes(&self) -> Vec<Vec<u8>> {
+        let mut hashes = vec![];
+
+        for hash in self.hashes.iter() {
+            hashes.push(hash.to_bytes());
+        }
+
+        hashes
+    }
+
     pub fn len(&self) -> usize {
         self.hashes.len()
     }

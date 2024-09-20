@@ -221,7 +221,7 @@ impl Cli {
         }
     
         let digest: [u8; 32] = bytes.as_slice().try_into()?;
-        let signature = key_manager.sign_ecdsa_message(&Message::from_digest(digest), PublicKey::from_str(public_key)?)?;
+        let signature = key_manager.sign_ecdsa_message(&Message::from_digest(digest), &PublicKey::from_str(public_key)?)?;
 
         info!("ECDSA Message signed. Signature is: {:?}", signature);
 
@@ -340,7 +340,7 @@ impl Cli {
         let key_derivation_seed = self.get_key_derivation_seed()?;
         let key_derivation_path = &self.config.key_manager.key_derivation_path;
         let winternitz_seed = self.get_winternitz_seed()?;
-        let network = self.get_network()?;
+        let network = Network::from_str(self.config.key_manager.network.as_str())?;
         let path = self.get_storage_path()?;
         let password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
 
@@ -355,17 +355,6 @@ impl Cli {
         )?;
 
         Ok(key_manager)
-    }
-
-    fn get_network(&self) -> Result<Network> {
-        let network = &self.config.key_manager.network;
-
-        match network.as_str() {
-            "mainnet" => Ok(Network::Bitcoin),
-            "testnet" => Ok(Network::Testnet),
-            "regtest" => Ok(Network::Regtest),
-            _ => Err(CliError::InvalidNetwork(network.to_string()).into()),
-        }
     }
 
     fn get_witnernitz_type(&self, winternitz_type: &str) -> Result<WinternitzType> {

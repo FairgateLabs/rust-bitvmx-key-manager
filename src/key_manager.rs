@@ -99,8 +99,8 @@ impl <K: KeyStore> KeyManager<K> {
     /*********************************/
     /*********** Signing *************/
     /*********************************/
-    pub fn sign_ecdsa_message(&self, message: &Message, public_key: PublicKey) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(&public_key)? {
+    pub fn sign_ecdsa_message(&self, message: &Message, public_key: &PublicKey) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
+        let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
         };
@@ -115,7 +115,7 @@ impl <K: KeyStore> KeyManager<K> {
             messages.iter(),
             public_keys.iter(),
         ) {
-            let signature = self.sign_ecdsa_message(message, public_key.to_owned())?;
+            let signature = self.sign_ecdsa_message(message, &public_key)?;
             signatures.push(signature);
         }
     
@@ -182,7 +182,6 @@ impl <K: KeyStore> KeyManager<K> {
     
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::{env, panic, str::FromStr};
@@ -206,7 +205,7 @@ mod tests {
         let pk = key_manager.generate_keypair(&mut rng)?;
      
         let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, pk)?;
+        let signature = key_manager.sign_ecdsa_message(&message, &pk)?;
         
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
@@ -298,8 +297,8 @@ mod tests {
         assert_ne!(pk_1.to_string(), pk_2.to_string());
      
         let message = random_message();
-        let signature_1 = key_manager.sign_ecdsa_message(&message, pk_1)?;
-        let signature_2 = key_manager.sign_ecdsa_message(&message, pk_2)?;
+        let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
+        let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
 
         assert_ne!(signature_1.to_string(), signature_2.to_string());
 
@@ -444,14 +443,14 @@ mod tests {
 
         // Case 5: Entry not found for public key
         let fake_public_key = PublicKey::from_str("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")?;
-        let result = key_manager.sign_ecdsa_message(&random_message(), fake_public_key);
+        let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
         Ok(())
     }
 
     #[test]
-    fn test_signature_with_bip_derivation() {
+    fn test_signature_with_bip32_derivation() {
         let keystore = database_keystore(&temp_storage()).unwrap();
         let mut key_manager = test_key_manager(keystore).unwrap();
 
@@ -463,25 +462,24 @@ mod tests {
             
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
-            let signature = key_manager.sign_ecdsa_message(&message, pk1).unwrap();
+            let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
             
             assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
         }
-
 
         let pk1 = key_manager.derive_keypair(10).unwrap();
         let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, pk1).unwrap();
+        let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
         
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
     }
     
 
     #[test]
-    fn test_schnorr_signature_with_bip_derivation() {
+    fn test_schnorr_signature_with_bip32_derivation() {
         let keystore = database_keystore(&temp_storage()).unwrap();
         let mut key_manager = test_key_manager(keystore).unwrap();
 
@@ -508,6 +506,26 @@ mod tests {
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
     }
     
+    #[test]
+    fn test_key_derivation_from_xpub_in_different_key_manager() {
+        let keystore = database_keystore(&temp_storage()).unwrap();
+        let mut key_manager_1 = test_key_manager(keystore).unwrap();
+
+        let keystore = database_keystore(&temp_storage()).unwrap();
+        let mut key_manager_2 = test_key_manager(keystore).unwrap();
+
+        for i in 0..5 {
+            // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
+            let master_xpub = key_manager_1.generate_master_xpub().unwrap();
+            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, i).unwrap();
+
+            // Derive keypair in key_manager_1 with the same index
+            let public_from_xpriv = key_manager_1.derive_keypair(i).unwrap();
+
+            // Both public keys must be equal
+            assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
+        }
+    }
 
     fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
         let key_derivation_seed = random_bytes();

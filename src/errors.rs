@@ -92,6 +92,12 @@ pub enum CliError {
 pub enum ConfigError {
     #[error("while trying to build configuration")]
     ConfigFileError(#[from] settings::ConfigError),
+
+    #[error("Winternitz seed is invalid")]
+    InvalidWinternitzSeed,  
+
+    #[error("Key derivation seed is invalid")]
+    InvalidKeyDerivationSeed,
 }
 
 #[derive(Error, Debug)]

@@ -360,7 +360,7 @@ impl Cli {
     fn get_witnernitz_type(&self, winternitz_type: &str) -> Result<WinternitzType> {
         match winternitz_type {
             "sha256" => Ok(WinternitzType::SHA256),
-            "ripemd160" => Ok(WinternitzType::RIPEMD160),
+            "ripemd160" => Ok(WinternitzType::HASH160),
             _ => Err(CliError::InvalidWinternitzType(winternitz_type.to_string()).into()),
         }
     }

@@ -1,6 +1,6 @@
 use bitcoin::{secp256k1::{self, All}, PublicKey};
 
-use crate::winternitz::{add_checksum, calculate_checksum_length, Winternitz, WinternitzPublicKey, WinternitzSignature, W};
+use crate::winternitz::{to_checksummed_message, Winternitz, WinternitzPublicKey, WinternitzSignature};
 
 pub struct SignatureVerifier {
     secp: secp256k1::Secp256k1<All>,
@@ -30,17 +30,12 @@ impl SignatureVerifier {
     }
 
     pub fn verify_winternitz_signature(&self, signature: &WinternitzSignature, message_bytes: &[u8], public_key: &WinternitzPublicKey) -> bool {
-        let winternitz = Winternitz::new();
-
-        let message_len = message_bytes.len();
-        let message_with_checksum = add_checksum(message_bytes, W);
-
-        let my_msg_with_checksum = add_checksum(&message_with_checksum[..message_len], W);
-        let message_pad_len = calculate_checksum_length(message_len, W) + message_len - message_with_checksum.len();
-        let message_with_checksum_pad = [message_with_checksum.as_slice(), &vec![0u8; message_pad_len]].concat(); 
+        let checksummed_message = to_checksummed_message(message_bytes);
         
-        let verification = winternitz.verify_signature(&message_with_checksum_pad, signature, public_key).is_ok();
+        let winternitz = Winternitz::new();        
+        let verification = winternitz.verify_signature(&checksummed_message, signature, public_key).is_ok();
+        verification
 
-        verification && (my_msg_with_checksum == message_with_checksum)
+        // verification && (my_msg_with_checksum == message_with_checksum)
     }
 }

@@ -6,14 +6,14 @@ use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use crate::errors::WinternitzError;
 
 pub const NBITS: usize = 4; // Nibbles
-pub const W: usize = 2usize.pow(NBITS as u32); // Winternitz parameter (times to hash)
+pub const W: usize = 2usize.pow(NBITS as u32) -1; // Winternitz parameter (times to hash)
 pub const SHA256_SIZE: usize = 32;
 pub const RIPEMD160_SIZE: usize = 20;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WinternitzType {
     SHA256,
-    RIPEMD160,
+    HASH160,
 }
 
 pub trait HashFunction {
@@ -25,7 +25,11 @@ impl HashFunction for WinternitzType {
     fn hash(&self, data: &WinternitzHash) -> WinternitzHash {
         let hash = match self {
             WinternitzType::SHA256 => WinternitzHash::new(sha256::Hash::hash(&data.to_bytes()).as_byte_array().to_vec()),
-            WinternitzType::RIPEMD160 => WinternitzHash::new(ripemd160::Hash::hash(&data.to_bytes()).as_byte_array().to_vec())
+            WinternitzType::HASH160 => {
+                let sha256 = sha256::Hash::hash(&data.to_bytes());
+                let hash160 = ripemd160::Hash::hash(sha256.as_byte_array());
+                WinternitzHash::new(hash160.as_byte_array().to_vec())
+            }
         };
 
         hash
@@ -34,7 +38,7 @@ impl HashFunction for WinternitzType {
     fn hash_size(&self) -> usize {
         match self {
             WinternitzType::SHA256 => SHA256_SIZE,
-            WinternitzType::RIPEMD160 => RIPEMD160_SIZE,
+            WinternitzType::HASH160 => RIPEMD160_SIZE,
         }
     }
 }
@@ -68,11 +72,16 @@ impl WinternitzHash {
     pub fn to_bytes(&self) -> Vec<u8> {
         self.hash.clone()
     }
+
+    pub fn to_hex(&self) -> String {
+        hex::encode(&self.hash)
+    }
 }
 
 #[derive(Clone)]
 pub struct WinternitzSignature {
     hashes: Vec<WinternitzHash>,
+    digits: Vec<u8>,
 }
 
 impl Default for WinternitzSignature {
@@ -84,7 +93,8 @@ impl Default for WinternitzSignature {
 impl WinternitzSignature {
     pub fn new() -> Self {
         WinternitzSignature {
-            hashes: Vec::new(),
+            hashes: vec![],
+            digits: vec![],
         }
     }
 
@@ -135,12 +145,20 @@ impl WinternitzSignature {
         self.hashes.is_empty()
     }
 
+    pub fn message_digits(&self) -> Vec<u8> {
+        self.digits.clone()
+    }
+
     fn push_hash(&mut self, hash: WinternitzHash) {
         self.hashes.push(hash);
     }
 
     fn hash_at(&self, index: usize) -> WinternitzHash {
         self.hashes[index].clone()
+    }
+
+    fn push_digit(&mut self, digit: u8) {
+        self.digits.push(digit);
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,6 +279,16 @@ impl WinternitzPrivateKey {
         bytes
     }
 
+    pub fn to_hashes(&self) -> Vec<Vec<u8>> {
+        let mut hashes = vec![];
+
+        for hash in self.hashes.iter() {
+            hashes.push(hash.to_bytes());
+        }
+
+        hashes
+    }
+
     pub fn len(&self) -> usize {
         self.hashes.len()
     }
@@ -307,61 +335,44 @@ impl Winternitz {
         }
     }
 
-    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, index: u32) -> Result<WinternitzPublicKey, WinternitzError> {
-        let private_key = self.generate_private_key(master_secret, key_type, message_size, index)?;
-        
-        WinternitzPublicKey::from(private_key)
+    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32) -> Result<WinternitzPublicKey, WinternitzError> {        
+        let private_key = self.generate_private_key(master_secret, key_type, message_size, checksum_size, index)?;
+        let public_key = WinternitzPublicKey::from(private_key)?;
+
+        Ok(public_key)
     }
 
-    pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
-        let checksum_size = calculate_checksum_length(message_size, W);
+    pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
         let private_key = self.generate_hashes(master_secret, key_type, message_size, checksum_size, index)?;
         
         Ok(private_key)
     }
 
-    pub fn sign_message(&self, msg_with_checksum_pad: &[u8], private_key: &WinternitzPrivateKey) -> WinternitzSignature {
+    pub fn sign_message(&self, checksummed_message: &[u8], private_key: &WinternitzPrivateKey) -> WinternitzSignature {
         let mut signature = WinternitzSignature::new();
         let key_type = private_key.key_type();
         
-        for (i, byte) in msg_with_checksum_pad.iter().enumerate() {
-            let (high_nibble, low_nibble) = split_byte(*byte);
-
-            let mut hashed_val = private_key.hash_at(2 * i);
-            for _ in 0..(W - (high_nibble as usize)) {
+        for (i, digit) in checksummed_message.iter().enumerate() {
+            let mut hashed_val = private_key.hash_at(i);
+            for _ in 0..(W - (*digit as usize)) {
                 hashed_val = key_type.hash(&hashed_val);
             }
 
             signature.push_hash(hashed_val);
-
-            let mut hashed_val = private_key.hash_at(2 * i + 1);
-            for _ in 0..(W - (low_nibble as usize)) {
-                hashed_val = key_type.hash(&hashed_val);
-            }
-        
-            signature.push_hash(hashed_val);
+            signature.push_digit(*digit);
         }   
 
         signature
     }
 
-    pub fn verify_signature(&self, msg_with_checksum_pad: &[u8], signature: &WinternitzSignature, public_key: &WinternitzPublicKey) -> Result<bool, WinternitzError> {
+    pub fn verify_signature(&self, checksummed_message: &[u8], signature: &WinternitzSignature, public_key: &WinternitzPublicKey) -> Result<bool, WinternitzError> {
         let mut generated_public_key: WinternitzPublicKey = WinternitzPublicKey::new(public_key.key_type(), public_key.message_size(), public_key.checksum_size());
 
         let key_type = public_key.key_type();
         
-        for (i, byte) in msg_with_checksum_pad.iter().enumerate() {
-            let (high_nibble, low_nibble) = split_byte(*byte);
-
-            let mut hashed_val = signature.hash_at(2 * i);
-            for _ in 0..(high_nibble as usize) {
-                hashed_val = key_type.hash(&hashed_val);
-            }
-
-            generated_public_key.push_hash(hashed_val)?;
-
-            let mut hashed_val = signature.hash_at(2 * i + 1);
-            for _ in 0..(low_nibble as usize) {
+        for (i, digit) in checksummed_message.iter().enumerate() {
+            let mut hashed_val = signature.hash_at(i);
+            for _ in 0..(*digit as usize) {
                 hashed_val = key_type.hash(&hashed_val);
             }
 
@@ -374,11 +385,9 @@ impl Winternitz {
     fn generate_hashes(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32)-> Result<WinternitzPrivateKey, WinternitzError>{
         index.checked_add(1).ok_or(WinternitzError::IndexOverflow)?;
 
-        let num_hashes = 2 * (message_size + checksum_size);
-
         let mut private_key = WinternitzPrivateKey::new(key_type, message_size, checksum_size);
 
-        for i in 0..num_hashes {
+        for i in 0..message_size + checksum_size {
             let privk = self.generate_hash(master_secret, key_type.hash_size(), index, i as u32);
             private_key.push_hash(privk)?;
         }
@@ -396,40 +405,64 @@ impl Winternitz {
     }
 }
 
-pub fn add_checksum(message: &[u8], w: usize) -> Vec<u8> {
-    let mut message = message.to_vec();
-    let checksum = calculate_checksum(&message, w);
-    message.extend_from_slice(&checksum);
-    message
+pub fn to_checksummed_message(message_bytes: &[u8]) -> Vec<u8> {
+    let mut message_digits = to_message_digits(message_bytes); 
+    let mut checksummed = calculate_checksum(&message_digits);
+    checksummed.append(&mut message_digits);
+    checksummed.reverse();
+
+    checksummed
 }
 
-pub fn calculate_checksum(message: &[u8], w: usize) -> Vec<u8> {
-    let mut checksum: u32 = 0;
-
-    for byte in message.iter() {
-        let (high_nibble, low_nibble) = split_byte(*byte);
-        checksum += (w as u32 - 1 - high_nibble as u32) + (w as u32 - 1 - low_nibble as u32);
+pub fn calculate_checksum(message_digits: &[u8]) -> Vec<u8> {
+    let mut sum: u32 = 0;
+    for digit in message_digits {
+        sum += *digit as u32;
     }
 
-    let mut checksum_bytes = Vec::new();
-    let mut temp = checksum;
+    let checksum = (W * message_digits.len() - sum as usize) as u32;
+    let checksum_size = calculate_checksum_length(message_digits.len());
+    let checksum_digits = to_digits(checksum, checksum_size);
 
-    while temp > 0 {
-        checksum_bytes.push((temp % 256) as u8);
-        temp /= 256;
-    }
-    checksum_bytes.reverse();
-    checksum_bytes
+    checksum_digits
 }
 
-pub fn calculate_checksum_length(message_size: usize, w: usize) -> usize {
-    let l1 = 2 * message_size;
-    let l2 = ((l1 * (w-1)) as f64).log2() / 4.0; //log16(x) = log2(x) / 4
-    (l2 / 2.0).ceil() as usize //checksum length in bytes
+pub fn calculate_checksum_length(message_digits_len: usize) -> usize {
+    let log_digits_per_message:f32 = ((W * message_digits_len) as f32).log((W + 1) as f32).ceil() + 1.0;
+    let digits_per_checksum: usize = usize::try_from(log_digits_per_message as u32).unwrap();
+    digits_per_checksum
 }
 
-pub fn split_byte(byte: u8) -> (u8, u8) {
+fn split_byte(byte: u8) -> (u8, u8) {
     let high_nibble: u8 = (byte & 0xF0) >> 4;
     let low_nibble: u8 = byte & 0x0F;
     (high_nibble, low_nibble)
+}
+
+fn to_message_digits(message_bytes: &[u8]) -> Vec<u8> {
+    let mut message_digits = Vec::new();
+
+    for byte in message_bytes.iter() {
+        let (high_nibble, low_nibble) = split_byte(*byte);
+        message_digits.push(high_nibble);
+        message_digits.push(low_nibble);
+    }
+
+    message_digits
+}
+
+// Convert a number to digits
+fn to_digits(mut number: u32, number_of_digits: usize) -> Vec<u8> {
+    let mut digits: Vec<u8> = Vec::with_capacity(number_of_digits);
+    for _ in 0..number_of_digits {
+        digits.push(0);
+    }
+
+    for i in 0..number_of_digits {
+        let digit = number % (W + 1) as u32;
+        number = (number - digit) / (W + 1) as u32;
+        digits[i] = digit as u8;
+    }
+
+    digits
 }

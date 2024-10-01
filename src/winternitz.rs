@@ -213,7 +213,7 @@ impl WinternitzPublicKey {
         hashes
     }
 
-    pub fn len(&self) -> usize {
+    pub fn total_len(&self) -> usize {
         self.hashes.len()
     }
 
@@ -235,6 +235,14 @@ impl WinternitzPublicKey {
 
     pub fn checksum_size(&self) -> usize {
         self.checksum_size
+    }
+
+    pub fn get_base(&self) -> usize {
+        W
+    }
+    
+    pub fn get_bits_per_digit(&self) -> u32 {
+        NBITS as u32
     }
 }
 
@@ -408,9 +416,9 @@ impl Winternitz {
 pub fn to_checksummed_message(message_bytes: &[u8]) -> Vec<u8> {
     let mut message_digits = to_message_digits(message_bytes); 
     let mut checksummed = calculate_checksum(&message_digits);
+    
     checksummed.append(&mut message_digits);
     checksummed.reverse();
-
     checksummed
 }
 
@@ -451,7 +459,8 @@ fn to_message_digits(message_bytes: &[u8]) -> Vec<u8> {
     message_digits
 }
 
-// Convert a number to digits
+// Converts a number to an array of digits of size number_of_digits.
+// If the number is smaller than the number of digits, the remaining digits are filled with 0.
 fn to_digits(mut number: u32, number_of_digits: usize) -> Vec<u8> {
     let mut digits: Vec<u8> = Vec::with_capacity(number_of_digits);
     for _ in 0..number_of_digits {

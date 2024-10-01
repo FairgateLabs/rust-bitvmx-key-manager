@@ -52,11 +52,10 @@ impl KeyStore for DatabaseKeyStore {
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.read(WINTERNITZ_KEY)? {
-            Some(entry) => entry.as_bytes().to_vec(),
+        let entry = match self.db.get::<&str, Vec<u8>>(WINTERNITZ_KEY)? {
+            Some(entry) => entry,
             None => return Err(KeyStoreError::WinternitzSeedNotFound),
         };
-
         let encoded = self.decrypt_entry(entry)?;
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }

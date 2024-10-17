@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey, XOnlyPublicKey};
 use itertools::izip;
 
 use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, calculate_checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType, NBITS}};
@@ -276,11 +276,9 @@ mod tests {
         let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::HASH160, 0)?;
         let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
 
-        println!("Pk size: {:?}", pk.len());
+        println!("Pk size: {:?}", pk.total_len());
         println!("Msg: {:?}", &message[..]);
-        //println!("Msg with checksum: {:?}", add_checksum(&message[..]));
-        //println!("Msg_len: {} \nMsg_checksum_len: {} \nMsg_checksum_max_len {} \nSignature_len: {}", message[..].len(), add_checksum(&message[..]).len(), calculate_checksum_length(message[..].len(), W), signature.len());
-
+        
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
         Ok(())
@@ -325,8 +323,8 @@ mod tests {
         let pk5 = key_manager.generate_keypair(&mut rng)?;
         let pk6 = key_manager.generate_keypair(&mut rng)?;
 
-        assert!(pk1.len() == checksummed.len());
-        assert!(pk2.len() == checksummed.len());
+        assert!(pk1.total_len() == checksummed.len());
+        assert!(pk2.total_len() == checksummed.len());
         assert!(pk1.hash_size() == 32);
         assert!(pk2.hash_size() == 20);
         assert!(pk5.to_bytes().len() == 33);

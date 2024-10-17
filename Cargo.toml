@@ -4,7 +4,7 @@ description = "A library for managing the collection of keys for the BitVMX prot
 version = "0.0.1"
 edition = "2021"
 authors = ["Diego Masini <diego.masini@gmail.com>", "Tomas Szejnfeld Sirkis", "Kevin Wahle"]
-repository = "https://github.com/FairgateLabs/rust-bitvmx-template-builder"
+repository = "https://github.com/FairgateLabs/rust-bitvmx-key-manager"
 
 [lib]
 name = "key_manager"

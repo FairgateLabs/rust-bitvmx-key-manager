@@ -167,6 +167,7 @@ pub struct WinternitzPublicKey {
     hash_type: WinternitzType,
     message_size: usize,
     checksum_size: usize,
+    derivation_index: u32,
 }
 
 impl WinternitzPublicKey {
@@ -174,12 +175,13 @@ impl WinternitzPublicKey {
         private_key.public_key()
     }
 
-    fn new(hash_type: WinternitzType, message_size: usize, checksum_size: usize) -> Self {
+    fn new(hash_type: WinternitzType, derivation_index: u32, message_size: usize, checksum_size: usize) -> Self {
         WinternitzPublicKey {
             hashes: Vec::new(),
             hash_type,
             message_size,
             checksum_size,
+            derivation_index,
         }
     }
 
@@ -237,11 +239,15 @@ impl WinternitzPublicKey {
         self.checksum_size
     }
 
-    pub fn get_base(&self) -> usize {
+    pub fn derivation_index(&self) -> u32 {
+        self.derivation_index
+    }
+
+    pub fn base(&self) -> usize {
         W
     }
     
-    pub fn get_bits_per_digit(&self) -> u32 {
+    pub fn bits_per_digit(&self) -> u32 {
         NBITS as u32
     }
 }
@@ -251,20 +257,22 @@ pub struct WinternitzPrivateKey {
     hash_type: WinternitzType,
     message_size: usize,
     checksum_size: usize,
+    derivation_index: u32,
 }
 
 impl WinternitzPrivateKey {
-    pub fn new(hash_type: WinternitzType, message_size: usize, checksum_size: usize) -> Self {
+    pub fn new(hash_type: WinternitzType, derivation_index: u32, message_size: usize, checksum_size: usize) -> Self {
         WinternitzPrivateKey {
             hashes: Vec::new(),
             hash_type,
             message_size,
             checksum_size,
+            derivation_index,
         }
     }
 
     pub fn public_key(&self) -> Result<WinternitzPublicKey, WinternitzError> {
-        let mut public_key = WinternitzPublicKey::new(self.hash_type, self.message_size, self.checksum_size);
+        let mut public_key = WinternitzPublicKey::new(self.hash_type, self.derivation_index, self.message_size, self.checksum_size);
 
         for h in self.hashes.iter() {
             let mut hashed_pk = h.clone(); // Start with sks as hashed_pk
@@ -313,6 +321,10 @@ impl WinternitzPrivateKey {
         self.hash_type
     }
 
+    pub fn derivation_index(&self) -> u32 {
+        self.derivation_index
+    }
+
     fn push_hash(&mut self, hash: WinternitzHash) -> Result<(), WinternitzError> {
         if hash.len() != self.hash_type.hash_size() {
             return Err(WinternitzError::HashSizeMissmatch(hash.len(), self.hash_type.to_string()));
@@ -343,15 +355,15 @@ impl Winternitz {
         }
     }
 
-    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32) -> Result<WinternitzPublicKey, WinternitzError> {        
-        let private_key = self.generate_private_key(master_secret, key_type, message_size, checksum_size, index)?;
+    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32) -> Result<WinternitzPublicKey, WinternitzError> {        
+        let private_key = self.generate_private_key(master_secret, key_type, message_size, checksum_size, derivation_index)?;
         let public_key = WinternitzPublicKey::from(private_key)?;
 
         Ok(public_key)
     }
 
-    pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
-        let private_key = self.generate_hashes(master_secret, key_type, message_size, checksum_size, index)?;
+    pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
+        let private_key = self.generate_hashes(master_secret, key_type, message_size, checksum_size, derivation_index)?;
         
         Ok(private_key)
     }
@@ -374,7 +386,12 @@ impl Winternitz {
     }
 
     pub fn verify_signature(&self, checksummed_message: &[u8], signature: &WinternitzSignature, public_key: &WinternitzPublicKey) -> Result<bool, WinternitzError> {
-        let mut generated_public_key: WinternitzPublicKey = WinternitzPublicKey::new(public_key.key_type(), public_key.message_size(), public_key.checksum_size());
+        let mut generated_public_key: WinternitzPublicKey = WinternitzPublicKey::new(
+            public_key.key_type(),
+            public_key.derivation_index(), 
+            public_key.message_size(), 
+            public_key.checksum_size()
+        );
 
         let key_type = public_key.key_type();
         
@@ -390,13 +407,13 @@ impl Winternitz {
         Ok(generated_public_key == *public_key)
     }
 
-    fn generate_hashes(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, index: u32)-> Result<WinternitzPrivateKey, WinternitzError>{
-        index.checked_add(1).ok_or(WinternitzError::IndexOverflow)?;
+    fn generate_hashes(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32)-> Result<WinternitzPrivateKey, WinternitzError>{
+        derivation_index.checked_add(1).ok_or(WinternitzError::IndexOverflow)?;
 
-        let mut private_key = WinternitzPrivateKey::new(key_type, message_size, checksum_size);
+        let mut private_key = WinternitzPrivateKey::new(key_type, derivation_index, message_size, checksum_size);
 
         for i in 0..message_size + checksum_size {
-            let privk = self.generate_hash(master_secret, key_type.hash_size(), index, i as u32);
+            let privk = self.generate_hash(master_secret, key_type.hash_size(), derivation_index, i as u32);
             private_key.push_hash(privk)?;
         }
 

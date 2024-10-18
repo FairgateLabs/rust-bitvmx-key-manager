@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey, XOnlyPublicKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
 use itertools::izip;
 
 use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, calculate_checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType, NBITS}};
@@ -278,7 +278,7 @@ mod tests {
 
         println!("Pk size: {:?}", pk.total_len());
         println!("Msg: {:?}", &message[..]);
-        
+
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
         Ok(())

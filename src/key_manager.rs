@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, SecretKey}, Network, PrivateKey, PublicKey};
+use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, Scalar, SecretKey}, Network, PrivateKey, PublicKey};
 use itertools::izip;
 
 use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, calculate_checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType, NBITS}};
@@ -138,7 +138,7 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     // For taproot key spend
-    pub fn sign_schnorr_message_with_tweak(&self, message: &Message, public_key: &PublicKey) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError>{
+    pub fn sign_schnorr_message_with_tap_tweak(&self, message: &Message, public_key: &PublicKey) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError>{
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
@@ -150,6 +150,19 @@ impl <K: KeyStore> KeyManager<K> {
         let keypair = tweaked_keypair.to_inner();
         Ok((self.secp.sign_schnorr(message, &keypair), PublicKey::new(keypair.public_key())))
     }
+
+        // For taproot key spend with tweak
+        pub fn sign_schnorr_message_with_tweak(&self, message: &Message, public_key: &PublicKey, tweak: &Scalar) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError>{
+            let (sk, _) = match self.keystore.load_keypair(public_key)? {
+                Some(entry) => entry,
+                None => return Err(KeyManagerError::EntryNotFound),
+            };
+            
+            let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
+            let tweaked_keypair = keypair.add_xonly_tweak(&self.secp, tweak)?;
+    
+            Ok((self.secp.sign_schnorr(message, &tweaked_keypair), PublicKey::new(keypair.public_key())))
+        }
 
     // For taproot script spend
     pub fn sign_schnorr_messages(&self, messages: Vec<Message>, public_keys: Vec<PublicKey>) -> Result<Vec<secp256k1::schnorr::Signature>, KeyManagerError> {
@@ -231,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sign_schnorr_message_with_tweak() -> Result<(), KeyManagerError> { 
+    fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> { 
         let keystore = database_keystore(&temp_storage())?;
         let mut key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
@@ -240,7 +253,7 @@ mod tests {
         let pk = key_manager.generate_keypair(&mut rng)?;
      
         let message = random_message();
-        let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tweak(&message, &pk)?;
+        let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tap_tweak(&message, &pk)?;
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 

@@ -17,6 +17,9 @@ pub enum KeyManagerError {
     #[error("Failed to create new Winternitz key")]
     WinternitzGenerationError(#[from] WinternitzError),
 
+    #[error("Failed to tweak secret key")]
+    FailedToTweakKey(#[from] secp256k1::Error),
+
     #[error("Failed to access secure storage")]
     KeyStorageError(#[from] KeyStoreError),
 

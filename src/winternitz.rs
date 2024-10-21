@@ -2,6 +2,7 @@ use core::fmt;
 use std::vec;
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
+use serde::{Deserialize, Serialize};
 
 use crate::errors::WinternitzError;
 
@@ -10,7 +11,7 @@ pub const W: usize = 2usize.pow(NBITS as u32) -1; // Winternitz parameter (times
 pub const SHA256_SIZE: usize = 32;
 pub const RIPEMD160_SIZE: usize = 20;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum WinternitzType {
     SHA256,
     HASH160,

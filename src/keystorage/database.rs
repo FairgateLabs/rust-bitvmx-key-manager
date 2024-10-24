@@ -27,7 +27,7 @@ impl KeyStore for DatabaseKeyStore {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
-        self.db.set(key, entry, None)?;
+        self.db.set(key, entry)?;
 
         Ok(())
     }
@@ -47,7 +47,7 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_winternitz_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
-        self.db.set(WINTERNITZ_KEY, entry, None)?;
+        self.db.set(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
@@ -62,7 +62,7 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_key_derivation_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
-        self.db.set(KEY_DERIVATION_SEED_KEY, entry, None)?;
+        self.db.set(KEY_DERIVATION_SEED_KEY, entry)?;
         Ok(())
     }
 

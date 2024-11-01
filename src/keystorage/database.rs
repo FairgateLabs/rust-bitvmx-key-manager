@@ -27,14 +27,14 @@ impl KeyStore for DatabaseKeyStore {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
-        self.db.set(key, entry)?;
+        self.db.write(&key, entry)?;
 
         Ok(())
     }
 
     fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> { 
         let key = public_key.to_string();
-        let entry = match self.db.get::<String, Vec<u8>>(key)?{
+        let entry = match self.db.read(&key)?{
             Some(entry) => {
                 let encoded = self.decrypt_entry(entry)?;
                 self.decode_entry(encoded.to_vec())
@@ -47,12 +47,12 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_winternitz_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
-        self.db.set(WINTERNITZ_KEY, entry)?;
+        self.db.write(WINTERNITZ_KEY, entry)?;
         Ok(())
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.get::<&str, Vec<u8>>(WINTERNITZ_KEY)? {
+        let entry = match self.db.read(WINTERNITZ_KEY)? {
             Some(entry) => entry,
             None => return Err(KeyStoreError::WinternitzSeedNotFound),
         };
@@ -62,12 +62,12 @@ impl KeyStore for DatabaseKeyStore {
 
     fn store_key_derivation_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
-        self.db.set(KEY_DERIVATION_SEED_KEY, entry)?;
+        self.db.write(KEY_DERIVATION_SEED_KEY, entry)?;
         Ok(())
     }
 
     fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let entry = match self.db.get::<&str, Vec<u8>>(KEY_DERIVATION_SEED_KEY)? {
+        let entry = match self.db.read(KEY_DERIVATION_SEED_KEY)? {
             Some(entry) => entry,
             None => return Err(KeyStoreError::KeyDerivationSeedNotFound),
         };

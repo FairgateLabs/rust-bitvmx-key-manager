@@ -1,5 +1,5 @@
 use core::fmt;
-use std::vec;
+use std::{str::FromStr, vec};
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,18 @@ impl HashFunction for WinternitzType {
 impl fmt::Display for WinternitzType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(self, f)
+    }
+}
+
+impl FromStr for WinternitzType {
+    type Err = WinternitzError;
+
+    fn from_str(input: &str) -> Result<WinternitzType, Self::Err> {
+        match input.to_uppercase().as_str() {
+            "SHA256"  => Ok(WinternitzType::SHA256),
+            "HASH160" => Ok(WinternitzType::HASH160),
+            _         => Err(WinternitzError::InvalidWinternitzType(input.to_string())),
+        }
     }
 }
 
@@ -250,6 +262,12 @@ impl WinternitzPublicKey {
     
     pub fn bits_per_digit(&self) -> u32 {
         NBITS as u32
+    }
+}
+
+impl ToString for WinternitzPublicKey {
+    fn to_string(&self) -> String {
+        self.hashes.iter().map(|hash| hash.to_hex()).collect::<Vec<String>>().join(",")
     }
 }
 

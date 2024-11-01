@@ -113,4 +113,7 @@ pub enum WinternitzError {
 
     #[error("Signature size of {0} bytes must be a multiple of the size specified in the Winternitz type {1}")]
     InvalidSignatureLength(usize, String),
+
+    #[error("Invalid Winternitz type {0}")]
+    InvalidWinternitzType(String),
 }

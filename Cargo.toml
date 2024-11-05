@@ -22,8 +22,8 @@ serde_json = "1.0.96"
 thiserror = "1.0.63"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
+rocksdb = "0.22.0"
 hex = "0.4.3"
-rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 
 [[bin]]
 name = "key-manager"

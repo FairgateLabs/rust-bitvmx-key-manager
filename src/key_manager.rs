@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, Scalar, SecretKey}, Network, PrivateKey, PublicKey};
 use itertools::izip;
 
-use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, calculate_checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType, NBITS}};
+use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType}};
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages 
@@ -83,13 +83,13 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     pub fn derive_winternitz(&mut self, message_size_in_bytes: usize, key_type: WinternitzType, index: u32) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
-        let message_digits = message_size_in_bytes * 8 / NBITS;
-        let checksum_size = calculate_checksum_length(message_digits);
+        let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
+        let checksum_size = checksum_length(message_digits_length);
 
         let master_secret = self.keystore.load_winternitz_seed()?;
         
         let winternitz = winternitz::Winternitz::new();
-        let public_key = winternitz.generate_public_key(&master_secret, key_type, message_digits, checksum_size, index)?;
+        let public_key = winternitz.generate_public_key(&master_secret, key_type, message_digits_length, checksum_size, index)?;
         
         Ok(public_key)
     }
@@ -118,7 +118,7 @@ impl <K: KeyStore> KeyManager<K> {
             messages.iter(),
             public_keys.iter(),
         ) {
-            let signature = self.sign_ecdsa_message(message, &public_key)?;
+            let signature = self.sign_ecdsa_message(message, public_key)?;
             signatures.push(signature);
         }
     
@@ -181,15 +181,18 @@ impl <K: KeyStore> KeyManager<K> {
     
     // For one-time winternitz keys
     pub fn sign_winternitz_message(&self, message_bytes : &[u8], key_type: WinternitzType, index:u32, ) -> Result<WinternitzSignature, KeyManagerError> { 
+        let message_digits_length = winternitz::message_digits_length(message_bytes.len());
         let checksummed_message = to_checksummed_message(message_bytes);
-        let checksum_size = calculate_checksum_length(checksummed_message.len());
+        let checksum_size = checksum_length(message_digits_length);
         let message_size = checksummed_message.len() - checksum_size;
+
+        assert!(message_size == message_digits_length);
 
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(&master_secret, key_type, message_size, checksum_size, index)?;
 
-        let signature = winternitz.sign_message(&checksummed_message, &private_key);  
+        let signature = winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);  
 
         Ok(signature)
     }

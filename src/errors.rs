@@ -114,6 +114,12 @@ pub enum WinternitzError {
     #[error("Signature size of {0} bytes must be a multiple of the size specified in the Winternitz type {1}")]
     InvalidSignatureLength(usize, String),
 
+    #[error("Public key size of {0} bytes must be a multiple of the size specified in the Winternitz type {1}")]
+    InvalidPublicKeyLength(usize, String),
+
     #[error("Invalid Winternitz type {0}")]
     InvalidWinternitzType(String),
+    
+    #[error("Extra data in Winternitz Public Key missing {0}")]
+    ExtraDataMissing(String),
 }

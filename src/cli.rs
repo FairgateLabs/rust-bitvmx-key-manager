@@ -103,6 +103,9 @@ enum Commands {
         #[arg(value_name = "message", short = 'm', long = "message")]
         message: String,
 
+        #[arg(value_name = "message_digits_len", short = 'l', long = "message_digits_length")]
+        message_digits_length: usize,
+
         #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
         winternitz_type: String,
 
@@ -173,8 +176,8 @@ impl Cli {
                 self.verify_schnorr_signature(signature, message, public_key)?;
             }
 
-            Commands::VerifyWinternitz {message, winternitz_type, signature, key_index} => {
-                self.verify_winternitz_signature(signature, message, *key_index, winternitz_type)?;
+            Commands::VerifyWinternitz {message, message_digits_length, winternitz_type, signature, key_index} => {
+                self.verify_winternitz_signature(signature, message, *message_digits_length, *key_index, winternitz_type)?;
             }
 
             Commands::RandomMessage { size } => {
@@ -309,12 +312,12 @@ impl Cli {
         Ok(())
     }
     
-    fn verify_winternitz_signature(&self, signature: &str, message: &str, key_index: u32, winternitz_type: &str) -> Result<()> {
+    fn verify_winternitz_signature(&self, signature: &str, message: &str, message_digits_length: usize, key_index: u32, winternitz_type: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
         let key_type = self.get_witnernitz_type(winternitz_type)?;
 
         let signature_bytes = hex::decode(signature).map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
-        let signature = WinternitzSignature::from_bytes(&signature_bytes, key_type).map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
+        let signature = WinternitzSignature::from_bytes(&signature_bytes, message_digits_length, key_type).map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
 
         let message_bytes = hex::decode(message)?;
 
@@ -328,9 +331,9 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_public_key(&self, master_xpub: &String, key_index: &u32) -> Result<(), anyhow::Error> {
+    fn derive_public_key(&self, master_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
         let mut key_manager = self.key_manager()?;
-        let master_xpub = Xpub::from_str(&master_xpub)?;
+        let master_xpub = Xpub::from_str(master_xpub)?;
         let public_key = key_manager.derive_public_key(master_xpub, *key_index)?;
         info!("Derived public key: {}", public_key);
         Ok(())

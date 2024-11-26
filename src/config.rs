@@ -8,7 +8,7 @@ use crate::errors::ConfigError;
 static DEFAULT_ENV: &str = "development";
 static CONFIG_PATH: &str = "config";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct KeyManagerConfig {
     pub network: String,
     pub key_derivation_seed: String,
@@ -16,13 +16,13 @@ pub struct KeyManagerConfig {
     pub winternitz_seed: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub password: String,
     pub path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)] // enforce strict field compliance
 pub struct Config {
     pub key_manager: KeyManagerConfig,

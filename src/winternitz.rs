@@ -62,7 +62,7 @@ impl FromStr for WinternitzType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WinternitzHash {
     hash: Vec<u8>,
 }
@@ -91,7 +91,7 @@ impl WinternitzHash {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WinternitzSignature {
     hashes: Vec<WinternitzHash>,
     digits: Vec<u8>,
@@ -212,7 +212,7 @@ impl WinternitzSignature {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtraData {
     message_size: usize,
     checksum_size: usize,
@@ -241,7 +241,7 @@ impl ExtraData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WinternitzPublicKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
@@ -363,6 +363,7 @@ impl WinternitzPublicKey {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct WinternitzPrivateKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,

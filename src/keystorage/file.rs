@@ -1,6 +1,14 @@
-use std::{collections::HashMap, fs::{File, OpenOptions}, io::{Cursor, Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{Cursor, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+};
 
-use bitcoin::{hashes::{self, Hash}, Network, PrivateKey, PublicKey};
+use bitcoin::{
+    hashes::{self, Hash},
+    Network, PrivateKey, PublicKey,
+};
 use cocoon::Cocoon;
 
 use crate::errors::KeyStoreError;
@@ -15,10 +23,11 @@ const KEY_DERIVATION_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted bip3
 const KEY_COUNT_POSITION: u64 = 0; // Position for the key count
 const WINTERNITZ_SEED_POSITION: u64 = KEY_COUNT_SIZE as u64; // Position for the Winternitz seed
 const KEY_DERIVATION_SEED_POSITION: u64 = (KEY_COUNT_SIZE + WINTERNITZ_SEED_SIZE) as u64; // Position for the bip32 key derivation seed
-const ENTRIES_START_POSITION: u64 = (KEY_COUNT_SIZE + WINTERNITZ_SEED_SIZE + KEY_DERIVATION_SEED_SIZE) as u64; // Position for the first entry
+const ENTRIES_START_POSITION: u64 =
+    (KEY_COUNT_SIZE + WINTERNITZ_SEED_SIZE + KEY_DERIVATION_SEED_SIZE) as u64; // Position for the first entry
 
 pub struct FileKeyStore {
-    path: PathBuf, 
+    path: PathBuf,
     network: Network,
     index: HashMap<String, u32>,
     key_count: u32,
@@ -26,8 +35,12 @@ pub struct FileKeyStore {
 }
 
 impl KeyStore for FileKeyStore {
-    fn store_keypair(&mut self, private_key: PrivateKey, public_key: PublicKey) -> Result<(), KeyStoreError> {
-        let encoded = self.encode_entry(private_key, public_key);  
+    fn store_keypair(
+        &mut self,
+        private_key: PrivateKey,
+        public_key: PublicKey,
+    ) -> Result<(), KeyStoreError> {
+        let encoded = self.encode_entry(private_key, public_key);
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         self.write_entry(&entry)?;
@@ -39,7 +52,10 @@ impl KeyStore for FileKeyStore {
         Ok(())
     }
 
-    fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> {
+    fn load_keypair(
+        &self,
+        public_key: &PublicKey,
+    ) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> {
         let key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
         let index = self.index.get(&key);
 
@@ -51,49 +67,46 @@ impl KeyStore for FileKeyStore {
         Ok(Some(entry))
     }
 
-    fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError>{
+    fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
-        self.update_entry_at(&entry, WINTERNITZ_SEED_POSITION)?;       
+        self.update_entry_at(&entry, WINTERNITZ_SEED_POSITION)?;
 
         Ok(())
     }
 
-    fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError>{
+    fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
-        self.update_entry_at(&entry, KEY_DERIVATION_SEED_POSITION)?;       
+        self.update_entry_at(&entry, KEY_DERIVATION_SEED_POSITION)?;
 
         Ok(())
     }
 
     fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let mut storage = OpenOptions::new()
-            .read(true)
-            .open(&self.path)?;
-    
+        let mut storage = OpenOptions::new().read(true).open(&self.path)?;
+
         storage.seek(SeekFrom::Start(WINTERNITZ_SEED_POSITION))?;
-    
+
         let mut entry: [u8; WINTERNITZ_SEED_SIZE as usize] = [0; WINTERNITZ_SEED_SIZE as usize];
         let read_amount = storage.read(&mut entry)?;
 
         assert_eq!(read_amount, WINTERNITZ_SEED_SIZE as usize);
-    
+
         let encoded = self.decrypt_entry(entry.to_vec())?;
 
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 
     fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyStoreError> {
-        let mut storage = OpenOptions::new()
-            .read(true)
-            .open(&self.path)?;
-    
+        let mut storage = OpenOptions::new().read(true).open(&self.path)?;
+
         storage.seek(SeekFrom::Start(KEY_DERIVATION_SEED_POSITION))?;
-    
-        let mut entry: [u8; KEY_DERIVATION_SEED_SIZE as usize] = [0; KEY_DERIVATION_SEED_SIZE as usize];
+
+        let mut entry: [u8; KEY_DERIVATION_SEED_SIZE as usize] =
+            [0; KEY_DERIVATION_SEED_SIZE as usize];
         let read_amount = storage.read(&mut entry)?;
 
         assert_eq!(read_amount, KEY_DERIVATION_SEED_SIZE as usize);
-    
+
         let encoded = self.decrypt_entry(entry.to_vec())?;
 
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
@@ -101,19 +114,23 @@ impl KeyStore for FileKeyStore {
 }
 
 impl FileKeyStore {
-    pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, KeyStoreError> {
-        let mut key_storage = FileKeyStore { 
-            path: path.as_ref().to_path_buf(), 
-            network, 
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        password: Vec<u8>,
+        network: Network,
+    ) -> Result<Self, KeyStoreError> {
+        let mut key_storage = FileKeyStore {
+            path: path.as_ref().to_path_buf(),
+            network,
             index: HashMap::new(),
             key_count: 0,
             password: password.to_vec(),
         };
-        
+
         key_storage.restore()?;
         Ok(key_storage)
     }
-    
+
     fn restore_from_file(&mut self) -> Result<(), KeyStoreError> {
         let entry = self.read_key_count()?;
         let encoded = self.decrypt_key_count(entry)?;
@@ -135,7 +152,7 @@ impl FileKeyStore {
         self.decode_entry(encoded.to_vec())
     }
 
-    fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, KeyStoreError>{
+    fn read_encrypted(&self, entry_index: u32) -> Result<Vec<u8>, KeyStoreError> {
         let position = ENTRIES_START_POSITION + (entry_index * ENTRY_SIZE) as u64;
 
         let mut storage = File::open(&self.path)?;
@@ -163,9 +180,7 @@ impl FileKeyStore {
     }
 
     fn read_key_count(&self) -> Result<Vec<u8>, KeyStoreError> {
-        let mut storage = OpenOptions::new()
-            .read(true)
-            .open(&self.path)?;
+        let mut storage = OpenOptions::new().read(true).open(&self.path)?;
 
         storage.seek(SeekFrom::Start(KEY_COUNT_POSITION))?;
 
@@ -184,7 +199,7 @@ impl FileKeyStore {
         Ok(())
     }
 
-    fn update_entry_at(&self, entry: &[u8], position: u64) -> Result<(), KeyStoreError>{
+    fn update_entry_at(&self, entry: &[u8], position: u64) -> Result<(), KeyStoreError> {
         let mut storage = OpenOptions::new()
             .read(true)
             .write(true)
@@ -193,11 +208,11 @@ impl FileKeyStore {
             .open(&self.path)?;
 
         storage.seek(SeekFrom::Start(position))?;
-        let write_amount = storage.write(entry)?; 
+        let write_amount = storage.write(entry)?;
 
         assert_eq!(write_amount, entry.len());
         Ok(())
-    } 
+    }
 
     fn encode_entry(&self, sk: PrivateKey, pk: PublicKey) -> Vec<u8> {
         let private_key_bytes = sk.to_bytes();
@@ -208,7 +223,7 @@ impl FileKeyStore {
         encoded.extend_from_slice(&private_key_bytes);
 
         encoded
-    }   
+    }
 
     fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey), KeyStoreError> {
         let public_key_bytes = &data[0..33];
@@ -220,10 +235,12 @@ impl FileKeyStore {
         Ok((private_key, public_key))
     }
 
-    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, KeyStoreError>{
+    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, KeyStoreError> {
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; size as usize]);
         let mut cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.dump(entry, &mut entry_cursor).map_err( |error| KeyStoreError::FailedToEncryptData{ error })?;
+        cocoon
+            .dump(entry, &mut entry_cursor)
+            .map_err(|error| KeyStoreError::FailedToEncryptData { error })?;
         Ok(entry_cursor.into_inner())
     }
 
@@ -231,14 +248,18 @@ impl FileKeyStore {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })
+        cocoon
+            .parse(&mut entry_cursor)
+            .map_err(|error| KeyStoreError::FailedToDecryptData { error })
     }
 
     fn decrypt_key_count(&self, count: Vec<u8>) -> Result<[u8; 4], KeyStoreError> {
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(count);
         let cocoon = Cocoon::new(self.password.as_slice());
-        let encoded = cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })?;
-        
+        let encoded = cocoon
+            .parse(&mut entry_cursor)
+            .map_err(|error| KeyStoreError::FailedToDecryptData { error })?;
+
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 

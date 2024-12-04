@@ -1,7 +1,7 @@
 use config as settings;
 use serde::Deserialize;
-use tracing::warn;
 use std::env;
+use tracing::warn;
 
 use crate::errors::ConfigError;
 
@@ -36,13 +36,14 @@ impl Config {
     }
 
     fn get_env() -> String {
-        env::var("BITVMX_ENV")
-            .unwrap_or_else(|_| {
-                let default_env = DEFAULT_ENV.to_string();
-                warn!("BITVMX_ENV not set. Using default environment: {}", default_env);
+        env::var("BITVMX_ENV").unwrap_or_else(|_| {
+            let default_env = DEFAULT_ENV.to_string();
+            warn!(
+                "BITVMX_ENV not set. Using default environment: {}",
                 default_env
-            }
-        )
+            );
+            default_env
+        })
     }
 
     fn parse_config(env: String) -> Result<Config, ConfigError> {
@@ -53,7 +54,8 @@ impl Config {
             .build()
             .map_err(ConfigError::ConfigFileError)?;
 
-        settings.try_deserialize::<Config>()
+        settings
+            .try_deserialize::<Config>()
             .map_err(ConfigError::ConfigFileError)
     }
 }

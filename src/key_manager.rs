@@ -1,9 +1,20 @@
 use std::str::FromStr;
 
-use bitcoin::{bip32::{DerivationPath, Xpriv, Xpub}, key::{rand::Rng, Keypair, TapTweak, TweakedKeypair}, secp256k1::{self, All, Message, Scalar, SecretKey}, Network, PrivateKey, PublicKey};
+use bitcoin::{
+    bip32::{DerivationPath, Xpriv, Xpub},
+    key::{rand::Rng, Keypair, TapTweak, TweakedKeypair},
+    secp256k1::{self, All, Message, Scalar, SecretKey},
+    Network, PrivateKey, PublicKey,
+};
 use itertools::izip;
 
-use crate::{errors::KeyManagerError, keystorage::keystore::KeyStore, winternitz::{self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType}};
+use crate::{
+    errors::KeyManagerError,
+    keystorage::keystore::KeyStore,
+    winternitz::{
+        self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
+    },
+};
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -16,8 +27,14 @@ pub struct KeyManager<K: KeyStore> {
     keystore: K,
 }
 
-impl <K: KeyStore> KeyManager<K> {
-    pub fn new(network: Network, key_derivation_path: &str, key_derivation_seed: [u8; 32], winternitz_seed: [u8; 32], keystore: K) -> Result<Self, KeyManagerError> {
+impl<K: KeyStore> KeyManager<K> {
+    pub fn new(
+        network: Network,
+        key_derivation_path: &str,
+        key_derivation_seed: [u8; 32],
+        winternitz_seed: [u8; 32],
+        keystore: K,
+    ) -> Result<Self, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
         keystore.store_winternitz_seed(winternitz_seed)?;
@@ -31,7 +48,7 @@ impl <K: KeyStore> KeyManager<K> {
         })
     }
 
-    pub fn import_private_key(&mut self, private_key: &str)-> Result<PublicKey, KeyManagerError> {
+    pub fn import_private_key(&mut self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
@@ -43,7 +60,10 @@ impl <K: KeyStore> KeyManager<K> {
     /*********************************/
     /******* Key Generation **********/
     /*********************************/
-    pub fn generate_keypair<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Result<PublicKey, KeyManagerError> {
+    pub fn generate_keypair<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+    ) -> Result<PublicKey, KeyManagerError> {
         let private_key = self.generate_private_key(self.network, rng);
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
@@ -63,7 +83,8 @@ impl <K: KeyStore> KeyManager<K> {
     pub fn derive_keypair(&mut self, index: u32) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path =
+            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -75,33 +96,60 @@ impl <K: KeyStore> KeyManager<K> {
         Ok(public_key)
     }
 
-    pub fn derive_public_key(&mut self, master_xpub: Xpub, index: u32) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_public_key(
+        &mut self,
+        master_xpub: Xpub,
+        index: u32,
+    ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path = DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path =
+            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
         Ok(xpub.to_pub().into())
     }
 
-    pub fn derive_winternitz(&mut self, message_size_in_bytes: usize, key_type: WinternitzType, index: u32) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
+    pub fn derive_winternitz(
+        &mut self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        index: u32,
+    ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let winternitz = winternitz::Winternitz::new();
-        let public_key = winternitz.generate_public_key(&master_secret, key_type, message_digits_length, checksum_size, index)?;
+        let public_key = winternitz.generate_public_key(
+            &master_secret,
+            key_type,
+            message_digits_length,
+            checksum_size,
+            index,
+        )?;
 
         Ok(public_key)
     }
 
-    pub fn get_priv_key(&mut self, message_size_in_bytes: usize, key_type: WinternitzType, index: u32) -> Result<winternitz::WinternitzPrivateKey, KeyManagerError> {
+    pub fn get_priv_key(
+        &mut self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        index: u32,
+    ) -> Result<winternitz::WinternitzPrivateKey, KeyManagerError> {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let winternitz = winternitz::Winternitz::new();
-        let private_key = winternitz.generate_private_key(&master_secret, key_type, message_digits_length, checksum_size, index)?;
+        let private_key = winternitz.generate_private_key(
+            &master_secret,
+            key_type,
+            message_digits_length,
+            checksum_size,
+            index,
+        )?;
 
         Ok(private_key)
     }
@@ -114,7 +162,11 @@ impl <K: KeyStore> KeyManager<K> {
     /*********************************/
     /*********** Signing *************/
     /*********************************/
-    pub fn sign_ecdsa_message(&self, message: &Message, public_key: &PublicKey) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
+    pub fn sign_ecdsa_message(
+        &self,
+        message: &Message,
+        public_key: &PublicKey,
+    ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
@@ -123,13 +175,14 @@ impl <K: KeyStore> KeyManager<K> {
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
     }
 
-    pub fn sign_ecdsa_messages(&self, messages: Vec<Message>, public_keys: Vec<PublicKey>) -> Result<Vec<secp256k1::ecdsa::Signature>, KeyManagerError> {
+    pub fn sign_ecdsa_messages(
+        &self,
+        messages: Vec<Message>,
+        public_keys: Vec<PublicKey>,
+    ) -> Result<Vec<secp256k1::ecdsa::Signature>, KeyManagerError> {
         let mut signatures = Vec::new();
 
-        for (message, public_key) in izip!(
-            messages.iter(),
-            public_keys.iter(),
-        ) {
+        for (message, public_key) in izip!(messages.iter(), public_keys.iter(),) {
             let signature = self.sign_ecdsa_message(message, public_key)?;
             signatures.push(signature);
         }
@@ -138,7 +191,11 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     // For taproot script spend
-    pub fn sign_schnorr_message(&self, message: &Message, public_key: &PublicKey) -> Result<secp256k1::schnorr::Signature, KeyManagerError>{
+    pub fn sign_schnorr_message(
+        &self,
+        message: &Message,
+        public_key: &PublicKey,
+    ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
@@ -150,7 +207,11 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     // For taproot key spend
-    pub fn sign_schnorr_message_with_tap_tweak(&self, message: &Message, public_key: &PublicKey) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError>{
+    pub fn sign_schnorr_message_with_tap_tweak(
+        &self,
+        message: &Message,
+        public_key: &PublicKey,
+    ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
@@ -160,30 +221,42 @@ impl <K: KeyStore> KeyManager<K> {
 
         let tweaked_keypair: TweakedKeypair = keypair.tap_tweak(&self.secp, None);
         let keypair = tweaked_keypair.to_inner();
-        Ok((self.secp.sign_schnorr(message, &keypair), PublicKey::new(keypair.public_key())))
+        Ok((
+            self.secp.sign_schnorr(message, &keypair),
+            PublicKey::new(keypair.public_key()),
+        ))
     }
 
-        // For taproot key spend with tweak
-        pub fn sign_schnorr_message_with_tweak(&self, message: &Message, public_key: &PublicKey, tweak: &Scalar) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError>{
-            let (sk, _) = match self.keystore.load_keypair(public_key)? {
-                Some(entry) => entry,
-                None => return Err(KeyManagerError::EntryNotFound),
-            };
+    // For taproot key spend with tweak
+    pub fn sign_schnorr_message_with_tweak(
+        &self,
+        message: &Message,
+        public_key: &PublicKey,
+        tweak: &Scalar,
+    ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
+        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+            Some(entry) => entry,
+            None => return Err(KeyManagerError::EntryNotFound),
+        };
 
-            let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
-            let tweaked_keypair = keypair.add_xonly_tweak(&self.secp, tweak)?;
+        let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
+        let tweaked_keypair = keypair.add_xonly_tweak(&self.secp, tweak)?;
 
-            Ok((self.secp.sign_schnorr(message, &tweaked_keypair), PublicKey::new(keypair.public_key())))
-        }
+        Ok((
+            self.secp.sign_schnorr(message, &tweaked_keypair),
+            PublicKey::new(keypair.public_key()),
+        ))
+    }
 
     // For taproot script spend
-    pub fn sign_schnorr_messages(&self, messages: Vec<Message>, public_keys: Vec<PublicKey>) -> Result<Vec<secp256k1::schnorr::Signature>, KeyManagerError> {
+    pub fn sign_schnorr_messages(
+        &self,
+        messages: Vec<Message>,
+        public_keys: Vec<PublicKey>,
+    ) -> Result<Vec<secp256k1::schnorr::Signature>, KeyManagerError> {
         let mut signatures = Vec::new();
 
-        for (message, public_key) in izip!(
-            messages.iter(),
-            public_keys.iter(),
-        ) {
+        for (message, public_key) in izip!(messages.iter(), public_keys.iter(),) {
             let signature = self.sign_schnorr_message(message, public_key)?;
             signatures.push(signature);
         }
@@ -192,7 +265,12 @@ impl <K: KeyStore> KeyManager<K> {
     }
 
     // For one-time winternitz keys
-    pub fn sign_winternitz_message(&self, message_bytes : &[u8], key_type: WinternitzType, index:u32, ) -> Result<WinternitzSignature, KeyManagerError> {
+    pub fn sign_winternitz_message(
+        &self,
+        message_bytes: &[u8],
+        key_type: WinternitzType,
+        index: u32,
+    ) -> Result<WinternitzSignature, KeyManagerError> {
         let message_digits_length = winternitz::message_digits_length(message_bytes.len());
         let checksummed_message = to_checksummed_message(message_bytes);
         let checksum_size = checksum_length(message_digits_length);
@@ -202,21 +280,36 @@ impl <K: KeyStore> KeyManager<K> {
 
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
-        let private_key = winternitz.generate_private_key(&master_secret, key_type, message_size, checksum_size, index)?;
+        let private_key = winternitz.generate_private_key(
+            &master_secret,
+            key_type,
+            message_size,
+            checksum_size,
+            index,
+        )?;
 
-        let signature = winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
+        let signature =
+            winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
         Ok(signature)
     }
-
 }
 
 #[cfg(test)]
 mod tests {
+    use bitcoin::{
+        key::rand::{self, RngCore},
+        secp256k1::{self, Message, SecretKey},
+        Network, PrivateKey, PublicKey,
+    };
     use std::{env, panic, str::FromStr};
-    use bitcoin::{key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}, Network, PrivateKey, PublicKey};
 
-    use crate::{errors::{KeyManagerError, KeyStoreError, WinternitzError}, keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore}, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}};
+    use crate::{
+        errors::{KeyManagerError, KeyStoreError, WinternitzError},
+        keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore},
+        verifier::SignatureVerifier,
+        winternitz::{to_checksummed_message, WinternitzType},
+    };
 
     use super::KeyManager;
 
@@ -268,7 +361,8 @@ mod tests {
         let pk = key_manager.generate_keypair(&mut rng)?;
 
         let message = random_message();
-        let (signature, tweaked_key) = key_manager.sign_schnorr_message_with_tap_tweak(&message, &pk)?;
+        let (signature, tweaked_key) =
+            key_manager.sign_schnorr_message_with_tap_tweak(&message, &pk)?;
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
@@ -283,8 +377,9 @@ mod tests {
 
         let message = random_message();
 
-        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::SHA256, 0)?;
-        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)?;
+        let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0)?;
+        let signature =
+            key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
@@ -301,8 +396,9 @@ mod tests {
         let digest: [u8; 32] = [0xFE; 32];
         let message = Message::from_digest(digest);
 
-        let pk = key_manager.derive_winternitz( message[..].len(), WinternitzType::HASH160, 0)?;
-        let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
+        let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 0)?;
+        let signature =
+            key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
 
         println!("Pk size: {:?}", pk.total_len());
         println!("Msg: {:?}", &message[..]);
@@ -403,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_keystore_index() -> Result<(), KeyManagerError>{
+    fn test_keystore_index() -> Result<(), KeyManagerError> {
         let path = temp_storage();
         let password = b"secret password".to_vec();
         let secp = secp256k1::Secp256k1::new();
@@ -450,7 +546,10 @@ mod tests {
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
-        assert!(matches!(result, Err(KeyManagerError::FailedToParsePrivateKey(_))));
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::FailedToParsePrivateKey(_))
+        ));
 
         // Case 2: Invalid derivation path
         let invalid_derivation_path = "m/44'/invalid'";
@@ -467,11 +566,19 @@ mod tests {
         assert!(matches!(result, Err(KeyStoreError::WriteError(_))));
 
         // Case 4: Index overflow when generating keys
-        let result = key_manager.derive_winternitz( message[..].len(), WinternitzType::HASH160, u32::MAX);
-        assert!(matches!(result, Err(KeyManagerError::WinternitzGenerationError(WinternitzError::IndexOverflow))));
+        let result =
+            key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, u32::MAX);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::WinternitzGenerationError(
+                WinternitzError::IndexOverflow
+            ))
+        ));
 
         // Case 5: Entry not found for public key
-        let fake_public_key = PublicKey::from_str("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")?;
+        let fake_public_key = PublicKey::from_str(
+            "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        )?;
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
@@ -505,7 +612,6 @@ mod tests {
 
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
     }
-
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
@@ -572,12 +678,12 @@ mod tests {
     }
 
     fn file_keystore(storage_path: &str) -> Result<FileKeyStore, KeyStoreError> {
-        let password =  b"secret password".to_vec();
+        let password = b"secret password".to_vec();
         FileKeyStore::new(storage_path, password, Network::Regtest)
     }
 
     fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreError> {
-        let password =  b"secret password".to_vec();
+        let password = b"secret password".to_vec();
         DatabaseKeyStore::new(storage_path, password, Network::Regtest)
     }
 
@@ -600,6 +706,9 @@ mod tests {
         let index = rng.next_u32();
 
         let storage_path = dir.join(format!("keystore_{}.db", index));
-        storage_path.to_str().expect("Failed to get path to temp file").to_string()
+        storage_path
+            .to_str()
+            .expect("Failed to get path to temp file")
+            .to_string()
     }
 }

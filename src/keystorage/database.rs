@@ -14,7 +14,6 @@ const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database fo
 const KEY_DERIVATION_SEED_SIZE: u32 = 92; // Size in bytes of the encrypted bip32 key derivation seed
 const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
 
-
 pub struct DatabaseKeyStore {
     db: rocksdb::DB,
     network: Network,
@@ -22,8 +21,12 @@ pub struct DatabaseKeyStore {
 }
 
 impl KeyStore for DatabaseKeyStore {
-    fn store_keypair(&mut self, private_key: PrivateKey, public_key: PublicKey) -> Result<(), KeyStoreError>{
-        let encoded = self.encode_entry(private_key, public_key);  
+    fn store_keypair(
+        &mut self,
+        private_key: PrivateKey,
+        public_key: PublicKey,
+    ) -> Result<(), KeyStoreError> {
+        let encoded = self.encode_entry(private_key, public_key);
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         let key = public_key.to_string();
@@ -32,9 +35,12 @@ impl KeyStore for DatabaseKeyStore {
         Ok(())
     }
 
-    fn load_keypair(&self, public_key: &PublicKey) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> { 
+    fn load_keypair(
+        &self,
+        public_key: &PublicKey,
+    ) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> {
         let key = public_key.to_string();
-        let entry = match self.db.get(key)?{
+        let entry = match self.db.get(key)? {
             Some(entry) => {
                 let encoded = self.decrypt_entry(entry)?;
                 self.decode_entry(encoded.to_vec())
@@ -72,25 +78,29 @@ impl KeyStore for DatabaseKeyStore {
             Some(entry) => entry,
             None => return Err(KeyStoreError::KeyDerivationSeedNotFound),
         };
-        
+
         let encoded = self.decrypt_entry(entry)?;
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 }
 
 impl DatabaseKeyStore {
-    pub fn new<P: AsRef<Path>>(path: P, password: Vec<u8>, network: Network) -> Result<Self, KeyStoreError> {
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        password: Vec<u8>,
+        network: Network,
+    ) -> Result<Self, KeyStoreError> {
         let mut opts = Options::default();
         opts.create_if_missing(true);
 
         let db = rocksdb::DB::open(&opts, path.as_ref())?;
-        
-        let key_storage = DatabaseKeyStore { 
-            db, 
-            network, 
+
+        let key_storage = DatabaseKeyStore {
+            db,
+            network,
             password: password.to_vec(),
         };
-        
+
         Ok(key_storage)
     }
 
@@ -105,10 +115,12 @@ impl DatabaseKeyStore {
         encoded
     }
 
-    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, KeyStoreError>{
+    fn encrypt_entry(&self, entry: Vec<u8>, size: u32) -> Result<Vec<u8>, KeyStoreError> {
         let mut entry_cursor: Cursor<Vec<u8>> = Cursor::new(vec![0; size as usize]);
         let mut cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.dump(entry, &mut entry_cursor).map_err( |error| KeyStoreError::FailedToEncryptData{ error })?;
+        cocoon
+            .dump(entry, &mut entry_cursor)
+            .map_err(|error| KeyStoreError::FailedToEncryptData { error })?;
         Ok(entry_cursor.into_inner())
     }
 
@@ -116,7 +128,9 @@ impl DatabaseKeyStore {
         let mut entry_cursor = Cursor::new(entry);
 
         let cocoon = Cocoon::new(self.password.as_slice());
-        cocoon.parse(&mut entry_cursor).map_err( |error| KeyStoreError::FailedToDecryptData{ error })
+        cocoon
+            .parse(&mut entry_cursor)
+            .map_err(|error| KeyStoreError::FailedToDecryptData { error })
     }
 
     fn decode_entry(&self, data: Vec<u8>) -> Result<(PrivateKey, PublicKey), KeyStoreError> {

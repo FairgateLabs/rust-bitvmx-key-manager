@@ -49,7 +49,7 @@ fn main() {
         "Winternitz public key: {:?}",
         hex::encode(winternitz_key.to_bytes())
     );
-    winternitz_key.checksum_size();
+    let _ = winternitz_key.checksum_size();
 
     // --- Signing and verifying a message using Winternitz
 

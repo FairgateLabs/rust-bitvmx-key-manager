@@ -13,9 +13,9 @@ fn main() -> Result<()> {
         Err(e) => {
             error!("{:?}", e);
             std::process::exit(1);
-        },
+        }
     };
-    
+
     if let Err(e) = cli.run() {
         error!("{:?}", e);
         std::process::exit(1);

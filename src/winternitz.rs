@@ -117,7 +117,7 @@ impl WinternitzSignature {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8], message_digits: usize, hash_type: WinternitzType) -> Result<Self, WinternitzError> {   
+    pub fn from_bytes(bytes: &[u8], message_digits: usize, hash_type: WinternitzType) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
         if bytes.len() % hash_size != 0 {
@@ -136,7 +136,7 @@ impl WinternitzSignature {
         Ok(signature)
     }
 
-    pub fn from_hashes_and_digits(hashes: &[u8], checksummed_digits: &[u8], message_length: usize, hash_type: WinternitzType) -> Result<Self, WinternitzError> {   
+    pub fn from_hashes_and_digits(hashes: &[u8], checksummed_digits: &[u8], message_length: usize, hash_type: WinternitzType) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
         if hashes.len() % hash_size != 0 {
@@ -281,7 +281,7 @@ impl WinternitzPublicKey {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8], hash_type: WinternitzType) -> Result<Self, WinternitzError> {   
+    pub fn from_bytes(bytes: &[u8], hash_type: WinternitzType) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
         if bytes.len() % hash_size != 0 {
@@ -342,7 +342,7 @@ impl WinternitzPublicKey {
         let checksum_size = self.extra_data.as_ref().ok_or(
             WinternitzError::ExtraDataMissing("checksum_size".to_string())
         )?.checksum_size;
-        
+
         Ok(checksum_size)
     }
 
@@ -350,20 +350,20 @@ impl WinternitzPublicKey {
         let derivation_index = self.extra_data.as_ref().ok_or(
             WinternitzError::ExtraDataMissing("derivation_index".to_string())
         )?.derivation_index;
-        
+
         Ok(derivation_index)
     }
 
     pub fn base(&self) -> usize {
         W
     }
-    
+
     pub fn bits_per_digit(&self) -> u32 {
         NBITS as u32
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WinternitzPrivateKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
@@ -385,19 +385,19 @@ impl WinternitzPrivateKey {
 
     pub fn public_key(&self) -> Result<WinternitzPublicKey, WinternitzError> {
         let mut public_key = WinternitzPublicKey::new(
-            self.hash_type, 
+            self.hash_type,
             Some(ExtraData::new(self.message_size, self.checksum_size, self.derivation_index)
         ));
 
         for h in self.hashes.iter() {
             let mut hashed_pk = h.clone(); // Start with sks as hashed_pk
-            
+
             for _ in 0..W {
                 hashed_pk = self.hash_type.hash(&hashed_pk);
             }
-           
+
             public_key.push_hash(hashed_pk)?;
-        }  
+        }
 
         Ok(public_key)
     }
@@ -470,7 +470,7 @@ impl Winternitz {
         }
     }
 
-    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32) -> Result<WinternitzPublicKey, WinternitzError> {        
+    pub fn generate_public_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32) -> Result<WinternitzPublicKey, WinternitzError> {
         let private_key = self.generate_private_key(master_secret, key_type, message_size, checksum_size, derivation_index)?;
         let public_key = WinternitzPublicKey::from(private_key)?;
 
@@ -479,14 +479,14 @@ impl Winternitz {
 
     pub fn generate_private_key(&self, master_secret: &[u8], key_type: WinternitzType, message_size: usize, checksum_size: usize, derivation_index: u32) -> Result<WinternitzPrivateKey, WinternitzError> {
         let private_key = self.generate_hashes(master_secret, key_type, message_size, checksum_size, derivation_index)?;
-        
+
         Ok(private_key)
     }
 
     pub fn sign_message(&self, message_digits: usize, checksummed_message: &[u8], private_key: &WinternitzPrivateKey) -> WinternitzSignature {
         let mut signature = WinternitzSignature::new(message_digits);
         let key_type = private_key.key_type();
-        
+
         for (i, digit) in checksummed_message.iter().enumerate() {
             let mut hashed_val = private_key.hash_at(i);
             for _ in 0..(W - (*digit as usize)) {
@@ -495,7 +495,7 @@ impl Winternitz {
 
             signature.push_hash(hashed_val);
             signature.push_digit(*digit);
-        }   
+        }
 
         signature
     }
@@ -507,7 +507,7 @@ impl Winternitz {
         );
 
         let key_type = public_key.key_type();
-        
+
         for (i, digit) in checksummed_message.iter().enumerate() {
             let mut hashed_val = signature.hash_at(i);
             for _ in 0..(*digit as usize) {
@@ -535,7 +535,7 @@ impl Winternitz {
 
     fn generate_hash(&self, master_secret: &[u8], key_size: usize, index: u32, internal_index: u32)-> WinternitzHash {
         let mut engine = HmacEngine::<sha256::Hash>::new(master_secret);
-        let input = [index.to_le_bytes(), internal_index.to_le_bytes()].concat();   
+        let input = [index.to_le_bytes(), internal_index.to_le_bytes()].concat();
         engine.input(&input);
 
         let hash = Hmac::<sha256::Hash>::from_engine(engine);
@@ -544,9 +544,9 @@ impl Winternitz {
 }
 
 pub fn to_checksummed_message(message_bytes: &[u8]) -> Vec<u8> {
-    let mut message_digits = to_message_digits(message_bytes); 
+    let mut message_digits = to_message_digits(message_bytes);
     let mut checksummed = calculate_checksum(&message_digits);
-    
+
     checksummed.append(&mut message_digits);
     checksummed.reverse();
     checksummed

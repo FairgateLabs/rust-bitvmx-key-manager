@@ -11,7 +11,7 @@ pub const W: usize = 2usize.pow(NBITS as u32) -1; // Winternitz parameter (times
 pub const SHA256_SIZE: usize = 32;
 pub const RIPEMD160_SIZE: usize = 20;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Hash)]
 pub enum WinternitzType {
     SHA256,
     HASH160,
@@ -62,7 +62,7 @@ impl FromStr for WinternitzType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct WinternitzHash {
     hash: Vec<u8>,
 }
@@ -91,7 +91,7 @@ impl WinternitzHash {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct WinternitzSignature {
     hashes: Vec<WinternitzHash>,
     digits: Vec<u8>,
@@ -363,7 +363,7 @@ impl WinternitzPublicKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct WinternitzPrivateKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,

@@ -33,7 +33,7 @@ impl SignatureVerifier {
         let checksummed_message = to_checksummed_message(message_bytes);
         
         let winternitz = Winternitz::new();        
-        winternitz.verify_signature(&checksummed_message, signature, public_key).is_ok()
+        winternitz.verify_signature(&checksummed_message, signature, public_key).unwrap_or(false)
 
         // verification && (my_msg_with_checksum == message_with_checksum)
     }

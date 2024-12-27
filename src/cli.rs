@@ -5,7 +5,7 @@ use anyhow::{Ok, Result};
 use bitcoin::{bip32::Xpub, key::rand::RngCore, secp256k1::{self, Message}, Network, PublicKey};
 use clap::{Parser, Subcommand};
 use tracing::info;
-use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}};
+use crate::{config::Config, errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore, verifier::SignatureVerifier, winternitz::WinternitzSignature};
 use hex;
 
 pub struct Cli {
@@ -206,9 +206,8 @@ impl Cli {
 
     fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize, index: u32) -> Result<()>{
         let mut key_manager = self.key_manager()?;
-        let key_type = self.get_witnernitz_type(winternitz_type)?;
         
-        let public_key = key_manager.derive_winternitz(msg_len_bytes, key_type, index)?;
+        let public_key = key_manager.derive_winternitz(msg_len_bytes, winternitz_type.parse()?, index)?;
 
         info!("New key pair created of Winternitz Key. Public key is: {}", hex::encode(public_key.to_bytes()));
 
@@ -233,11 +232,10 @@ impl Cli {
 
     fn sign_winternitz(&self, message: &str, winternitz_type: &str, key_index: u32) -> Result<()>{
         let key_manager = self.key_manager()?;
-        let key_type = self.get_witnernitz_type(winternitz_type)?;
 
         let message_bytes = hex::decode(message)?;
     
-        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), key_type, key_index)?;
+        let signature = key_manager.sign_winternitz_message(message_bytes.as_slice(), winternitz_type.parse()?, key_index)?;
 
         info!("Winternitz Message signed. Signature is: {}", hex::encode(signature.to_bytes()));
 
@@ -314,7 +312,7 @@ impl Cli {
     
     fn verify_winternitz_signature(&self, signature: &str, message: &str, message_digits_length: usize, key_index: u32, winternitz_type: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
-        let key_type = self.get_witnernitz_type(winternitz_type)?;
+        let key_type = winternitz_type.parse()?;
 
         let signature_bytes = hex::decode(signature).map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
         let signature = WinternitzSignature::from_bytes(&signature_bytes, message_digits_length, key_type).map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
@@ -358,14 +356,6 @@ impl Cli {
         )?;
 
         Ok(key_manager)
-    }
-
-    fn get_witnernitz_type(&self, winternitz_type: &str) -> Result<WinternitzType> {
-        match winternitz_type {
-            "sha256" => Ok(WinternitzType::SHA256),
-            "ripemd160" => Ok(WinternitzType::HASH160),
-            _ => Err(CliError::InvalidWinternitzType(winternitz_type.to_string()).into()),
-        }
     }
 
     fn get_storage_path(&self) -> Result<PathBuf> {

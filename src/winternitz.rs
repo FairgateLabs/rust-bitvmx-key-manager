@@ -363,7 +363,7 @@ impl WinternitzPublicKey {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WinternitzPrivateKey {
     hashes: Vec<WinternitzHash>,
     hash_type: WinternitzType,
@@ -455,13 +455,8 @@ impl WinternitzPrivateKey {
     }
 }
 
+#[derive(Default)]
 pub struct Winternitz {
-}
-
-impl Default for Winternitz {
-    fn default() -> Self {
-        Winternitz::new()
-    }
 }
 
 impl Winternitz {
@@ -619,3 +614,4 @@ fn to_digits(mut number: u32, number_of_digits: usize) -> Vec<u8> {
     digits.resize(number_of_digits, 0);
     digits
 }
+

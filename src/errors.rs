@@ -36,10 +36,10 @@ pub enum KeyStoreError {
     OpenError,
 
     #[error("Failed to write secure storage")]
-    WriteError(#[from] rocksdb::Error),
+    WriteError(#[from] storage_backend::error::StorageError),
 
     #[error("Failed to read secure storage")]
-    ReadError(rocksdb::Error),
+    ReadError(storage_backend::error::StorageError),
 
     #[error("Failed to decode data")]
     FailedToDecodeData(#[from] FromSliceError),

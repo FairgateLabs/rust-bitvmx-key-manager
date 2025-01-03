@@ -17,7 +17,7 @@ pub struct KeyManager<K: KeyStore> {
 }
 
 impl <K: KeyStore> KeyManager<K> {
-    pub fn new(network: Network, key_derivation_path: &str, key_derivation_seed: [u8; 32], winternitz_seed: [u8; 32], keystore: K) -> Result<Self, KeyManagerError> {
+    pub fn new(network: Network, key_derivation_path: &str, key_derivation_seed: [u8; 32], winternitz_seed: [u8; 32], mut keystore: K) -> Result<Self, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
         keystore.store_winternitz_seed(winternitz_seed)?;

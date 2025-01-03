@@ -45,7 +45,7 @@ impl KeyStore for DatabaseKeyStore {
         Ok(Some(entry?))
     }
 
-    fn store_winternitz_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
+    fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), WINTERNITZ_SEED_SIZE)?;
         self.db.set(WINTERNITZ_KEY, entry, None)?;
         Ok(())
@@ -61,7 +61,7 @@ impl KeyStore for DatabaseKeyStore {
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 
-    fn store_key_derivation_seed(&mut self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
+    fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyStoreError> {
         let entry = self.encrypt_entry(seed.to_vec(), KEY_DERIVATION_SEED_SIZE)?;
         self.db.set(KEY_DERIVATION_SEED_KEY, entry, None)?;
         Ok(())

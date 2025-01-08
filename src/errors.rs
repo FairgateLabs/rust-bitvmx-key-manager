@@ -51,14 +51,10 @@ pub enum KeyStoreError {
     FailedToDecodePublicKey(#[from] bitcoin::key::FromSliceError),
 
     #[error("Failed to encrypt data")]
-    FailedToEncryptData {
-        error: cocoon::Error,
-    },
+    FailedToEncryptData { error: cocoon::Error },
 
     #[error("Failed to decrypt data")]
-    FailedToDecryptData {
-        error: cocoon::Error,
-    },
+    FailedToDecryptData { error: cocoon::Error },
 
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
@@ -83,7 +79,7 @@ pub enum CliError {
 
     #[error("Invalid Winternitz Type: {0}")]
     InvalidWinternitzType(String),
-    
+
     #[error("Invalid Configuration File: {0}")]
     InvalidConfigFile(String),
 
@@ -97,7 +93,7 @@ pub enum ConfigError {
     ConfigFileError(#[from] settings::ConfigError),
 
     #[error("Winternitz seed is invalid")]
-    InvalidWinternitzSeed,  
+    InvalidWinternitzSeed,
 
     #[error("Key derivation seed is invalid")]
     InvalidKeyDerivationSeed,
@@ -119,7 +115,7 @@ pub enum WinternitzError {
 
     #[error("Invalid Winternitz type {0}")]
     InvalidWinternitzType(String),
-    
+
     #[error("Extra data in Winternitz Public Key missing {0}")]
     ExtraDataMissing(String),
 }

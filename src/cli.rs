@@ -1,16 +1,17 @@
-use std::{path::PathBuf, str::FromStr};
+use std::str::FromStr;
 
 use anyhow::{Ok, Result};
 
 use crate::{
-    config::Config, errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore,
+    config::Config, create_file_key_store_from_config, create_key_manager_from_config,
+    errors::CliError, key_manager::KeyManager, keystorage::file::FileKeyStore,
     verifier::SignatureVerifier, winternitz::WinternitzSignature,
 };
 use bitcoin::{
     bip32::Xpub,
     key::rand::RngCore,
     secp256k1::{self, Message},
-    Network, PublicKey,
+    PublicKey,
 };
 use clap::{Parser, Subcommand};
 use hex;
@@ -443,54 +444,14 @@ impl Cli {
     }
 
     fn key_manager(&self) -> Result<KeyManager<FileKeyStore>> {
-        let key_derivation_seed = self.get_key_derivation_seed()?;
-        let key_derivation_path = &self.config.key_manager.key_derivation_path;
-        let winternitz_seed = self.get_winternitz_seed()?;
-        let network = Network::from_str(self.config.key_manager.network.as_str())?;
-        let path = self.get_storage_path()?;
-        let password: Vec<u8> = self.config.storage.password.as_bytes().to_vec();
-
-        let keystore = FileKeyStore::new(path, password, Network::Regtest)?;
-
-        let key_manager = KeyManager::new(
-            network,
-            key_derivation_path,
-            key_derivation_seed,
-            winternitz_seed,
-            keystore,
+        let keystore = create_file_key_store_from_config(
+            &self.config.storage,
+            &self.config.key_manager.network,
         )?;
-
-        Ok(key_manager)
-    }
-
-    fn get_storage_path(&self) -> Result<PathBuf> {
-        Ok(PathBuf::from(&self.config.storage.path))
-    }
-
-    fn get_winternitz_seed(&self) -> Result<[u8; 32]> {
-        let winternitz_seed = hex::decode(self.config.key_manager.winternitz_seed.clone())?;
-
-        if winternitz_seed.len() > 32 {
-            return Err(CliError::BadArgument {
-                msg: "Winternitz secret length must be 32 bytes".to_string(),
-            }
-            .into());
-        }
-
-        Ok(winternitz_seed.as_slice().try_into()?)
-    }
-
-    fn get_key_derivation_seed(&self) -> Result<[u8; 32]> {
-        let key_derivation_seed = hex::decode(self.config.key_manager.key_derivation_seed.clone())?;
-
-        if key_derivation_seed.len() > 32 {
-            return Err(CliError::BadArgument {
-                msg: "Key derivation seed length must be 32 bytes".to_string(),
-            }
-            .into());
-        }
-
-        Ok(key_derivation_seed.as_slice().try_into()?)
+        Ok(create_key_manager_from_config(
+            &self.config.key_manager,
+            keystore,
+        )?)
     }
 
     fn get_random_bytes(&self, size: usize) -> Vec<u8> {

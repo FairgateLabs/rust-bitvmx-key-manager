@@ -25,6 +25,9 @@ pub enum KeyManagerError {
 
     #[error("Entry not found for public key")]
     EntryNotFound,
+
+    #[error("Error in configuration")]
+    ConfigError(#[from] ConfigError),
 }
 
 #[derive(Error, Debug)]
@@ -97,6 +100,9 @@ pub enum ConfigError {
 
     #[error("Key derivation seed is invalid")]
     InvalidKeyDerivationSeed,
+
+    #[error("Network is invalid")]
+    InvalidNetwork,
 }
 
 #[derive(Error, Debug)]

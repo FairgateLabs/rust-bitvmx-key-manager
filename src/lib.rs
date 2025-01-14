@@ -5,7 +5,7 @@ use bitcoin::Network;
 use config::{KeyManagerConfig, StorageConfig};
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
-use keystorage::{file::FileKeyStore, keystore::KeyStore};
+use keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore};
 
 pub mod cli;
 pub mod config;
@@ -15,14 +15,30 @@ pub mod keystorage;
 pub mod verifier;
 pub mod winternitz;
 
+fn decode_data(
+    store_config: &StorageConfig,
+    network: &str,
+) -> Result<(PathBuf, Vec<u8>, Network), KeyManagerError> {
+    let path = PathBuf::from(&store_config.path);
+    let password: Vec<u8> = store_config.password.as_bytes().to_vec();
+    let network = Network::from_str(network).map_err(|_| ConfigError::InvalidNetwork)?;
+    Ok((path, password, network))
+}
+
 pub fn create_file_key_store_from_config(
     store_config: &StorageConfig,
     network: &str,
 ) -> Result<FileKeyStore, KeyManagerError> {
-    let path = PathBuf::from(&store_config.path);
-    let password: Vec<u8> = store_config.password.as_bytes().to_vec();
-    let network = Network::from_str(network).map_err(|_| ConfigError::InvalidNetwork)?;
+    let (path, password, network) = decode_data(store_config, network)?;
     Ok(FileKeyStore::new(path, password, network)?)
+}
+
+pub fn create_database_key_store_from_config(
+    store_config: &StorageConfig,
+    network: &str,
+) -> Result<DatabaseKeyStore, KeyManagerError> {
+    let (path, password, network) = decode_data(store_config, network)?;
+    Ok(DatabaseKeyStore::new(path, password, network)?)
 }
 
 pub fn create_key_manager_from_config<K: KeyStore>(

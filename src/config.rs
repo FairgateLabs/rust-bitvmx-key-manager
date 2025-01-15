@@ -17,7 +17,7 @@ pub struct KeyManagerConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct StorageConfig {
+pub struct KeyStorageConfig {
     pub password: String,
     pub path: String,
 }
@@ -26,7 +26,7 @@ pub struct StorageConfig {
 #[serde(deny_unknown_fields)] // enforce strict field compliance
 pub struct Config {
     pub key_manager: KeyManagerConfig,
-    pub storage: StorageConfig,
+    pub storage: KeyStorageConfig,
 }
 
 impl Config {

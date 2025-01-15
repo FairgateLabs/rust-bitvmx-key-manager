@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use bitcoin::Network;
-use config::{KeyManagerConfig, StorageConfig};
+use config::{KeyManagerConfig, KeyStorageConfig};
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
 use keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore};
@@ -16,7 +16,7 @@ pub mod verifier;
 pub mod winternitz;
 
 fn decode_data(
-    store_config: &StorageConfig,
+    store_config: &KeyStorageConfig,
     network: &str,
 ) -> Result<(PathBuf, Vec<u8>, Network), KeyManagerError> {
     let path = PathBuf::from(&store_config.path);
@@ -26,7 +26,7 @@ fn decode_data(
 }
 
 pub fn create_file_key_store_from_config(
-    store_config: &StorageConfig,
+    store_config: &KeyStorageConfig,
     network: &str,
 ) -> Result<FileKeyStore, KeyManagerError> {
     let (path, password, network) = decode_data(store_config, network)?;
@@ -34,7 +34,7 @@ pub fn create_file_key_store_from_config(
 }
 
 pub fn create_database_key_store_from_config(
-    store_config: &StorageConfig,
+    store_config: &KeyStorageConfig,
     network: &str,
 ) -> Result<DatabaseKeyStore, KeyManagerError> {
     let (path, password, network) = decode_data(store_config, network)?;

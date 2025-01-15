@@ -4,7 +4,7 @@ use crate::errors::KeyStoreError;
 
 pub trait KeyStore {
     fn store_keypair(
-        &mut self,
+        &self,
         private_key: PrivateKey,
         public_key: PublicKey,
     ) -> Result<(), KeyStoreError>;

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{Cursor, Read, Seek, SeekFrom, Write},
@@ -29,14 +30,22 @@ const ENTRIES_START_POSITION: u64 =
 pub struct FileKeyStore {
     path: PathBuf,
     network: Network,
-    index: HashMap<String, u32>,
-    key_count: u32,
+    index: RefCell<HashMap<String, u32>>,
+    key_count: RefCell<u32>,
     password: Vec<u8>,
+}
+impl FileKeyStore {
+    fn get_key_count(&self) -> u32 {
+        *self.key_count.borrow()
+    }
+    fn get_value(&self, key: &str) -> Option<u32> {
+        self.index.borrow().get(key).copied()
+    }
 }
 
 impl KeyStore for FileKeyStore {
     fn store_keypair(
-        &mut self,
+        &self,
         private_key: PrivateKey,
         public_key: PublicKey,
     ) -> Result<(), KeyStoreError> {
@@ -44,9 +53,9 @@ impl KeyStore for FileKeyStore {
         let entry = self.encrypt_entry(encoded, ENTRY_SIZE)?;
 
         self.write_entry(&entry)?;
-        self.update_index(public_key, self.key_count);
+        self.update_index(public_key, self.get_key_count());
 
-        self.key_count += 1;
+        *self.key_count.borrow_mut() += 1;
         self.update_key_count()?;
 
         Ok(())
@@ -57,7 +66,7 @@ impl KeyStore for FileKeyStore {
         public_key: &PublicKey,
     ) -> Result<Option<(PrivateKey, PublicKey)>, KeyStoreError> {
         let key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
-        let index = self.index.get(&key);
+        let index = self.get_value(&key);
 
         let entry = match index {
             Some(index) => self.read_entry(index.to_owned())?,
@@ -119,11 +128,11 @@ impl FileKeyStore {
         password: Vec<u8>,
         network: Network,
     ) -> Result<Self, KeyStoreError> {
-        let mut key_storage = FileKeyStore {
+        let key_storage = FileKeyStore {
             path: path.as_ref().to_path_buf(),
             network,
-            index: HashMap::new(),
-            key_count: 0,
+            index: RefCell::new(HashMap::new()),
+            key_count: RefCell::new(0),
             password: password.to_vec(),
         };
 
@@ -131,14 +140,14 @@ impl FileKeyStore {
         Ok(key_storage)
     }
 
-    fn restore_from_file(&mut self) -> Result<(), KeyStoreError> {
+    fn restore_from_file(&self) -> Result<(), KeyStoreError> {
         let entry = self.read_key_count()?;
         let encoded = self.decrypt_key_count(entry)?;
         let index: u32 = u32::from_be_bytes(encoded);
 
-        self.key_count = index;
+        *self.key_count.borrow_mut() = index;
 
-        for i in 0..self.key_count {
+        for i in 0..index {
             self.restore_index(i)?;
         }
 
@@ -166,7 +175,7 @@ impl FileKeyStore {
         Ok(entry.to_vec())
     }
 
-    fn write_entry(&mut self, entry: &[u8]) -> Result<(), KeyStoreError> {
+    fn write_entry(&self, entry: &[u8]) -> Result<(), KeyStoreError> {
         let mut storage = OpenOptions::new()
             .append(true)
             .create(true)
@@ -192,8 +201,8 @@ impl FileKeyStore {
         Ok(entry.to_vec())
     }
 
-    fn update_key_count(&mut self) -> Result<(), KeyStoreError> {
-        let encoded = self.key_count.to_be_bytes().to_vec();
+    fn update_key_count(&self) -> Result<(), KeyStoreError> {
+        let encoded = self.get_key_count().to_be_bytes().to_vec();
         let count = self.encrypt_entry(encoded, KEY_COUNT_SIZE)?;
         self.update_entry_at(&count, KEY_COUNT_POSITION)?;
         Ok(())
@@ -263,20 +272,20 @@ impl FileKeyStore {
         encoded.try_into().map_err(|_| KeyStoreError::CorruptedData)
     }
 
-    fn update_index(&mut self, public_key: PublicKey, position: u32) {
+    fn update_index(&self, public_key: PublicKey, position: u32) {
         let pk_key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
-        self.index.insert(pk_key, position);
+        self.index.borrow_mut().insert(pk_key, position);
     }
 
-    fn restore_index(&mut self, entry_index: u32) -> Result<(), KeyStoreError> {
+    fn restore_index(&self, entry_index: u32) -> Result<(), KeyStoreError> {
         let (_, public_key) = self.read_entry(entry_index)?;
 
         let pk_key = hashes::sha256::Hash::hash(public_key.to_string().as_bytes()).to_string();
-        self.index.insert(pk_key, entry_index);
+        self.index.borrow_mut().insert(pk_key, entry_index);
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<(), KeyStoreError> {
+    fn restore(&self) -> Result<(), KeyStoreError> {
         if Path::new(&self.path).exists() {
             self.restore_from_file()?;
         } else {

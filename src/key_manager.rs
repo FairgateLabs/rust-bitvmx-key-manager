@@ -80,7 +80,7 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(master_xpub)
     }
 
-    pub fn derive_keypair(&mut self, index: u32) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_keypair(&self, index: u32) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
         let derivation_path =

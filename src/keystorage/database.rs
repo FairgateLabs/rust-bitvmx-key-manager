@@ -22,7 +22,7 @@ pub struct DatabaseKeyStore {
 
 impl KeyStore for DatabaseKeyStore {
     fn store_keypair(
-        &mut self,
+        &self,
         private_key: PrivateKey,
         public_key: PublicKey,
     ) -> Result<(), KeyStoreError> {

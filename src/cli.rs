@@ -150,7 +150,7 @@ impl Cli {
             }
 
             Commands::NewMasterXpub => {
-                let mut key_manager = self.key_manager()?;
+                let key_manager = self.key_manager()?;
                 let xpub = key_manager.generate_master_xpub()?;
                 info!("Master Xpub: {}", xpub);
             }
@@ -241,7 +241,7 @@ impl Cli {
     // Commands
     //
     fn generate_key(&self) -> Result<()> {
-        let mut key_manager = self.key_manager()?;
+        let key_manager = self.key_manager()?;
         let mut rng = secp256k1::rand::thread_rng();
 
         let pk = key_manager.generate_keypair(&mut rng)?;
@@ -260,7 +260,7 @@ impl Cli {
         msg_len_bytes: usize,
         index: u32,
     ) -> Result<()> {
-        let mut key_manager = self.key_manager()?;
+        let key_manager = self.key_manager()?;
 
         let public_key =
             key_manager.derive_winternitz(msg_len_bytes, winternitz_type.parse()?, index)?;
@@ -337,7 +337,7 @@ impl Cli {
     }
 
     fn derive_keypair(&self, key_index: u32) -> Result<()> {
-        let mut key_manager = self.key_manager()?;
+        let key_manager = self.key_manager()?;
 
         let pk = key_manager.derive_keypair(key_index)?;
 
@@ -436,7 +436,7 @@ impl Cli {
     }
 
     fn derive_public_key(&self, master_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
-        let mut key_manager = self.key_manager()?;
+        let key_manager = self.key_manager()?;
         let master_xpub = Xpub::from_str(master_xpub)?;
         let public_key = key_manager.derive_public_key(master_xpub, *key_index)?;
         info!("Derived public key: {}", public_key);

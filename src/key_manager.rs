@@ -48,7 +48,7 @@ impl<K: KeyStore> KeyManager<K> {
         })
     }
 
-    pub fn import_private_key(&mut self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
+    pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
@@ -61,7 +61,7 @@ impl<K: KeyStore> KeyManager<K> {
     /******* Key Generation **********/
     /*********************************/
     pub fn generate_keypair<R: Rng + ?Sized>(
-        &mut self,
+        &self,
         rng: &mut R,
     ) -> Result<PublicKey, KeyManagerError> {
         let private_key = self.generate_private_key(self.network, rng);
@@ -72,7 +72,7 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(public_key)
     }
 
-    pub fn generate_master_xpub(&mut self) -> Result<Xpub, KeyManagerError> {
+    pub fn generate_master_xpub(&self) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
         let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
@@ -97,7 +97,7 @@ impl<K: KeyStore> KeyManager<K> {
     }
 
     pub fn derive_public_key(
-        &mut self,
+        &self,
         master_xpub: Xpub,
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
@@ -109,7 +109,7 @@ impl<K: KeyStore> KeyManager<K> {
     }
 
     pub fn derive_winternitz(
-        &mut self,
+        &self,
         message_size_in_bytes: usize,
         key_type: WinternitzType,
         index: u32,
@@ -297,7 +297,7 @@ mod tests {
     fn test_sign_ecdsa_message() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
 
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_sign_schnorr_message() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn test_sign_winternitz_message_sha256() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_sign_winternitz_message_ripemd160() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_derive_key() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let pk_1 = key_manager.derive_keypair(0)?;
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn test_key_generation() -> Result<(), KeyManagerError> {
         let keystore = database_keystore(&temp_storage())?;
-        let mut key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore)?;
         let mut rng = secp256k1::rand::thread_rng();
 
         let message = random_message();
@@ -446,7 +446,7 @@ mod tests {
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
 
-        let mut keystore = FileKeyStore::new(path, password, Network::Regtest)?;
+        let keystore = FileKeyStore::new(path, password, Network::Regtest)?;
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
@@ -483,7 +483,7 @@ mod tests {
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
 
-        let mut keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
+        let keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn test_signature_with_bip32_derivation() {
         let keystore = database_keystore(&temp_storage()).unwrap();
-        let mut key_manager = test_key_manager(keystore).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
         let keystore = database_keystore(&temp_storage()).unwrap();
-        let mut key_manager = test_key_manager(keystore).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -622,10 +622,10 @@ mod tests {
     #[test]
     fn test_key_derivation_from_xpub_in_different_key_manager() {
         let keystore = database_keystore(&temp_storage()).unwrap();
-        let mut key_manager_1 = test_key_manager(keystore).unwrap();
+        let key_manager_1 = test_key_manager(keystore).unwrap();
 
         let keystore = database_keystore(&temp_storage()).unwrap();
-        let mut key_manager_2 = test_key_manager(keystore).unwrap();
+        let key_manager_2 = test_key_manager(keystore).unwrap();
 
         for i in 0..5 {
             // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index

@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::{Ok, Result};
+use bitvmx_settings::settings::ConfigurationFile;
 
 use crate::{
     config::Config, create_file_key_store_from_config, create_key_manager_from_config,
@@ -27,6 +28,9 @@ pub struct Cli {
 pub struct Menu {
     #[command(subcommand)]
     command: Commands,
+
+    #[clap(flatten)]
+    configuration: ConfigurationFile,
 }
 
 #[derive(Subcommand)]
@@ -137,7 +141,10 @@ enum Commands {
 
 impl Cli {
     pub fn new() -> Result<Self> {
-        let config = Config::new()?;
+        let menu = Menu::parse();
+        let config = bitvmx_settings::settings::load_config_file::<Config>(
+            menu.configuration.configuration,
+        )?;
         Ok(Self { config })
     }
 

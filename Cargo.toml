@@ -3,7 +3,11 @@ name = "bitvmx-key-manager"
 description = "A library for managing the collection of keys for the BitVMX protocol transactions"
 version = "0.0.1"
 edition = "2021"
-authors = ["Diego Masini <diego.masini@gmail.com>", "Tomas Szejnfeld Sirkis", "Kevin Wahle"]
+authors = [
+    "Diego Masini <diego.masini@gmail.com>",
+    "Tomas Szejnfeld Sirkis",
+    "Kevin Wahle",
+]
 repository = "https://github.com/FairgateLabs/rust-bitvmx-key-manager"
 
 [lib]
@@ -11,8 +15,8 @@ name = "key_manager"
 
 [dependencies]
 anyhow = "1.0.86"
-bitcoin = { version = "0.32.1", features = ["std", "rand-std"]}
-clap = {version = "4.5.10", features = ["derive"]}
+bitcoin = { version = "0.32.1", features = ["std", "rand-std"] }
+clap = { version = "4.5.10", features = ["derive"] }
 cocoon = "0.4.2"
 config = "0.14.0"
 console = "0.15.8"
@@ -23,7 +27,8 @@ thiserror = "1.0.63"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 hex = "0.4.3"
-rust-bitvmx-storage-backend = {path = "../rust-bitvmx-storage-backend"}
+rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
+bitvmx-settings = { path = "../rust-bitvmx-settings" }
 
 [[bin]]
 name = "key-manager"

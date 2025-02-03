@@ -16,6 +16,8 @@ use crate::{
     },
 };
 
+use musig2::{sign_partial, AggNonce, KeyAggContext, PartialSignature, SecNonce};
+
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
 /// using ECDSA, Schnorr and Winternitz algorithms. The key manager uses a secure storage mechanism
@@ -269,6 +271,25 @@ impl<K: KeyStore> KeyManager<K> {
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
         Ok(signature)
+    }
+
+    pub fn sign_partial_message(
+        &self,
+        my_public_key: musig2::secp256k1::PublicKey,
+        key_agg_ctx: &KeyAggContext,
+        secnonce: SecNonce,
+        aggregated_nonce: AggNonce,
+        message: Vec<u8>,
+    ) -> Result<PartialSignature, KeyManagerError> {
+        let my_public_key = PublicKey::from_str(my_public_key.to_string().as_str()).unwrap();
+
+        let (private_key, _) = self.keystore.load_keypair(&my_public_key)?.ok_or(KeyManagerError::EntryNotFound)?;
+        
+        let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+            .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+       
+        sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
+            .map_err(|_| KeyManagerError::FailedToSignMessage)
     }
 }
 

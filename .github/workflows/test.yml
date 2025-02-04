@@ -16,11 +16,20 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    steps:    
+    steps:
+    - name: Set up Git credentials for key manager
+      run: |
+        git config --global url."https://${{ secrets.REPO_ACCESS_TOKEN }}:x-oauth-basic@github.com/FairgateLabs/".insteadOf "https://github.com/FairgateLabs/"
     - name: Checkout rust-bitvmx-key-manager
       uses: actions/checkout@v4
       with:
+        path: main
         submodules: true
+    - name: Checkout rust-bitvmx-settings
+      uses: actions/checkout@v4
+      with:
+        repository: FairgateLabs/rust-bitvmx-settings
+        path: rust-bitvmx-settings
     
     - name: Cache Cargo dependencies
       uses: actions/cache@v3

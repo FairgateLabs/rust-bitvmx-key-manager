@@ -29,7 +29,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: FairgateLabs/rust-bitvmx-settings
+        ref: main
         path: rust-bitvmx-settings
+        submodules: true
     
     - name: Cache Cargo dependencies
       uses: actions/cache@v3

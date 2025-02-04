@@ -28,6 +28,12 @@ pub enum KeyManagerError {
 
     #[error("Error in configuration")]
     ConfigError(#[from] ConfigError),
+
+    #[error("Failed to sign message")]
+    FailedToSignMessage,
+
+    #[error("Invalid private key")]
+    InvalidPrivateKey,
 }
 
 #[derive(Error, Debug)]

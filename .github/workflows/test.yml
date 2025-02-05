@@ -1,5 +1,4 @@
 name: 'Test action'
-
 on:
   push:
     branches: [ "main" ]
@@ -10,39 +9,16 @@ env:
   CARGO_TERM_COLOR: always
 
 concurrency:
-  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}' 
   cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout rust-bitvmx-key-manager
-      uses: actions/checkout@v4
-      with:
-        path: main
-        submodules: true
-    - name: Checkout rust-bitvmx-settings
-      uses: actions/checkout@v4
-      with:
-        repository: FairgateLabs/rust-bitvmx-settings
-        token: ${{ secrets.REPO_ACCESS_TOKEN }}
-        ref: main
-        path: rust-bitvmx-settings
-        submodules: true
-    
-    - name: Cache Cargo dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          ./target
-          ./Cargo.lock
-        key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-        
-    - name: Build project
-      run: cargo build --verbose
-
-    - name: Run tests
-      run: cargo test --verbose
+    if: ${{ !contains(github.event.pull_request.title, '[cov]') }}
+    uses: FairgateLabs/rust-bitvmx-workspace/.github/workflows/test_template.yml@main
+    with:
+      repo: 'FairgateLabs/rust-bitvmx-workspace'
+      submodule_path: 'rust-bitvmx-key-manager'
+      cargo_lock_path: 'rust-bitvmx-key-manager/Cargo.lock'
+      target_path: 'rust-bitvmx-key-manager/target'
+    secrets: inherit

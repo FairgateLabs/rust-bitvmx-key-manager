@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
+    hashes::{self, Hash},
     key::{rand::Rng, Keypair, TapTweak, TweakedKeypair},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey,
@@ -275,28 +276,53 @@ impl<K: KeyStore> KeyManager<K> {
 
     pub fn sign_partial_message(
         &self,
-        my_public_key: musig2::secp256k1::PublicKey,
+        pub_key: musig2::secp256k1::PublicKey,
         key_agg_ctx: &KeyAggContext,
         secnonce: SecNonce,
         aggregated_nonce: AggNonce,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
-        let my_public_key = PublicKey::from_str(my_public_key.to_string().as_str()).unwrap();
+        let my_public_key = PublicKey::from_str(pub_key.to_string().as_str()).unwrap();
 
-        let (private_key, _) = self.keystore.load_keypair(&my_public_key)?.ok_or(KeyManagerError::EntryNotFound)?;
-        
+        let (private_key, _) = self
+            .keystore
+            .load_keypair(&my_public_key)?
+            .ok_or(KeyManagerError::EntryNotFound)?;
+
         let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
             .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
-       
+
         sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
             .map_err(|_| KeyManagerError::FailedToSignMessage)
+    }
+
+    pub fn generate_nonce_seed(
+        &self,
+        index: u32,
+        public_key: musig2::secp256k1::PublicKey,
+    ) -> Result<[u8; 32], KeyManagerError> {
+        let pub_key = PublicKey::from_str(public_key.to_string().as_str()).unwrap();
+
+        let (sk, _) = match self.keystore.load_keypair(&pub_key)? {
+            Some(entry) => entry,
+            None => return Err(KeyManagerError::EntryNotFound),
+        };
+
+        let mut data = Vec::new();
+        data.extend_from_slice(&sk.to_bytes());
+        data.extend_from_slice(&index.to_le_bytes());
+
+        let nonce_seed = hashes::sha256::Hash::hash(data.as_slice()).to_byte_array();
+
+        Ok(nonce_seed)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use bitcoin::{
-        key::rand::{self, RngCore},
+        hex::DisplayHex,
+        key::rand::{self, rngs::mock::StepRng, RngCore},
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
@@ -313,6 +339,54 @@ mod tests {
 
     const DERIVATION_PATH: &str = "m/101/1/0/0/";
     const REGTEST: Network = Network::Regtest;
+
+    #[test]
+    fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
+        let keystore = database_keystore(&temp_storage())?;
+
+        let key_manager = test_key_manager(keystore)?;
+        let mut rng = StepRng::new(1, 0);
+        let pk: PublicKey = key_manager.generate_keypair(&mut rng)?;
+
+        let mut rng = StepRng::new(2, 0);
+        let pk2: PublicKey = key_manager.generate_keypair(&mut rng)?;
+
+        let pub_key = musig2::secp256k1::PublicKey::from_str(&pk.to_string()).unwrap();
+        let pub_key2 = musig2::secp256k1::PublicKey::from_str(&pk2.to_string()).unwrap();
+
+        // Small test to check that the nonce is deterministic with the same index and public key
+        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
+        assert_eq!(
+            nonce_seed.to_lower_hex_string(),
+            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+        );
+        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
+        assert_eq!(
+            nonce_seed.to_lower_hex_string(),
+            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+        );
+
+        // Test that the nonce is different for different index
+        let nonce_seed = key_manager.generate_nonce_seed(1, pub_key)?;
+        assert_eq!(
+            nonce_seed.to_lower_hex_string(),
+            "30364fcd5b5dc41f5261219ed4db2c8b57e2a6b025852cda02e8718256661339"
+        );
+        let nonce_seed = key_manager.generate_nonce_seed(4, pub_key)?;
+        assert_eq!(
+            nonce_seed.to_lower_hex_string(),
+            "335884b6a1febb486b546cd7fd64f262dab8f0577892a7dd2fe96b501c1e5139"
+        );
+
+        // Test that the nonce is different for different public key
+        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key2)?;
+        assert_ne!(
+            nonce_seed.to_lower_hex_string(),
+            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn test_sign_ecdsa_message() -> Result<(), KeyManagerError> {

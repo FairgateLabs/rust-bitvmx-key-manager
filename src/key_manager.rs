@@ -299,11 +299,9 @@ impl<K: KeyStore> KeyManager<K> {
     pub fn generate_nonce_seed(
         &self,
         index: u32,
-        public_key: musig2::secp256k1::PublicKey,
+        public_key: PublicKey,
     ) -> Result<[u8; 32], KeyManagerError> {
-        let pub_key = PublicKey::from_str(public_key.to_string().as_str()).unwrap();
-
-        let (sk, _) = match self.keystore.load_keypair(&pub_key)? {
+        let (sk, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => return Err(KeyManagerError::EntryNotFound),
         };
@@ -346,13 +344,10 @@ mod tests {
 
         let key_manager = test_key_manager(keystore)?;
         let mut rng = StepRng::new(1, 0);
-        let pk: PublicKey = key_manager.generate_keypair(&mut rng)?;
+        let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
 
         let mut rng = StepRng::new(2, 0);
-        let pk2: PublicKey = key_manager.generate_keypair(&mut rng)?;
-
-        let pub_key = musig2::secp256k1::PublicKey::from_str(&pk.to_string()).unwrap();
-        let pub_key2 = musig2::secp256k1::PublicKey::from_str(&pk2.to_string()).unwrap();
+        let pub_key2: PublicKey = key_manager.generate_keypair(&mut rng)?;
 
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;

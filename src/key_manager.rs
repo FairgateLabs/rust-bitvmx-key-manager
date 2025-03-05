@@ -759,6 +759,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one(){
+        let keystore = database_keystore(&temp_storage()).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
+
+        let message_size_in_bytes = 32;
+        let key_type = WinternitzType::SHA256;
+        let initial_index = 0;
+        let number_of_keys: u32 = 10;
+
+        let public_keys = key_manager.derive_multiple_winternitz(
+            message_size_in_bytes,
+            key_type,
+            initial_index,
+            number_of_keys,
+        ).unwrap();
+
+        for i in 0..number_of_keys {
+            let public_key = key_manager.derive_winternitz(
+                message_size_in_bytes,
+                key_type,
+                initial_index + i,
+            ).unwrap();
+
+            assert_eq!(public_keys[i as usize], public_key);
+        }
+    }
+
     fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();

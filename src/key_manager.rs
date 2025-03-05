@@ -134,6 +134,35 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(public_key)
     }
 
+    pub fn derive_multiple_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        initial_index: u32,
+        number_of_keys: u32,
+    ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
+        let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
+        let checksum_size = checksum_length(message_digits_length);
+
+        let master_secret = self.keystore.load_winternitz_seed()?;
+
+        let mut public_keys = Vec::new();
+
+        for index in initial_index..initial_index + number_of_keys {
+            let winternitz = winternitz::Winternitz::new();
+            let public_key = winternitz.generate_public_key(
+                &master_secret,
+                key_type,
+                message_digits_length,
+                checksum_size,
+                index,
+            )?;
+            public_keys.push(public_key);
+        }
+
+        Ok(public_keys)
+    }
+
     fn generate_private_key<R: Rng + ?Sized>(&self, network: Network, rng: &mut R) -> PrivateKey {
         let secret_key = SecretKey::new(rng);
         PrivateKey::new(secret_key, network)

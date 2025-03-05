@@ -607,7 +607,7 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
-        cleanup_storage(&path);
+        cleanup_file_storage(&path);
         Ok(())
     }
 
@@ -647,7 +647,7 @@ mod tests {
 
         assert_eq!(recovered_public_key_2.to_string(), public_key.to_string());
 
-        cleanup_storage(&path);
+        cleanup_file_storage(&path);
         Ok(())
     }
 
@@ -859,6 +859,10 @@ mod tests {
 
     fn cleanup_storage(path: &str) {
         fs::remove_dir_all(path).unwrap();
+    }
+
+    fn cleanup_file_storage(path: &str) {
+        fs::remove_file(path).unwrap();
     }
 
     fn temp_storage() -> String {

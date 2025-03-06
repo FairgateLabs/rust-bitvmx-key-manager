@@ -31,6 +31,14 @@ rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 bitvmx-settings = { path = "../rust-bitvmx-settings" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 
+[dev-dependencies]
+criterion = "0.5.1"
+rand = "0.8.5"
+
 [[bin]]
 name = "key-manager"
 path = "src/main.rs"
+
+[[bench]]
+name = "winternitz_bench"
+harness = false

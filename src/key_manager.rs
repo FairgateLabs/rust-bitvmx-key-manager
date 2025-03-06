@@ -134,6 +134,35 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(public_key)
     }
 
+    pub fn derive_multiple_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        initial_index: u32,
+        number_of_keys: u32,
+    ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
+        let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
+        let checksum_size = checksum_length(message_digits_length);
+
+        let master_secret = self.keystore.load_winternitz_seed()?;
+
+        let mut public_keys = Vec::new();
+
+        for index in initial_index..initial_index + number_of_keys {
+            let winternitz = winternitz::Winternitz::new();
+            let public_key = winternitz.generate_public_key(
+                &master_secret,
+                key_type,
+                message_digits_length,
+                checksum_size,
+                index,
+            )?;
+            public_keys.push(public_key);
+        }
+
+        Ok(public_keys)
+    }
+
     fn generate_private_key<R: Rng + ?Sized>(&self, network: Network, rng: &mut R) -> PrivateKey {
         let secret_key = SecretKey::new(rng);
         PrivateKey::new(secret_key, network)
@@ -324,7 +353,7 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
-    use std::{env, panic, str::FromStr};
+    use std::{env, fs, panic, str::FromStr};
 
     use crate::{
         errors::{KeyManagerError, KeyStoreError, WinternitzError},
@@ -340,7 +369,8 @@ mod tests {
 
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
 
         let key_manager = test_key_manager(keystore)?;
         let mut rng = StepRng::new(1, 0);
@@ -380,12 +410,14 @@ mod tests {
             "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
         );
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_ecdsa_message() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
 
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
@@ -398,12 +430,14 @@ mod tests {
 
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_schnorr_message() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
@@ -415,12 +449,14 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
@@ -433,12 +469,14 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_winternitz_message_sha256() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
@@ -451,12 +489,14 @@ mod tests {
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_winternitz_message_ripemd160() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
@@ -472,12 +512,14 @@ mod tests {
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_derive_key() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
@@ -495,12 +537,14 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
         assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_key_generation() -> Result<(), KeyManagerError> {
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let key_manager = test_key_manager(keystore)?;
         let mut rng = secp256k1::rand::thread_rng();
 
@@ -525,6 +569,7 @@ mod tests {
         assert!(pk2 != pk4);
         assert!(pk5 != pk6);
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
@@ -536,7 +581,7 @@ mod tests {
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
 
-        let keystore = FileKeyStore::new(path, password, Network::Regtest)?;
+        let keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
@@ -562,6 +607,7 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
+        cleanup_file_storage(&path);
         Ok(())
     }
 
@@ -601,6 +647,7 @@ mod tests {
 
         assert_eq!(recovered_public_key_2.to_string(), public_key.to_string());
 
+        cleanup_file_storage(&path);
         Ok(())
     }
 
@@ -608,7 +655,8 @@ mod tests {
     fn test_error_handling() -> Result<(), KeyManagerError> {
         let message = random_message();
 
-        let keystore = database_keystore(&temp_storage())?;
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
         let mut key_manager = test_key_manager(keystore)?;
 
         // Case 1: Invalid private key string
@@ -650,12 +698,14 @@ mod tests {
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_signature_with_bip32_derivation() {
-        let keystore = database_keystore(&temp_storage()).unwrap();
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).unwrap();
         let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
@@ -679,11 +729,14 @@ mod tests {
         let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
 
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+
+        cleanup_storage(&keystore_path);
     }
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
-        let keystore = database_keystore(&temp_storage()).unwrap();
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).unwrap();
         let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
@@ -707,14 +760,18 @@ mod tests {
         let signature = key_manager.sign_schnorr_message(&message, &pk1).unwrap();
 
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
+
+        cleanup_storage(&keystore_path);
     }
 
     #[test]
     fn test_key_derivation_from_xpub_in_different_key_manager() {
-        let keystore = database_keystore(&temp_storage()).unwrap();
+        let keystore_path_1 = temp_storage();
+        let keystore = database_keystore(&keystore_path_1).unwrap();
         let key_manager_1 = test_key_manager(keystore).unwrap();
 
-        let keystore = database_keystore(&temp_storage()).unwrap();
+        let keystore_path_2 = temp_storage();
+        let keystore = database_keystore(&keystore_path_2).unwrap();
         let key_manager_2 = test_key_manager(keystore).unwrap();
 
         for i in 0..5 {
@@ -728,6 +785,39 @@ mod tests {
             // Both public keys must be equal
             assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
         }
+
+        cleanup_storage(&keystore_path_1);
+        cleanup_storage(&keystore_path_2);
+    }
+
+    #[test]
+    fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one(){
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
+
+        let message_size_in_bytes = 32;
+        let key_type = WinternitzType::SHA256;
+        let initial_index = 0;
+        let number_of_keys: u32 = 10;
+
+        let public_keys = key_manager.derive_multiple_winternitz(
+            message_size_in_bytes,
+            key_type,
+            initial_index,
+            number_of_keys,
+        ).unwrap();
+
+        for i in 0..number_of_keys {
+            let public_key = key_manager.derive_winternitz(
+                message_size_in_bytes,
+                key_type,
+                initial_index + i,
+            ).unwrap();
+
+            assert_eq!(public_keys[i as usize], public_key);
+        }
+        cleanup_storage(&keystore_path);
     }
 
     fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
@@ -765,6 +855,14 @@ mod tests {
         let mut seed = [0u8; 32];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
+    }
+
+    fn cleanup_storage(path: &str) {
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    fn cleanup_file_storage(path: &str) {
+        fs::remove_file(path).unwrap();
     }
 
     fn temp_storage() -> String {

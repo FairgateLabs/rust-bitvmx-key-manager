@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::Rng, Keypair, TapTweak, TweakedKeypair},
+    key::{rand::Rng, Keypair, Parity, TapTweak, TweakedKeypair},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey,
 };
@@ -91,12 +91,21 @@ impl<K: KeyStore> KeyManager<K> {
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
-        let public_key = PublicKey::new(internal_keypair.public_key());
-        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
+        let(public_key, private_key) = self.adjust_parity(internal_keypair);
 
         self.keystore.store_keypair(private_key, public_key)?;
-
         Ok(public_key)
+    }
+
+    // This method changes the parity of a keypair to be even, this is needed for Taproot.
+    fn adjust_parity(&self, keypair: Keypair) -> (PublicKey, PrivateKey) {
+        let (_, parity) = keypair.public_key().x_only_public_key();
+        
+        if parity == Parity::Odd {
+            (PublicKey::new(keypair.public_key().negate(&self.secp)), PrivateKey::new(keypair.secret_key().negate(), self.network))
+        } else {
+            (PublicKey::new(keypair.public_key()), PrivateKey::new(keypair.secret_key(), self.network))
+        }
     }
 
     pub fn derive_public_key(

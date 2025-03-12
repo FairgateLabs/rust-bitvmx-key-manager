@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::Rng, Keypair, Parity, TapTweak, TweakedKeypair},
+    key::{rand::Rng, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
@@ -110,6 +110,17 @@ impl<K: KeyStore> KeyManager<K> {
         }
     }
 
+    // This method changes the parity of a public key to be even, this is needed for Taproot.
+    fn adjust_public_key_only_parity(&self, public_key: PublicKey) -> PublicKey {
+        let (_, parity) = public_key.inner.x_only_public_key();
+        
+        if parity == Parity::Odd {
+            PublicKey::new(public_key.inner.negate(&self.secp))
+        } else {
+            public_key
+        }
+    }
+
     pub fn derive_public_key(
         &self,
         master_xpub: Xpub,
@@ -119,7 +130,8 @@ impl<K: KeyStore> KeyManager<K> {
         let derivation_path =
             DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
-        Ok(xpub.to_pub().into())
+
+        Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
     }
 
     pub fn derive_winternitz(

@@ -3,9 +3,9 @@ use std::str::FromStr;
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::Rng, Keypair, TapTweak, TweakedKeypair},
+    key::{rand::Rng, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey,
+    Network, PrivateKey, PublicKey, TapNodeHash,
 };
 use itertools::izip;
 
@@ -91,12 +91,34 @@ impl<K: KeyStore> KeyManager<K> {
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
-        let public_key = PublicKey::new(internal_keypair.public_key());
-        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
+
+        // For taproot keys
+        let(public_key, private_key) = self.adjust_parity(internal_keypair);
 
         self.keystore.store_keypair(private_key, public_key)?;
-
         Ok(public_key)
+    }
+
+    // This method changes the parity of a keypair to be even, this is needed for Taproot.
+    fn adjust_parity(&self, keypair: Keypair) -> (PublicKey, PrivateKey) {
+        let (_, parity) = keypair.public_key().x_only_public_key();
+        
+        if parity == Parity::Odd {
+            (PublicKey::new(keypair.public_key().negate(&self.secp)), PrivateKey::new(keypair.secret_key().negate(), self.network))
+        } else {
+            (PublicKey::new(keypair.public_key()), PrivateKey::new(keypair.secret_key(), self.network))
+        }
+    }
+
+    // This method changes the parity of a public key to be even, this is needed for Taproot.
+    fn adjust_public_key_only_parity(&self, public_key: PublicKey) -> PublicKey {
+        let (_, parity) = public_key.inner.x_only_public_key();
+        
+        if parity == Parity::Odd {
+            PublicKey::new(public_key.inner.negate(&self.secp))
+        } else {
+            public_key
+        }
     }
 
     pub fn derive_public_key(
@@ -108,7 +130,8 @@ impl<K: KeyStore> KeyManager<K> {
         let derivation_path =
             DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
-        Ok(xpub.to_pub().into())
+
+        Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
     }
 
     pub fn derive_winternitz(
@@ -220,6 +243,7 @@ impl<K: KeyStore> KeyManager<K> {
         &self,
         message: &Message,
         public_key: &PublicKey,
+        merkle_root: Option<TapNodeHash>
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
@@ -228,7 +252,7 @@ impl<K: KeyStore> KeyManager<K> {
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
-        let tweaked_keypair: TweakedKeypair = keypair.tap_tweak(&self.secp, None);
+        let tweaked_keypair = keypair.tap_tweak(&self.secp, merkle_root);
         let keypair = tweaked_keypair.to_inner();
         Ok((
             self.secp.sign_schnorr(message, &keypair),
@@ -465,7 +489,7 @@ mod tests {
 
         let message = random_message();
         let (signature, tweaked_key) =
-            key_manager.sign_schnorr_message_with_tap_tweak(&message, &pk)?;
+            key_manager.sign_schnorr_message_with_tap_tweak(&message, &pk, None)?;
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 

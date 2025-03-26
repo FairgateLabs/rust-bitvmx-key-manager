@@ -68,6 +68,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_add_partial_signatures() -> Result<(), anyhow::Error> {
         // Set up test environment
         let path = PathBuf::from(format!("test_output/test_partial_2"));

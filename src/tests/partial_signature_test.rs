@@ -27,7 +27,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2];
 
         musig
-            .init_musig2(musig_id, participant_pubkeys.clone(), participant_2)
+            .init(musig_id, participant_pubkeys.clone(), participant_2)
             .expect("Failed to initialize MuSig session");
 
         let index = musig.get_index(musig_id)?;
@@ -85,8 +85,8 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
-        musig.init_musig2(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
-        musig.init_musig2(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+        musig.init(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
+        musig.init(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
 
         key_manager.generate_nonce(musig_id_1, "message_1", "message_1".as_bytes().to_vec(), None)?;
         key_manager.generate_nonce(musig_id_2, "message_1", "message_1".as_bytes().to_vec(), None)?;
@@ -153,7 +153,7 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
-        musig.init_musig2(musig_id, participant_pubkeys.clone(), pub_key_part_2)?;
+        musig.init(musig_id, participant_pubkeys.clone(), pub_key_part_2)?;
 
         key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
 
@@ -168,7 +168,7 @@ mod tests {
         let other_musig_id = "other_musig_id";
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_3];
 
-        musig.init_musig2(other_musig_id, participant_pubkeys.clone(), pub_key_part_3)?;
+        musig.init(other_musig_id, participant_pubkeys.clone(), pub_key_part_3)?;
 
         key_manager.generate_nonce(other_musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
 
@@ -186,7 +186,7 @@ mod tests {
         // Add partial signature for participant 1 which is not a correct partial signature (belongs to participant 1 and 2)
         let result = musig.save_partial_signatures(
             musig_id,
-            HashMap::from([(pub_key_part_1, other_partial_signature)]),
+            HashMap::from([(pub_key_part_1, other_partial_signature.clone()), (pub_key_part_2, other_partial_signature)]),
         );
         assert!(matches!(
             result,
@@ -218,7 +218,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, my_pub_key];
 
         musig
-            .init_musig2(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .init(musig_id, participant_pubkeys.clone(), my_pub_key)
             .expect("Failed to initialize MuSig session");
 
         key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;

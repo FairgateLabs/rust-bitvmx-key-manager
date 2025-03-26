@@ -20,20 +20,20 @@
         let musig_id_2 = "2"; // Use other id for testing porpouse
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
+        musig.init(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
 
-        let aggregated_pub_key = MuSig2Signer::get_aggregated_pubkey(participant_pubkeys.clone(), None)?;
-        let aggregated_pub_key_2 = MuSig2Signer::get_aggregated_pubkey(participant_pubkeys.clone(), None)?;
+        let aggregated_pub_key = key_manager.get_aggregated_pubkey(musig_id_1, None)?;
 
         let messages = vec!["1 test message", "2 test message", "3 test message"];
-
-        musig.init_musig2(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
 
         // Generate pub nonces for all messages
         key_manager.generate_nonce(musig_id_1, messages[0], messages[0].as_bytes().to_vec(), None)?;
         key_manager.generate_nonce(musig_id_1, messages[1], messages[1].as_bytes().to_vec(), None)?;
         key_manager.generate_nonce(musig_id_1, messages[2], messages[2].as_bytes().to_vec(), None)?;
 
-        musig.init_musig2(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+        musig.init(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+
+        let aggregated_pub_key_2 = key_manager.get_aggregated_pubkey(musig_id_2, None)?;
 
         // Generate pub nonces for all messages
         key_manager.generate_nonce(musig_id_2, messages[0], messages[0].as_bytes().to_vec(), None)?;

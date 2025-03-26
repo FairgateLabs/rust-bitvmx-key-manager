@@ -338,15 +338,14 @@ impl<K: KeyStore> KeyManager<K> {
 
     pub fn sign_partial_message(
         &self,
+        id: &str,
         my_public_key:PublicKey,
-        participant_pub_keys: Vec<PublicKey>,
         secnonce: SecNonce,
         aggregated_nonce: AggNonce,
         tweak: Option<TapNodeHash>,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
-
-        let key_aggregation_context = MuSig2Signer::get_key_agg_context(participant_pub_keys.clone(), tweak).unwrap();
+        let key_aggregation_context = self.musig2.get_key_agg_context(id, tweak).unwrap();
 
         let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
@@ -355,12 +354,6 @@ impl<K: KeyStore> KeyManager<K> {
 
         let sk = match tweak {
             Some(_) => {
-                // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner).tap_tweak(&self.secp, Some(tweak)).to_inner();
-                // let tweaked_private_key = PrivateKey::new(keypair.secret_key(), self.network);
-        
-                // musig2::secp256k1::SecretKey::from_slice(&tweaked_private_key[..])
-                //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?
-
                 musig2::secp256k1::SecretKey::from_slice(&private_key[..])
                     .map_err(|_| KeyManagerError::InvalidPrivateKey)?
             }
@@ -434,7 +427,7 @@ impl<K: KeyStore> KeyManager<K> {
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
     ) -> Result<(), Musig2SignerError> {
-        self.musig2.init_musig2(id, participant_pubkeys, my_pub_key)
+        self.musig2.init(id, participant_pubkeys, my_pub_key)
     }
 
     pub fn aggregate_nonces(
@@ -488,13 +481,13 @@ impl<K: KeyStore> KeyManager<K> {
 
         let data_to_iterate = self.musig2.get_data_for_partial_signatures(id)?;
         let my_pub_key = self.musig2.my_public_key(id)?;
-        let participant_pub_keys = self.musig2.get_participant_pub_keys(id)?;
+        // let participant_pub_keys = self.musig2.get_participant_pub_keys(id)?;
 
         for (message_id, (message, sec_nonce, tweak,  aggregated_nonce)) in data_to_iterate.iter() {
             let sig = self
                 .sign_partial_message(
-                    my_pub_key,
-                    participant_pub_keys.clone(),
+                    id,
+                my_pub_key,
                     sec_nonce.clone(),
                     aggregated_nonce.clone(),
                     tweak.clone(),
@@ -539,11 +532,12 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(nonce_seed)
     }
 
-    pub fn get_aggregated_pubkey<KS: KeyStore>(
-        participant_pubkeys: Vec<PublicKey>,
+    pub fn get_aggregated_pubkey(
+        &self,
+        id: &str,
         tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError> {
-        MuSig2Signer::get_aggregated_pubkey(participant_pubkeys, tweak)
+        self.musig2.get_aggregated_pubkey(id, tweak)
     }
 }
 

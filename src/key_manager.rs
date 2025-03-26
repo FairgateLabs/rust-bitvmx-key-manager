@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashMap, rc::Rc, str::FromStr};
 
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
@@ -8,16 +8,16 @@ use bitcoin::{
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
 use itertools::izip;
+use storage_backend::storage::Storage;
+use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError,
-    keystorage::keystore::KeyStore,
-    winternitz::{
+    errors::KeyManagerError, keystorage::keystore::KeyStore, musig2::{errors::Musig2SignerError, musig::{MuSig2Signer, MuSig2SignerApi}, types::MessageId}, winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    },
+    }
 };
 
-use musig2::{sign_partial, AggNonce, KeyAggContext, PartialSignature, SecNonce};
+use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -27,6 +27,7 @@ pub struct KeyManager<K: KeyStore> {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
     key_derivation_path: String,
+    musig2: MuSig2Signer,
     keystore: K,
 }
 
@@ -37,16 +38,20 @@ impl<K: KeyStore> KeyManager<K> {
         key_derivation_seed: [u8; 32],
         winternitz_seed: [u8; 32],
         keystore: K,
+        store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
+        let musig2 = MuSig2Signer::new(store.clone());
+
         Ok(KeyManager {
             secp,
             network,
             key_derivation_path: key_derivation_path.to_string(),
+            musig2,
             keystore,
         })
     }
@@ -327,26 +332,81 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(signature)
     }
 
+    /*********************************/
+    /*********** MuSig2 **************/
+    /*********************************/
+
     pub fn sign_partial_message(
         &self,
-        pub_key: musig2::secp256k1::PublicKey,
-        key_agg_ctx: &KeyAggContext,
+        my_public_key:PublicKey,
+        participant_pub_keys: Vec<PublicKey>,
         secnonce: SecNonce,
         aggregated_nonce: AggNonce,
+        tweak: Option<TapNodeHash>,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
-        let my_public_key = PublicKey::from_str(pub_key.to_string().as_str()).unwrap();
 
-        let (private_key, _) = self
-            .keystore
-            .load_keypair(&my_public_key)?
-            .ok_or(KeyManagerError::EntryNotFound)?;
+        let key_aggregation_context = MuSig2Signer::get_key_agg_context(participant_pub_keys.clone(), tweak).unwrap();
 
-        let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
-            .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+        let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
+            Some(entry) => entry,
+            None => return Err(KeyManagerError::EntryNotFound),
+        };
 
-        sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
-            .map_err(|_| KeyManagerError::FailedToSignMessage)
+        let sk = match tweak {
+            Some(_) => {
+                // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner).tap_tweak(&self.secp, Some(tweak)).to_inner();
+                // let tweaked_private_key = PrivateKey::new(keypair.secret_key(), self.network);
+        
+                // musig2::secp256k1::SecretKey::from_slice(&tweaked_private_key[..])
+                //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?
+
+                musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+                    .map_err(|_| KeyManagerError::InvalidPrivateKey)?
+            }
+            None => musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+                .map_err(|_| KeyManagerError::InvalidPrivateKey)?
+        };
+
+        let result = sign_partial(&key_aggregation_context, sk, secnonce, &aggregated_nonce, message);
+
+        match result {
+            Ok(signature) => Ok(signature),
+            Err(e) => {
+                debug!("Failed to sign message: {:?}", e);
+                return Err(KeyManagerError::FailedToSignMessage);
+            }
+        }
+
+        // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner).tap_tweak(&self.secp, tweak).to_inner();
+        // let tweaked_private_key = PrivateKey::new(keypair.secret_key(), self.network);
+
+        // let sk = musig2::secp256k1::SecretKey::from_slice(&tweaked_private_key[..])
+        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+
+
+
+        // let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+
+        // sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
+        //     .map_err(|_| KeyManagerError::FailedToSignMessage)
+
+        // let my_public_key = PublicKey::from_str(pub_key.to_string().as_str()).unwrap();
+
+        // let (private_key, _) = self
+        //     .keystore
+        //     .load_keypair(&my_public_key)?
+        //     .ok_or(KeyManagerError::EntryNotFound)?;
+
+        // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner);
+        // let tweaked_keypair = keypair.tap_tweak(&self.secp, tweak);
+
+        // let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+
+        // sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
+        //     .map_err(|_| KeyManagerError::FailedToSignMessage)
     }
 
     pub fn generate_nonce_seed(
@@ -367,6 +427,124 @@ impl<K: KeyStore> KeyManager<K> {
 
         Ok(nonce_seed)
     }
+
+    pub fn init_musig2(
+        &self,
+        id: &str,
+        participant_pubkeys: Vec<PublicKey>,
+        my_pub_key: PublicKey,
+    ) -> Result<(), Musig2SignerError> {
+        self.musig2.init_musig2(id, participant_pubkeys, my_pub_key)
+    }
+
+    pub fn aggregate_nonces(
+        &self,
+        id: &str,
+        pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
+    ) -> Result<(), Musig2SignerError> {
+        self.musig2.aggregate_nonces(id, pub_nonces_map)
+    }
+
+    // pub fn aggregate_partial_signatures(
+    //     &self,
+    //     id: &str,
+    //     partial_signatures: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    //     key_manager: &Rc<KeyManager<K>>,
+    // ) -> Result<(), Musig2SignerError> {
+    //     self.musig2.aggregate_partial_signatures(id, partial_signatures, key_manager)
+    // }
+
+    pub fn get_my_pub_nonces(&self, id: &str) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
+        self.musig2.get_my_pub_nonces(id)
+    }
+
+    pub fn save_partial_signatures(
+        &self,
+        id: &str,
+        other_public_key: PublicKey,
+        other_partial_signatures: Vec<(MessageId, PartialSignature)>,
+    ) -> Result<Vec<(MessageId, PartialSignature)>, Musig2SignerError> {
+
+        let mut partial_signatures = HashMap::new();
+        partial_signatures.insert(other_public_key, other_partial_signatures);
+
+        let my_partial_signatures = self.get_my_partial_signatures(id)?;
+        let my_pub_key = self.musig2.my_public_key(id)?;
+
+        partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
+
+        self.musig2.save_partial_signatures(id, partial_signatures)?;
+
+        //self.musig2.get_my_partial_signatures(id, key_manager)
+
+        Ok(my_partial_signatures)
+    }
+
+    pub fn get_my_partial_signatures(
+        &self,
+        id: &str,
+    ) -> Result<Vec<(MessageId, PartialSignature)>, Musig2SignerError> {
+        let mut my_partial_signatures = Vec::new();
+
+        let data_to_iterate = self.musig2.get_data_for_partial_signatures(id)?;
+        let my_pub_key = self.musig2.my_public_key(id)?;
+        let participant_pub_keys = self.musig2.get_participant_pub_keys(id)?;
+
+        for (message_id, (message, sec_nonce, tweak,  aggregated_nonce)) in data_to_iterate.iter() {
+            let sig = self
+                .sign_partial_message(
+                    my_pub_key,
+                    participant_pub_keys.clone(),
+                    sec_nonce.clone(),
+                    aggregated_nonce.clone(),
+                    tweak.clone(),
+                    message.clone(),
+                )
+                .map_err(|_| Musig2SignerError::InvalidSignature)?;
+
+            my_partial_signatures.push((message_id.clone(), sig));
+        }
+
+        Ok(my_partial_signatures)
+    }
+
+    pub fn get_aggregated_signature(
+        &self,
+        musig_id: &str,
+        message_id: &str,
+    ) -> Result<secp256k1::schnorr::Signature, Musig2SignerError> {
+        self.musig2.get_aggregated_signature(musig_id, message_id)
+    }
+
+    pub fn generate_nonce(
+        &self,
+        musig_id: &str,
+        message_id: &str,
+        message: Vec<u8>,
+        tweak: Option<TapNodeHash>,
+    ) -> Result<(), Musig2SignerError> {
+
+        let nonce_seed = self.nonce_seed(musig_id)?;
+        self.musig2.generate_nonce(musig_id, message_id, message, tweak, nonce_seed)
+    }
+
+    pub fn nonce_seed(&self, musig_id: &str) -> Result<[u8; 32], Musig2SignerError> {
+        let index = self.musig2.get_index(musig_id)?;
+        let public_key = self.musig2.my_public_key(musig_id)?;
+
+        let nonce_seed: [u8; 32] = self
+            .generate_nonce_seed(index, public_key)
+            .map_err(|_| Musig2SignerError::NonceSeedError)?;
+    
+        Ok(nonce_seed)
+    }
+
+    pub fn get_aggregated_pubkey<KS: KeyStore>(
+        participant_pubkeys: Vec<PublicKey>,
+        tweak: Option<TapNodeHash>,
+    ) -> Result<PublicKey, Musig2SignerError> {
+        MuSig2Signer::get_aggregated_pubkey(participant_pubkeys, tweak)
+    }
 }
 
 #[cfg(test)]
@@ -377,7 +555,8 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
-    use std::{env, fs, panic, str::FromStr};
+    use storage_backend::storage::Storage;
+    use std::{env, fs, panic, path::PathBuf, rc::Rc, str::FromStr};
 
     use crate::{
         errors::{KeyManagerError, KeyStoreError, WinternitzError},
@@ -395,8 +574,11 @@ mod tests {
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
+        
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore, store)?;
         let mut rng = StepRng::new(1, 0);
         let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
 
@@ -435,6 +617,7 @@ mod tests {
         );
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -443,7 +626,10 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -455,6 +641,7 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -462,7 +649,11 @@ mod tests {
     fn test_sign_schnorr_message() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -474,6 +665,7 @@ mod tests {
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -481,7 +673,11 @@ mod tests {
     fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -494,6 +690,7 @@ mod tests {
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -501,7 +698,11 @@ mod tests {
     fn test_sign_winternitz_message_sha256() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -514,6 +715,7 @@ mod tests {
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -521,7 +723,11 @@ mod tests {
     fn test_sign_winternitz_message_ripemd160() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -537,6 +743,7 @@ mod tests {
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -544,7 +751,11 @@ mod tests {
     fn test_derive_key() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
 
         let pk_1 = key_manager.derive_keypair(0)?;
@@ -562,6 +773,7 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -569,7 +781,11 @@ mod tests {
     fn test_key_generation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store)?;
         let mut rng = secp256k1::rand::thread_rng();
 
         let message = random_message();
@@ -594,6 +810,7 @@ mod tests {
         assert!(pk5 != pk6);
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -660,7 +877,7 @@ mod tests {
 
         assert_eq!(recovered_public_key.to_string(), public_key.to_string());
 
-        // Create a second SecureStorage instance to test that the indexes are restored correctly by loading the same storage file        let password = b"secret password".to_vec();
+        // Create a second SecureStorage instance to test that the indexes are restored correctly by loading the same storage file let password = b"secret password".to_vec();
         let password = b"secret password".to_vec();
         let keystore_2 = FileKeyStore::new(&path, password, Network::Regtest)?;
 
@@ -681,7 +898,11 @@ mod tests {
 
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let mut key_manager = test_key_manager(keystore)?;
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let mut key_manager = test_key_manager(keystore, store)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -723,6 +944,7 @@ mod tests {
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -730,7 +952,11 @@ mod tests {
     fn test_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-        let key_manager = test_key_manager(keystore).unwrap();
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -755,13 +981,18 @@ mod tests {
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
     }
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-        let key_manager = test_key_manager(keystore).unwrap();
+        
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -786,17 +1017,26 @@ mod tests {
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
 
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
     }
 
     #[test]
     fn test_key_derivation_from_xpub_in_different_key_manager() {
         let keystore_path_1 = temp_storage();
         let keystore = database_keystore(&keystore_path_1).unwrap();
-        let key_manager_1 = test_key_manager(keystore).unwrap();
+
+        let store_path_1 = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path_1.clone())).unwrap());
+
+        let key_manager_1 = test_key_manager(keystore, store).unwrap();
 
         let keystore_path_2 = temp_storage();
         let keystore = database_keystore(&keystore_path_2).unwrap();
-        let key_manager_2 = test_key_manager(keystore).unwrap();
+
+        let store_path_2 = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path_2.clone())).unwrap());
+
+        let key_manager_2 = test_key_manager(keystore, store).unwrap();
 
         for i in 0..5 {
             // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
@@ -812,13 +1052,19 @@ mod tests {
 
         cleanup_storage(&keystore_path_1);
         cleanup_storage(&keystore_path_2);
+        cleanup_storage(&store_path_1);
+        cleanup_storage(&store_path_2);
     }
 
     #[test]
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one(){
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-        let key_manager = test_key_manager(keystore).unwrap();
+
+        let store_path = temp_storage();
+        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+
+        let key_manager = test_key_manager(keystore, store).unwrap();
 
         let message_size_in_bytes = 32;
         let key_type = WinternitzType::SHA256;
@@ -842,9 +1088,10 @@ mod tests {
             assert_eq!(public_keys[i as usize], public_key);
         }
         cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
     }
 
-    fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
+    fn test_key_manager<K: KeyStore>(keystore: K, store: Rc<Storage>) -> Result<KeyManager<K>, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
 
@@ -854,6 +1101,7 @@ mod tests {
             key_derivation_seed,
             winternitz_seed,
             keystore,
+            store,
         )?;
 
         Ok(key_manager)

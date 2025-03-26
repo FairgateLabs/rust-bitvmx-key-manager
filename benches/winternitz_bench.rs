@@ -1,14 +1,14 @@
-use std::{env, fs, time::Duration};
+use std::{env, fs, path::PathBuf, rc::Rc, time::Duration};
 
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{errors::{KeyManagerError, KeyStoreError}, key_manager::KeyManager, keystorage::{database::DatabaseKeyStore, keystore::KeyStore}, winternitz::WinternitzType};
-use rand::thread_rng;
+use storage_backend::storage::Storage;
 const DERIVATION_PATH: &str = "m/101/1/0/0/";
 const REGTEST: Network = Network::Regtest;
 
 
-fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManagerError> {
+fn test_key_manager<K: KeyStore>(keystore: K, store: Rc<Storage>) -> Result<KeyManager<K>, KeyManagerError> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
@@ -18,6 +18,7 @@ fn test_key_manager<K: KeyStore>(keystore: K) -> Result<KeyManager<K>, KeyManage
         key_derivation_seed,
         winternitz_seed,
         keystore,
+        store,
     )?;
 
     Ok(key_manager)
@@ -31,7 +32,7 @@ fn random_bytes() -> [u8; 32] {
 
 fn temp_storage() -> String {
     let dir = env::temp_dir();
-    let mut rng = thread_rng();
+    let mut rng = secp256k1::rand::thread_rng();
     let index = rng.next_u32();
     dir.join(format!("storage_{}.db", index)).to_str().unwrap().to_string()
 }
@@ -44,7 +45,11 @@ fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreErr
 fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
     let keystore = database_keystore(&storage_path).unwrap();
-    let key_manager = test_key_manager(keystore).unwrap();
+
+    let store_path = PathBuf::from(format!("/tmp/key_manager_storage"));
+    let store = Rc::new(Storage::new_with_path(&store_path).unwrap());
+
+    let key_manager = test_key_manager(keystore, store).unwrap();
 
     let mut criterion = Criterion::default().measurement_time(Duration::from_secs(40));
     let numbers_of_keys_to_hash = vec![2, 4, 6, 8, 10, 12, 14, 16];
@@ -70,6 +75,7 @@ fn criterion_benchmark(_c: &mut Criterion) {
     }
 
     fs::remove_dir_all(storage_path).unwrap();
+    fs::remove_dir_all(store_path).unwrap();
 }
 
 criterion_group!(benches, criterion_benchmark);

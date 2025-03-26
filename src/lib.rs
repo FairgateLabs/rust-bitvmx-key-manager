@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, rc::Rc};
 use std::str::FromStr;
 
 use bitcoin::Network;
@@ -6,12 +6,15 @@ use config::{KeyManagerConfig, KeyStorageConfig};
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
 use keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore};
+use storage_backend::storage::Storage;
 
 pub mod cli;
 pub mod config;
 pub mod errors;
 pub mod key_manager;
 pub mod keystorage;
+pub mod musig2;
+pub mod tests;
 pub mod verifier;
 pub mod winternitz;
 
@@ -44,6 +47,7 @@ pub fn create_database_key_store_from_config(
 pub fn create_key_manager_from_config<K: KeyStore>(
     key_manager_config: &KeyManagerConfig,
     keystore: K,
+    store: Rc<Storage>,
 ) -> Result<KeyManager<K>, KeyManagerError> {
     let key_derivation_seed = decode_key_derivation_seed(&key_manager_config.key_derivation_seed)?;
     let key_derivation_path = &key_manager_config.key_derivation_path;
@@ -57,6 +61,7 @@ pub fn create_key_manager_from_config<K: KeyStore>(
         key_derivation_seed,
         winternitz_seed,
         keystore,
+        store,
     )?;
 
     Ok(key_manager)

@@ -1,7 +1,8 @@
-use std::str::FromStr;
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 
 use anyhow::{Ok, Result};
 use bitvmx_settings::settings::ConfigurationFile;
+use storage_backend::storage::Storage;
 
 use crate::{
     config::Config, create_file_key_store_from_config, create_key_manager_from_config,
@@ -455,9 +456,14 @@ impl Cli {
             &self.config.storage,
             &self.config.key_manager.network,
         )?;
+
+        let path = PathBuf::from(format!("/tmp/key_manager_storage"));
+        let store = Rc::new(Storage::new_with_path(&path).unwrap());
+
         Ok(create_key_manager_from_config(
             &self.config.key_manager,
             keystore,
+            store,
         )?)
     }
 

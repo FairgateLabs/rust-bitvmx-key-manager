@@ -421,13 +421,14 @@ impl<K: KeyStore> KeyManager<K> {
         Ok(nonce_seed)
     }
 
-    pub fn init_musig2(
+    pub fn new_musig2_session(
         &self,
         id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
-    ) -> Result<(), Musig2SignerError> {
-        self.musig2.init(id, participant_pubkeys, my_pub_key)
+        tweak: Option<TapNodeHash>,
+    ) -> Result<PublicKey, Musig2SignerError> {
+        self.musig2.new_session(id, participant_pubkeys, my_pub_key, tweak)
     }
 
     pub fn aggregate_nonces(

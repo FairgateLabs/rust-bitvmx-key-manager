@@ -27,7 +27,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2];
 
         musig
-            .init(musig_id, participant_pubkeys.clone(), participant_2)
+            .new_session(musig_id, participant_pubkeys.clone(), participant_2, None)
             .expect("Failed to initialize MuSig session");
 
         let index = musig.get_index(musig_id)?;
@@ -86,8 +86,8 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
-        musig.init(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
-        musig.init(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+        musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1, None)?;
+        musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2, None)?;
 
         key_manager.generate_nonce(musig_id_1, "message_1", "message_1".as_bytes().to_vec(), None)?;
         key_manager.generate_nonce(musig_id_2, "message_1", "message_1".as_bytes().to_vec(), None)?;
@@ -154,7 +154,7 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
-        musig.init(musig_id, participant_pubkeys.clone(), pub_key_part_2)?;
+        musig.new_session(musig_id, participant_pubkeys.clone(), pub_key_part_2, None)?;
 
         key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
 
@@ -169,7 +169,7 @@ mod tests {
         let other_musig_id = "other_musig_id";
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_3];
 
-        musig.init(other_musig_id, participant_pubkeys.clone(), pub_key_part_3)?;
+        musig.new_session(other_musig_id, participant_pubkeys.clone(), pub_key_part_3, None)?;
 
         key_manager.generate_nonce(other_musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
 
@@ -219,7 +219,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, my_pub_key];
 
         musig
-            .init(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)
             .expect("Failed to initialize MuSig session");
 
         key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;

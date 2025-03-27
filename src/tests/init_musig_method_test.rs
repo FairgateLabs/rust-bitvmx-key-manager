@@ -26,7 +26,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
         let _aggregated_pubkey =
-            musig.init(musig_id, participant_pubkeys.clone(), my_pub_key)?;
+            musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)?;
 
         clear_output();
 
@@ -48,7 +48,7 @@ mod tests {
             .unwrap();
         let participant_pubkeys = vec![participant_1];
 
-        let result = musig.init(musig_id, participant_pubkeys.clone(), participant_1);
+        let result = musig.new_session(musig_id, participant_pubkeys.clone(), participant_1, None);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -79,7 +79,7 @@ mod tests {
 
         let participant_pubkeys = vec![participant_1, participant_2];
 
-        let result = musig.init(musig_id, participant_pubkeys.clone(), my_pub_key);
+        let result = musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -111,7 +111,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
         let aggregated_pub_key = musig
-            .init(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)
             .unwrap();
 
         let participant_pubkeys = vec![participant_2, my_pub_key, participant_1];
@@ -119,9 +119,10 @@ mod tests {
         let musig_id = "2";
 
         let aggregated_pub_key_2 = musig
-            .init(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)
             .unwrap();
 
+        // Check if the aggregated pub keys are the same
         assert_eq!(aggregated_pub_key, aggregated_pub_key_2);
 
         clear_output();

@@ -458,7 +458,6 @@ impl<K: KeyStore> KeyManager<K> {
         other_public_key: PublicKey,
         other_partial_signatures: Vec<(MessageId, PartialSignature)>,
     ) -> Result<Vec<(MessageId, PartialSignature)>, Musig2SignerError> {
-
         let mut partial_signatures = HashMap::new();
         partial_signatures.insert(other_public_key, other_partial_signatures);
 
@@ -468,8 +467,6 @@ impl<K: KeyStore> KeyManager<K> {
         partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
 
         self.musig2.save_partial_signatures(id, partial_signatures)?;
-
-        //self.musig2.get_my_partial_signatures(id, key_manager)
 
         Ok(my_partial_signatures)
     }
@@ -482,7 +479,6 @@ impl<K: KeyStore> KeyManager<K> {
 
         let data_to_iterate = self.musig2.get_data_for_partial_signatures(id)?;
         let my_pub_key = self.musig2.my_public_key(id)?;
-        // let participant_pub_keys = self.musig2.get_participant_pub_keys(id)?;
 
         for (message_id, (message, sec_nonce, tweak,  aggregated_nonce)) in data_to_iterate.iter() {
             let sig = self

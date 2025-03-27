@@ -42,12 +42,7 @@ mod tests {
 
         // Get partial signatures
         let my_partial_sigs_1 = key_manager.get_my_partial_signatures(musig_id_1)?;
-        // let mut partial_sigs_1 = HashMap::new();
-        // partial_sigs_1.insert(pub_key_part_1, my_partial_sigs_1.clone());
-
         let my_partial_sigs_2 = key_manager.get_my_partial_signatures(musig_id_2)?;
-        // let mut partial_sigs_2 = HashMap::new();
-        // partial_sigs_2.insert(pub_key_part_2, my_partial_sigs_2.clone());
 
         key_manager.save_partial_signatures(musig_id_1, pub_key_part_2, my_partial_sigs_2)?;
         key_manager.save_partial_signatures(musig_id_2, pub_key_part_1, my_partial_sigs_1)?;

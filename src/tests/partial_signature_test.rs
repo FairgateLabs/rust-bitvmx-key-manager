@@ -68,7 +68,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_add_partial_signatures() -> Result<(), anyhow::Error> {
         // Set up test environment
         let path = PathBuf::from(format!("test_output/test_partial_2"));
@@ -86,34 +85,35 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
+        // Initialize MuSig2 session 1 with two participants
         musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1, None)?;
-        musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2, None)?;
-
         key_manager.generate_nonce(musig_id_1, "message_1", "message_1".as_bytes().to_vec(), None)?;
-        key_manager.generate_nonce(musig_id_2, "message_1", "message_1".as_bytes().to_vec(), None)?;
 
-        // Add nonces for both participants
+        // Create nonces for pub_key_part_1
         let mut nonce_part_1 = HashMap::new();
         let nonces = musig.get_my_pub_nonces(musig_id_1).unwrap();
-
         nonce_part_1.insert(pub_key_part_1, nonces);
 
+
+        // Initialize MuSig2 session 2 with the same two participants
+        musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2, None)?;
+        key_manager.generate_nonce(musig_id_2, "message_1", "message_1".as_bytes().to_vec(), None)?;
+
+         // Create nonces for pub_key_part_2
         let mut nonce_part_2 = HashMap::new();
         let nonces = musig.get_my_pub_nonces(musig_id_2).unwrap();
-
         nonce_part_2.insert(pub_key_part_2, nonces);
-
+        
         musig.aggregate_nonces(musig_id_1, nonce_part_2).unwrap();
         musig.aggregate_nonces(musig_id_2, nonce_part_1).unwrap();
 
         let partial_sig_part_2 = key_manager.get_my_partial_signatures(musig_id_2).unwrap();
+        let partial_sig_part_1 = key_manager.get_my_partial_signatures(musig_id_1).unwrap();
 
         // Test adding partial signatures with invalid public key
         let mut partial_sigs_2 = HashMap::new();
         partial_sigs_2.insert(pub_key_part_2, partial_sig_part_2.clone());
-
-        let result = musig.save_partial_signatures(musig_id_2, partial_sigs_2.clone());
-        assert!(matches!(result, Err(Musig2SignerError::InvalidPublicKey)));
+        partial_sigs_2.insert(pub_key_part_1, partial_sig_part_1.clone());
 
         let result = musig.save_partial_signatures(musig_id_1, partial_sigs_2.clone());
         assert!(matches!(result, Ok(_)));

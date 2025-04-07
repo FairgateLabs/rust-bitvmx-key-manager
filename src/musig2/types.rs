@@ -1,4 +1,4 @@
-use bitcoin::{PublicKey, TapNodeHash};
+use bitcoin::PublicKey;
 use musig2::{PartialSignature, PubNonce, SecNonce};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,7 +31,8 @@ pub struct Musig2Data {
     /// Message to be signed
     pub message: Vec<u8>,
 
-    pub tweak: Option<TapNodeHash>,
+    /// Tweak to be applied to the message
+    tweak: Option<[u8; 32]>,
 }
 
 impl Musig2Data {
@@ -39,15 +40,26 @@ impl Musig2Data {
         message: Vec<u8>,
         pub_nonces: HashMap<PublicKey, PubNonce>,
         secret_nonce: SecNonce,
-        tweak: Option<TapNodeHash>,
+        tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Self {
+
+        let tweak_bytes: Option<[u8; 32]> = tweak.map(|t| {
+            let mut bytes = [0; 32];
+            bytes.copy_from_slice(&t.to_be_bytes());
+            bytes
+        });
+
         Self {
             message,
             pub_nonces,
             partial_signatures: HashMap::new(),
             secret_nonce,
-            tweak,
+            tweak: tweak_bytes,
         }
+    }
+
+    pub fn tweak(&self) -> Option<musig2::secp256k1::Scalar> {
+        self.tweak.map(|t| musig2::secp256k1::Scalar::from_be_bytes(t).unwrap())
     }
 }
 

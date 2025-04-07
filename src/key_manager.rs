@@ -9,7 +9,7 @@ use bitcoin::{
 };
 use itertools::izip;
 use storage_backend::storage::Storage;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     errors::KeyManagerError, keystorage::keystore::KeyStore, musig2::{errors::Musig2SignerError, musig::{MuSig2Signer, MuSig2SignerApi}, types::MessageId}, winternitz::{
@@ -339,10 +339,10 @@ impl<K: KeyStore> KeyManager<K> {
     pub fn sign_partial_message(
         &self,
         id: &str,
-        my_public_key:PublicKey,
+        my_public_key: PublicKey,
         secnonce: SecNonce,
         aggregated_nonce: AggNonce,
-        tweak: Option<TapNodeHash>,
+        tweak: Option<musig2::secp256k1::Scalar>,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
         let key_aggregation_context = self.musig2.get_key_agg_context(id, tweak).unwrap();
@@ -352,14 +352,8 @@ impl<K: KeyStore> KeyManager<K> {
             None => return Err(KeyManagerError::EntryNotFound),
         };
 
-        let sk = match tweak {
-            Some(_) => {
-                musig2::secp256k1::SecretKey::from_slice(&private_key[..])
-                    .map_err(|_| KeyManagerError::InvalidPrivateKey)?
-            }
-            None => musig2::secp256k1::SecretKey::from_slice(&private_key[..])
-                .map_err(|_| KeyManagerError::InvalidPrivateKey)?
-        };
+        let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+            .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
 
         let result = sign_partial(&key_aggregation_context, sk, secnonce, &aggregated_nonce, message);
 
@@ -370,36 +364,6 @@ impl<K: KeyStore> KeyManager<K> {
                 return Err(KeyManagerError::FailedToSignMessage);
             }
         }
-
-        // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner).tap_tweak(&self.secp, tweak).to_inner();
-        // let tweaked_private_key = PrivateKey::new(keypair.secret_key(), self.network);
-
-        // let sk = musig2::secp256k1::SecretKey::from_slice(&tweaked_private_key[..])
-        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
-
-
-
-        // let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
-        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
-
-        // sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
-        //     .map_err(|_| KeyManagerError::FailedToSignMessage)
-
-        // let my_public_key = PublicKey::from_str(pub_key.to_string().as_str()).unwrap();
-
-        // let (private_key, _) = self
-        //     .keystore
-        //     .load_keypair(&my_public_key)?
-        //     .ok_or(KeyManagerError::EntryNotFound)?;
-
-        // let keypair = Keypair::from_secret_key(&self.secp, &private_key.inner);
-        // let tweaked_keypair = keypair.tap_tweak(&self.secp, tweak);
-
-        // let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
-        //     .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
-
-        // sign_partial(key_agg_ctx, sk, secnonce, &aggregated_nonce, message)
-        //     .map_err(|_| KeyManagerError::FailedToSignMessage)
     }
 
     pub fn generate_nonce_seed(
@@ -426,9 +390,8 @@ impl<K: KeyStore> KeyManager<K> {
         id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError> {
-        self.musig2.new_session(id, participant_pubkeys, my_pub_key, tweak)
+        self.musig2.new_session(id, participant_pubkeys, my_pub_key)
     }
 
     pub fn aggregate_nonces(
@@ -438,15 +401,6 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<(), Musig2SignerError> {
         self.musig2.aggregate_nonces(id, pub_nonces_map)
     }
-
-    // pub fn aggregate_partial_signatures(
-    //     &self,
-    //     id: &str,
-    //     partial_signatures: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
-    //     key_manager: &Rc<KeyManager<K>>,
-    // ) -> Result<(), Musig2SignerError> {
-    //     self.musig2.aggregate_partial_signatures(id, partial_signatures, key_manager)
-    // }
 
     pub fn get_my_pub_nonces(&self, id: &str) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
         self.musig2.get_my_pub_nonces(id)
@@ -511,30 +465,25 @@ impl<K: KeyStore> KeyManager<K> {
         musig_id: &str,
         message_id: &str,
         message: Vec<u8>,
-        tweak: Option<TapNodeHash>,
+        aggregated_pubkey: &PublicKey,
+        tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<(), Musig2SignerError> {
 
-        let nonce_seed = self.nonce_seed(musig_id)?;
-        self.musig2.generate_nonce(musig_id, message_id, message, tweak, nonce_seed)
-    }
-
-    pub fn nonce_seed(&self, musig_id: &str) -> Result<[u8; 32], Musig2SignerError> {
         let index = self.musig2.get_index(musig_id)?;
         let public_key = self.musig2.my_public_key(musig_id)?;
 
         let nonce_seed: [u8; 32] = self
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
-    
-        Ok(nonce_seed)
+
+        self.musig2.generate_nonce(musig_id, message_id, message, aggregated_pubkey, tweak, nonce_seed)
     }
 
     pub fn get_aggregated_pubkey(
         &self,
         id: &str,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError> {
-        self.musig2.get_aggregated_pubkey(id, tweak)
+        self.musig2.get_aggregated_pubkey(id)
     }
 }
 

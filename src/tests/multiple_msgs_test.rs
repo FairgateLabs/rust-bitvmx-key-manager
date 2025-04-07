@@ -20,21 +20,21 @@
         let musig_id_2 = "2"; // Use other id for testing porpouse
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
-        let aggregated_pub_key = musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1, None)?;
+        let aggregated_pub_key = musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
 
         let messages = vec!["1 test message", "2 test message", "3 test message"];
 
         // Generate pub nonces for all messages
-        key_manager.generate_nonce(musig_id_1, messages[0], messages[0].as_bytes().to_vec(), None)?;
-        key_manager.generate_nonce(musig_id_1, messages[1], messages[1].as_bytes().to_vec(), None)?;
-        key_manager.generate_nonce(musig_id_1, messages[2], messages[2].as_bytes().to_vec(), None)?;
+        key_manager.generate_nonce(musig_id_1, messages[0], messages[0].as_bytes().to_vec(), &aggregated_pub_key, None)?;
+        key_manager.generate_nonce(musig_id_1, messages[1], messages[1].as_bytes().to_vec(), &aggregated_pub_key,None)?;
+        key_manager.generate_nonce(musig_id_1, messages[2], messages[2].as_bytes().to_vec(), &aggregated_pub_key,None)?;
 
-        let aggregated_pub_key_2 = musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2, None)?;
+        let aggregated_pub_key_2 = musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
 
         // Generate pub nonces for all messages
-        key_manager.generate_nonce(musig_id_2, messages[0], messages[0].as_bytes().to_vec(), None)?;
-        key_manager.generate_nonce(musig_id_2, messages[1], messages[1].as_bytes().to_vec(), None)?;
-        key_manager.generate_nonce(musig_id_2, messages[2], messages[2].as_bytes().to_vec(), None)?;
+        key_manager.generate_nonce(musig_id_2, messages[0], messages[0].as_bytes().to_vec(), &aggregated_pub_key,None)?;
+        key_manager.generate_nonce(musig_id_2, messages[1], messages[1].as_bytes().to_vec(), &aggregated_pub_key,None)?;
+        key_manager.generate_nonce(musig_id_2, messages[2], messages[2].as_bytes().to_vec(), &aggregated_pub_key,None)?;
 
         // Check if the aggregated pub keys are the same
         assert_eq!(aggregated_pub_key, aggregated_pub_key_2);

@@ -3,7 +3,7 @@ use musig2::{
     aggregate_partial_signatures, verify_partial, verify_single, AggNonce, CompactSignature,
     PartialSignature, SecNonce,
 };
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 
 use musig2::{KeyAggContext, PubNonce};
@@ -53,7 +53,6 @@ pub trait MuSig2SignerApi {
         session_id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError>;
 
     /// Aggregates public nonces from other participants.
@@ -122,7 +121,7 @@ pub trait MuSig2SignerApi {
     fn get_data_for_partial_signatures(
         &self,
         session_id: &str,
-    ) -> Result<HashMap<String, (Vec<u8>, SecNonce, Option<TapNodeHash>, AggNonce)>, Musig2SignerError>;
+    ) -> Result<HashMap<String, (Vec<u8>, SecNonce, Option<musig2::secp256k1::Scalar>, AggNonce)>, Musig2SignerError>;
 
     /// Verifies partial signatures from a participant.
     ///
@@ -180,7 +179,6 @@ pub trait MuSig2SignerApi {
     fn get_aggregated_pubkey(
         &self,
         session_id: &str,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError>;
 
     /// Gets the final aggregated signature for a specific message.
@@ -209,7 +207,6 @@ impl MuSig2SignerApi for MuSig2Signer {
         session_id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError> {
         if participant_pubkeys.len() < 2 {
             return Err(Musig2SignerError::InvalidNumberOfParticipants);
@@ -230,20 +227,21 @@ impl MuSig2SignerApi for MuSig2Signer {
         let musig = MuSig2Session::new(session_id.to_string(), sorted_participants, my_pub_key);
 
         self.save_musig_data(&musig)?;
-        self.get_aggregated_pubkey(session_id, tweak)
+        self.get_aggregated_pubkey(session_id)
     }
 
     fn get_aggregated_pubkey(
         &self,
         session_id: &str,
-        tweak: Option<TapNodeHash>,
     ) -> Result<PublicKey, Musig2SignerError> {
         // // Sort participants by public key
         // let mut sorted_participants = participant_pubkeys.clone();
         // sorted_participants.sort();
 
-        let aggregated_musig_pubkey = self.get_aggregated_musig_pubkey(session_id, tweak)?;
-        let aggregated_pubkey = to_bitcoin_pubkey(aggregated_musig_pubkey)?;
+        let key_agg_context = self.get_key_agg_context(session_id, None)?;
+        let aggregated_pubkey: musig2::secp256k1::PublicKey = key_agg_context.aggregated_pubkey();
+
+        let aggregated_pubkey = to_bitcoin_pubkey(aggregated_pubkey)?;
         Ok(aggregated_pubkey)
     }
 
@@ -313,7 +311,7 @@ impl MuSig2SignerApi for MuSig2Signer {
     fn get_data_for_partial_signatures(
         &self,
         session_id: &str,
-    ) -> Result<HashMap<String, (Vec<u8>, SecNonce, Option<TapNodeHash>, AggNonce)>, Musig2SignerError> {
+    ) -> Result<HashMap<String, (Vec<u8>, SecNonce, Option<musig2::secp256k1::Scalar>, AggNonce)>, Musig2SignerError> {
         let musig_data = self
             .get_musig_data(session_id)?
             .ok_or(Musig2SignerError::MuSig2IdNotFound)?;
@@ -327,7 +325,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         }
 
         let aggregated_nonces = self.get_aggregated_nonces(session_id)?;
-        let mut data_to_sign: HashMap<String, (Vec<u8>, SecNonce, Option<TapNodeHash>, AggNonce)> = HashMap::new();
+        let mut data_to_sign: HashMap<String, (Vec<u8>, SecNonce, Option<musig2::secp256k1::Scalar>, AggNonce)> = HashMap::new();
 
         for (message_id, data) in musig_data.data.iter() {
             let aggregated_nonce = aggregated_nonces
@@ -342,7 +340,7 @@ impl MuSig2SignerApi for MuSig2Signer {
                 (
                     data.message.clone(),
                     data.secret_nonce.clone(),
-                    data.tweak.clone(),
+                    data.tweak(),
                     aggregated_nonce,
                 ),
             );
@@ -424,7 +422,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             return Err(Musig2SignerError::InvalidParticipantPartialSignatures);
         }
 
-        let key_agg_ctx = self.get_key_agg_context(session_id, data.tweak)?;
+        let key_agg_ctx = self.get_key_agg_context(session_id, data.tweak())?;
         let aggregated_nonce = self.get_aggregated_nonce(session_id, message_id)?;
 
         let mut partial_signatures = Vec::new();
@@ -462,7 +460,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             return Err(Musig2SignerError::InvalidPublicKey);
         }
 
-        let mut data_to_iterate: HashMap<MessageId, (Vec<u8>, AggNonce, PubNonce, Option<TapNodeHash>)> = HashMap::new();
+        let mut data_to_iterate: HashMap<MessageId, (Vec<u8>, AggNonce, PubNonce, Option<musig2::secp256k1::Scalar>)> = HashMap::new();
 
         for (message_id, data) in musig_data.data.iter() {
             let aggregated_nonce = self.get_aggregated_nonce(session_id, message_id)?;
@@ -473,7 +471,7 @@ impl MuSig2SignerApi for MuSig2Signer {
                     data.message.clone(),
                     aggregated_nonce.clone(),
                     data.pub_nonces.get(&pubkey).unwrap().clone(),
-                    data.tweak.clone(),
+                    data.tweak(),
                 ),
             );
         }
@@ -552,7 +550,8 @@ impl MuSig2Signer {
         session_id: &str,
         message_id: &str,
         message: Vec<u8>,
-        tweak: Option<TapNodeHash>,
+        aggregated_pubkey: &PublicKey,
+        tweak: Option<musig2::secp256k1::Scalar>,
         nonce_seed: [u8; 32],
     ) -> Result<(), Musig2SignerError> {
         let mut musig_data = self
@@ -565,11 +564,11 @@ impl MuSig2Signer {
             return Ok(());
         }
 
-        let aggregated_pubkey =
-            self.get_aggregated_musig_pubkey(session_id, tweak)?;
+        // let key_agg_context = self.get_key_agg_context(session_id, tweak)?;
+        // let aggregated_pubkey: musig2::secp256k1::PublicKey = key_agg_context.aggregated_pubkey();
 
         let sec_nonce = musig2::SecNonceBuilder::new(nonce_seed)
-            .with_pubkey(aggregated_pubkey)
+            .with_pubkey(to_musig_pubkey(aggregated_pubkey.clone())?)
             .with_message(&message)
             .build();
 
@@ -634,16 +633,6 @@ impl MuSig2Signer {
         Ok(aggregated_nonce)
     }
 
-    fn get_aggregated_musig_pubkey(
-        &self, 
-        session_id: &str,
-        tweak: Option<TapNodeHash>,
-    ) -> Result<musig2::secp256k1::PublicKey, Musig2SignerError> {
-        let key_agg_context = self.get_key_agg_context(session_id, tweak)?;
-        let aggregated_pubkey = key_agg_context.aggregated_pubkey();
-        Ok(aggregated_pubkey)
-    }
-
     pub fn get_index(&self, session_id: &str) -> Result<u32, Musig2SignerError> {
         let musig_data = self
             .get_musig_data(session_id)?
@@ -701,7 +690,7 @@ impl MuSig2Signer {
     pub fn get_key_agg_context(
         &self,
         session_id: &str,
-        tweak: Option<TapNodeHash>,
+        tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<KeyAggContext, Musig2SignerError> {
         let participant_pubkeys = self.get_participant_pub_keys(session_id)?
             .into_iter()
@@ -710,7 +699,7 @@ impl MuSig2Signer {
 
         match tweak {
             Some(tweak) => {
-                let key_agg_context = KeyAggContext::new(participant_pubkeys).unwrap().with_taproot_tweak(tweak.as_ref())
+                let key_agg_context = KeyAggContext::new(participant_pubkeys).unwrap().with_tweak(tweak, true)
                     .map_err(|_| Musig2SignerError::InvalidPublicKey)?;
 
                 Ok(key_agg_context)

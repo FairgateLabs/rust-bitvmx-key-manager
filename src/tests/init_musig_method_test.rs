@@ -9,7 +9,7 @@ mod tests {
 
     #[test]
     fn test_init_musig_method() -> Result<(), anyhow::Error> {
-        let path = PathBuf::from(format!("test_output/test"));
+        let path = PathBuf::from(format!("test_output/test_init_musig_method"));
         let store = Rc::new(Storage::new_with_path(&path)?);
         let key_manager = create_key_manager("test_output/keystore_1", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
@@ -26,7 +26,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
         let _aggregated_pubkey =
-            musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)?;
+            musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key)?;
 
         clear_output();
 
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn test_init_musig_invalid_participants() -> Result<(), anyhow::Error> {
-        let path = PathBuf::from(format!("test_output/test_1"));
+        let path = PathBuf::from(format!("test_output/test_init_musig_invalid_participants"));
 
         let store = Rc::new(Storage::new_with_path(&path).unwrap());
 
@@ -48,7 +48,7 @@ mod tests {
             .unwrap();
         let participant_pubkeys = vec![participant_1];
 
-        let result = musig.new_session(musig_id, participant_pubkeys.clone(), participant_1, None);
+        let result = musig.new_session(musig_id, participant_pubkeys.clone(), participant_1);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn test_init_musig_invalid_participant_key_no_current_pub_key() -> Result<(), anyhow::Error> {
-        let path = PathBuf::from(format!("test_output/test_2"));
+        let path = PathBuf::from(format!("test_output/test_init_musig_invalid_participant_key_no_current_pub_key"));
         let store = Rc::new(Storage::new_with_path(&path).unwrap());
         let key_manager = create_key_manager("test_output/keystore_3", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
@@ -79,7 +79,7 @@ mod tests {
 
         let participant_pubkeys = vec![participant_1, participant_2];
 
-        let result = musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None);
+        let result = musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_init_musig_unsort_pub_keys() -> Result<(), anyhow::Error> {
-        let path = PathBuf::from(format!("test_output/test_3"));
+        let path = PathBuf::from(format!("test_output/test_init_musig_unsort_pub_keys"));
         let store = Rc::new(Storage::new_with_path(&path).unwrap());
         let key_manager = create_key_manager("test_output/keystore_4", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
@@ -111,7 +111,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
         let aggregated_pub_key = musig
-            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)
+            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key)
             .unwrap();
 
         let participant_pubkeys = vec![participant_2, my_pub_key, participant_1];
@@ -119,7 +119,7 @@ mod tests {
         let musig_id = "2";
 
         let aggregated_pub_key_2 = musig
-            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key, None)
+            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key)
             .unwrap();
 
         // Check if the aggregated pub keys are the same

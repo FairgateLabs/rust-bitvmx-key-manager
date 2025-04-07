@@ -27,9 +27,9 @@ mod tests {
             my_pubkey,
         ];
 
-        musig.new_session(musig_id, participant_pubkeys.clone(), my_pubkey, None)?;
+        let aggregated_pubkey = musig.new_session(musig_id, participant_pubkeys.clone(), my_pubkey)?;
 
-        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
+        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
 
         // Test getting nonces returns expected number
         let pub_nonces = musig.get_my_pub_nonces(musig_id);
@@ -62,7 +62,7 @@ mod tests {
 
         let participant_pubkeys = vec![participant_1, participant_2];
 
-        musig.new_session(musig_id, participant_pubkeys.clone(), participant_2, None)?;
+        let aggregated_pubkey = musig.new_session(musig_id, participant_pubkeys.clone(), participant_2)?;
 
         //For now we use the same nonces that we get from the first participant.
         let nonces = musig.get_my_pub_nonces(musig_id);
@@ -70,7 +70,7 @@ mod tests {
         // Test getting nonces before adding any messages returns error
         assert!(matches!(nonces, Err(Musig2SignerError::NoncesNotGenerated)));
 
-        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), None)?;
+        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
 
         let nonces = musig.get_my_pub_nonces(musig_id).unwrap();
 
@@ -123,8 +123,8 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2];
 
         // Initialize first musig session
-        musig.new_session(musig_id, participant_pubkeys.clone(), participant_2, None)?;
-        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(),None)?;
+        let aggregated_pubkey = musig.new_session(musig_id, participant_pubkeys.clone(), participant_2)?;
+        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
         // Test nonce determinism - same session and message should give same nonce
         let my_pub_nonce = musig.get_my_pub_nonces(musig_id).unwrap();
         let my_pub_nonce_again = musig.get_my_pub_nonces(musig_id).unwrap();
@@ -132,8 +132,8 @@ mod tests {
 
         // Test nonce uniqueness - different session should give different nonce
         let other_musig_id = "other_musig_id";
-        musig.new_session(other_musig_id, participant_pubkeys.clone(), participant_2, None)?;
-        key_manager.generate_nonce(other_musig_id, "message_1", "message_1".as_bytes().to_vec(),None)?;
+        let aggregated_pubkey = musig.new_session(other_musig_id, participant_pubkeys.clone(), participant_2)?;
+        key_manager.generate_nonce(other_musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
         let my_pub_nonce_again = musig.get_my_pub_nonces(other_musig_id).unwrap();
         assert_ne!(my_pub_nonce, my_pub_nonce_again);
 

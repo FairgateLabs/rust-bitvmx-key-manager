@@ -1,9 +1,9 @@
-use bitcoin::{secp256k1::schnorr::Signature, PublicKey, TapNodeHash};
+use bitcoin::{secp256k1::schnorr::Signature, PublicKey};
 use musig2::{
     aggregate_partial_signatures, verify_partial, verify_single, AggNonce, CompactSignature,
     PartialSignature, SecNonce,
 };
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{collections::HashMap, rc::Rc};
 use storage_backend::storage::{KeyValueStore, Storage};
 
 use musig2::{KeyAggContext, PubNonce};

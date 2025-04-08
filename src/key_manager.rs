@@ -9,7 +9,7 @@ use bitcoin::{
 };
 use itertools::izip;
 use storage_backend::storage::Storage;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{
     errors::KeyManagerError,

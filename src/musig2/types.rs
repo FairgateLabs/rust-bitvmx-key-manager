@@ -42,7 +42,6 @@ impl Musig2Data {
         secret_nonce: SecNonce,
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Self {
-
         let tweak_bytes: Option<[u8; 32]> = tweak.map(|t| {
             let mut bytes = [0; 32];
             bytes.copy_from_slice(&t.to_be_bytes());
@@ -59,7 +58,8 @@ impl Musig2Data {
     }
 
     pub fn tweak(&self) -> Option<musig2::secp256k1::Scalar> {
-        self.tweak.map(|t| musig2::secp256k1::Scalar::from_be_bytes(t).unwrap())
+        self.tweak
+            .map(|t| musig2::secp256k1::Scalar::from_be_bytes(t).unwrap())
     }
 }
 

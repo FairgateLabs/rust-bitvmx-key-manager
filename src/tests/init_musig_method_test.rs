@@ -5,7 +5,13 @@ mod tests {
     use std::{path::PathBuf, rc::Rc};
     use storage_backend::storage::Storage;
 
-    use crate::{musig2::{errors::Musig2SignerError, musig::{MuSig2Signer, MuSig2SignerApi}}, tests::utils::helper::{clear_output, create_key_manager, create_pub_key}};
+    use crate::{
+        musig2::{
+            errors::Musig2SignerError,
+            musig::{MuSig2Signer, MuSig2SignerApi},
+        },
+        tests::utils::helper::{clear_output, create_key_manager, create_pub_key},
+    };
 
     #[test]
     fn test_init_musig_method() -> Result<(), anyhow::Error> {
@@ -63,7 +69,9 @@ mod tests {
 
     #[test]
     fn test_init_musig_invalid_participant_key_no_current_pub_key() -> Result<(), anyhow::Error> {
-        let path = PathBuf::from(format!("test_output/test_init_musig_invalid_participant_key_no_current_pub_key"));
+        let path = PathBuf::from(format!(
+            "test_output/test_init_musig_invalid_participant_key_no_current_pub_key"
+        ));
         let store = Rc::new(Storage::new_with_path(&path).unwrap());
         let key_manager = create_key_manager("test_output/keystore_3", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
@@ -129,5 +137,4 @@ mod tests {
 
         Ok(())
     }
-
 }

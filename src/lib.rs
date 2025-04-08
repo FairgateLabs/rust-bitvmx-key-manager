@@ -1,5 +1,5 @@
-use std::{path::PathBuf, rc::Rc};
 use std::str::FromStr;
+use std::{path::PathBuf, rc::Rc};
 
 use bitcoin::Network;
 use config::{KeyManagerConfig, KeyStorageConfig};

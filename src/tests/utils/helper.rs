@@ -6,7 +6,10 @@ use bitcoin::{
 };
 use storage_backend::storage::Storage;
 
-use crate::{key_manager::{self, KeyManager}, keystorage::{self, database::DatabaseKeyStore}};
+use crate::{
+    key_manager::{self, KeyManager},
+    keystorage::{self, database::DatabaseKeyStore},
+};
 
 pub fn random_bytes() -> [u8; 32] {
     let mut seed = [0u8; 32];

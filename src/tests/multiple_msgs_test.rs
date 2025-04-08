@@ -1,10 +1,13 @@
 #[cfg(test)]
-    mod tests {
+mod tests {
 
     use std::{collections::HashMap, path::PathBuf, rc::Rc};
     use storage_backend::storage::Storage;
 
-    use crate::{musig2::musig::{MuSig2Signer, MuSig2SignerApi}, tests::utils::helper::{clear_output, create_key_manager, create_pub_key}};
+    use crate::{
+        musig2::musig::{MuSig2Signer, MuSig2SignerApi},
+        tests::utils::helper::{clear_output, create_key_manager, create_pub_key},
+    };
 
     #[test]
     fn test_multiple_messages() -> Result<(), anyhow::Error> {
@@ -20,21 +23,59 @@
         let musig_id_2 = "2"; // Use other id for testing porpouse
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
-        let aggregated_pub_key = musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
+        let aggregated_pub_key =
+            musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
 
         let messages = vec!["1 test message", "2 test message", "3 test message"];
 
         // Generate pub nonces for all messages
-        key_manager.generate_nonce(musig_id_1, messages[0], messages[0].as_bytes().to_vec(), &aggregated_pub_key, None)?;
-        key_manager.generate_nonce(musig_id_1, messages[1], messages[1].as_bytes().to_vec(), &aggregated_pub_key,None)?;
-        key_manager.generate_nonce(musig_id_1, messages[2], messages[2].as_bytes().to_vec(), &aggregated_pub_key,None)?;
+        key_manager.generate_nonce(
+            musig_id_1,
+            messages[0],
+            messages[0].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
+        key_manager.generate_nonce(
+            musig_id_1,
+            messages[1],
+            messages[1].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
+        key_manager.generate_nonce(
+            musig_id_1,
+            messages[2],
+            messages[2].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
 
-        let aggregated_pub_key_2 = musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+        let aggregated_pub_key_2 =
+            musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
 
         // Generate pub nonces for all messages
-        key_manager.generate_nonce(musig_id_2, messages[0], messages[0].as_bytes().to_vec(), &aggregated_pub_key,None)?;
-        key_manager.generate_nonce(musig_id_2, messages[1], messages[1].as_bytes().to_vec(), &aggregated_pub_key,None)?;
-        key_manager.generate_nonce(musig_id_2, messages[2], messages[2].as_bytes().to_vec(), &aggregated_pub_key,None)?;
+        key_manager.generate_nonce(
+            musig_id_2,
+            messages[0],
+            messages[0].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
+        key_manager.generate_nonce(
+            musig_id_2,
+            messages[1],
+            messages[1].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
+        key_manager.generate_nonce(
+            musig_id_2,
+            messages[2],
+            messages[2].as_bytes().to_vec(),
+            &aggregated_pub_key,
+            None,
+        )?;
 
         // Check if the aggregated pub keys are the same
         assert_eq!(aggregated_pub_key, aggregated_pub_key_2);
@@ -76,11 +117,19 @@
         let signature_2 = musig.get_aggregated_signature(musig_id_2, &messages[1])?;
         // Check that signatures length matches number of messages
 
-        let verification_1 =
-            musig.verify_final_signature(musig_id_1, &messages[0], signature_1, aggregated_pub_key)?;
+        let verification_1 = musig.verify_final_signature(
+            musig_id_1,
+            &messages[0],
+            signature_1,
+            aggregated_pub_key,
+        )?;
 
-        let verification_2 =
-            musig.verify_final_signature(musig_id_2, &messages[1], signature_2, aggregated_pub_key)?;
+        let verification_2 = musig.verify_final_signature(
+            musig_id_2,
+            &messages[1],
+            signature_2,
+            aggregated_pub_key,
+        )?;
 
         assert!(verification_1);
         assert!(verification_2);

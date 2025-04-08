@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, path::PathBuf, rc::Rc};
@@ -6,7 +5,13 @@ mod tests {
     use bitcoin::PublicKey;
     use storage_backend::storage::Storage;
 
-    use crate::{musig2::{errors::Musig2SignerError, musig::{MuSig2Signer, MuSig2SignerApi}}, tests::utils::helper::{clear_output, create_key_manager, create_pub_key}};
+    use crate::{
+        musig2::{
+            errors::Musig2SignerError,
+            musig::{MuSig2Signer, MuSig2SignerApi},
+        },
+        tests::utils::helper::{clear_output, create_key_manager, create_pub_key},
+    };
 
     #[test]
     fn test_get_partial_signatures() -> Result<(), anyhow::Error> {
@@ -37,7 +42,14 @@ mod tests {
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 
-        musig.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None, nonce_seed)?;
+        musig.generate_nonce(
+            musig_id,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+            nonce_seed,
+        )?;
 
         musig.get_my_pub_nonces(musig_id).unwrap();
 
@@ -86,24 +98,37 @@ mod tests {
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
         // Initialize MuSig2 session 1 with two participants
-        let aggregated_pubkey = musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
-        key_manager.generate_nonce(musig_id_1, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
+        let aggregated_pubkey =
+            musig.new_session(musig_id_1, participant_pubkeys.clone(), pub_key_part_1)?;
+        key_manager.generate_nonce(
+            musig_id_1,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+        )?;
 
         // Create nonces for pub_key_part_1
         let mut nonce_part_1 = HashMap::new();
         let nonces = musig.get_my_pub_nonces(musig_id_1).unwrap();
         nonce_part_1.insert(pub_key_part_1, nonces);
 
-
         // Initialize MuSig2 session 2 with the same two participants
-        let aggregated_pubkey = musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
-        key_manager.generate_nonce(musig_id_2, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey,None)?;
+        let aggregated_pubkey =
+            musig.new_session(musig_id_2, participant_pubkeys.clone(), pub_key_part_2)?;
+        key_manager.generate_nonce(
+            musig_id_2,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+        )?;
 
-         // Create nonces for pub_key_part_2
+        // Create nonces for pub_key_part_2
         let mut nonce_part_2 = HashMap::new();
         let nonces = musig.get_my_pub_nonces(musig_id_2).unwrap();
         nonce_part_2.insert(pub_key_part_2, nonces);
-        
+
         musig.aggregate_nonces(musig_id_1, nonce_part_2).unwrap();
         musig.aggregate_nonces(musig_id_2, nonce_part_1).unwrap();
 
@@ -154,9 +179,16 @@ mod tests {
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
-        let aggregated_pubkey = musig.new_session(musig_id, participant_pubkeys.clone(), pub_key_part_2)?;
+        let aggregated_pubkey =
+            musig.new_session(musig_id, participant_pubkeys.clone(), pub_key_part_2)?;
 
-        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey,None)?;
+        key_manager.generate_nonce(
+            musig_id,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+        )?;
 
         let mut nonces_part_1 = HashMap::new();
         let nonce = musig.get_my_pub_nonces(musig_id).unwrap();
@@ -169,9 +201,16 @@ mod tests {
         let other_musig_id = "other_musig_id";
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_3];
 
-        let aggregated_pubkey = musig.new_session(other_musig_id, participant_pubkeys.clone(), pub_key_part_3)?;
+        let aggregated_pubkey =
+            musig.new_session(other_musig_id, participant_pubkeys.clone(), pub_key_part_3)?;
 
-        key_manager.generate_nonce(other_musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
+        key_manager.generate_nonce(
+            other_musig_id,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+        )?;
 
         musig.get_my_pub_nonces(&other_musig_id).unwrap();
 
@@ -182,12 +221,17 @@ mod tests {
         // The only way to add the message.
         musig.get_my_pub_nonces(&other_musig_id).unwrap();
 
-        let other_partial_signature = key_manager.get_my_partial_signatures(other_musig_id).unwrap();
+        let other_partial_signature = key_manager
+            .get_my_partial_signatures(other_musig_id)
+            .unwrap();
 
         // Add partial signature for participant 1 which is not a correct partial signature (belongs to participant 1 and 2)
         let result = musig.save_partial_signatures(
             musig_id,
-            HashMap::from([(pub_key_part_1, other_partial_signature.clone()), (pub_key_part_2, other_partial_signature)]),
+            HashMap::from([
+                (pub_key_part_1, other_partial_signature.clone()),
+                (pub_key_part_2, other_partial_signature),
+            ]),
         );
         assert!(matches!(
             result,
@@ -222,7 +266,13 @@ mod tests {
             .new_session(musig_id, participant_pubkeys.clone(), my_pub_key)
             .expect("Failed to initialize MuSig session");
 
-        key_manager.generate_nonce(musig_id, "message_1", "message_1".as_bytes().to_vec(), &aggregated_pubkey, None)?;
+        key_manager.generate_nonce(
+            musig_id,
+            "message_1",
+            "message_1".as_bytes().to_vec(),
+            &aggregated_pubkey,
+            None,
+        )?;
 
         // Add nonce for participant 1, are a copy of nonces of participant 2
         let mut nonces_map = HashMap::new();

@@ -9,12 +9,19 @@ use bitcoin::{
 };
 use itertools::izip;
 use storage_backend::storage::Storage;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError, keystorage::keystore::KeyStore, musig2::{errors::Musig2SignerError, musig::{MuSig2Signer, MuSig2SignerApi}, types::MessageId}, winternitz::{
+    errors::KeyManagerError,
+    keystorage::keystore::KeyStore,
+    musig2::{
+        errors::Musig2SignerError,
+        musig::{MuSig2Signer, MuSig2SignerApi},
+        types::MessageId,
+    },
+    winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    }
+    },
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -98,7 +105,7 @@ impl<K: KeyStore> KeyManager<K> {
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // For taproot keys
-        let(public_key, private_key) = self.adjust_parity(internal_keypair);
+        let (public_key, private_key) = self.adjust_parity(internal_keypair);
 
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
@@ -107,18 +114,24 @@ impl<K: KeyStore> KeyManager<K> {
     // This method changes the parity of a keypair to be even, this is needed for Taproot.
     fn adjust_parity(&self, keypair: Keypair) -> (PublicKey, PrivateKey) {
         let (_, parity) = keypair.public_key().x_only_public_key();
-        
+
         if parity == Parity::Odd {
-            (PublicKey::new(keypair.public_key().negate(&self.secp)), PrivateKey::new(keypair.secret_key().negate(), self.network))
+            (
+                PublicKey::new(keypair.public_key().negate(&self.secp)),
+                PrivateKey::new(keypair.secret_key().negate(), self.network),
+            )
         } else {
-            (PublicKey::new(keypair.public_key()), PrivateKey::new(keypair.secret_key(), self.network))
+            (
+                PublicKey::new(keypair.public_key()),
+                PrivateKey::new(keypair.secret_key(), self.network),
+            )
         }
     }
 
     // This method changes the parity of a public key to be even, this is needed for Taproot.
     fn adjust_public_key_only_parity(&self, public_key: PublicKey) -> PublicKey {
         let (_, parity) = public_key.inner.x_only_public_key();
-        
+
         if parity == Parity::Odd {
             PublicKey::new(public_key.inner.negate(&self.secp))
         } else {
@@ -248,7 +261,7 @@ impl<K: KeyStore> KeyManager<K> {
         &self,
         message: &Message,
         public_key: &PublicKey,
-        merkle_root: Option<TapNodeHash>
+        merkle_root: Option<TapNodeHash>,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
@@ -355,7 +368,13 @@ impl<K: KeyStore> KeyManager<K> {
         let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
             .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
 
-        let result = sign_partial(&key_aggregation_context, sk, secnonce, &aggregated_nonce, message);
+        let result = sign_partial(
+            &key_aggregation_context,
+            sk,
+            secnonce,
+            &aggregated_nonce,
+            message,
+        );
 
         match result {
             Ok(signature) => Ok(signature),
@@ -402,7 +421,10 @@ impl<K: KeyStore> KeyManager<K> {
         self.musig2.aggregate_nonces(id, pub_nonces_map)
     }
 
-    pub fn get_my_pub_nonces(&self, id: &str) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
+    pub fn get_my_pub_nonces(
+        &self,
+        id: &str,
+    ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
         self.musig2.get_my_pub_nonces(id)
     }
 
@@ -420,7 +442,8 @@ impl<K: KeyStore> KeyManager<K> {
 
         partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
 
-        self.musig2.save_partial_signatures(id, partial_signatures)?;
+        self.musig2
+            .save_partial_signatures(id, partial_signatures)?;
 
         Ok(my_partial_signatures)
     }
@@ -434,11 +457,11 @@ impl<K: KeyStore> KeyManager<K> {
         let data_to_iterate = self.musig2.get_data_for_partial_signatures(id)?;
         let my_pub_key = self.musig2.my_public_key(id)?;
 
-        for (message_id, (message, sec_nonce, tweak,  aggregated_nonce)) in data_to_iterate.iter() {
+        for (message_id, (message, sec_nonce, tweak, aggregated_nonce)) in data_to_iterate.iter() {
             let sig = self
                 .sign_partial_message(
                     id,
-                my_pub_key,
+                    my_pub_key,
                     sec_nonce.clone(),
                     aggregated_nonce.clone(),
                     tweak.clone(),
@@ -468,7 +491,6 @@ impl<K: KeyStore> KeyManager<K> {
         aggregated_pubkey: &PublicKey,
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<(), Musig2SignerError> {
-
         let index = self.musig2.get_index(musig_id)?;
         let public_key = self.musig2.my_public_key(musig_id)?;
 
@@ -476,13 +498,17 @@ impl<K: KeyStore> KeyManager<K> {
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 
-        self.musig2.generate_nonce(musig_id, message_id, message, aggregated_pubkey, tweak, nonce_seed)
+        self.musig2.generate_nonce(
+            musig_id,
+            message_id,
+            message,
+            aggregated_pubkey,
+            tweak,
+            nonce_seed,
+        )
     }
 
-    pub fn get_aggregated_pubkey(
-        &self,
-        id: &str,
-    ) -> Result<PublicKey, Musig2SignerError> {
+    pub fn get_aggregated_pubkey(&self, id: &str) -> Result<PublicKey, Musig2SignerError> {
         self.musig2.get_aggregated_pubkey(id)
     }
 }
@@ -495,8 +521,8 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
-    use storage_backend::storage::Storage;
     use std::{env, fs, panic, path::PathBuf, rc::Rc, str::FromStr};
+    use storage_backend::storage::Storage;
 
     use crate::{
         errors::{KeyManagerError, KeyStoreError, WinternitzError},
@@ -514,7 +540,7 @@ mod tests {
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        
+
         let store_path = temp_storage();
         let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
 
@@ -928,7 +954,7 @@ mod tests {
     fn test_schnorr_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-        
+
         let store_path = temp_storage();
         let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
 
@@ -997,7 +1023,7 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one(){
+    fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
 
@@ -1011,19 +1037,19 @@ mod tests {
         let initial_index = 0;
         let number_of_keys: u32 = 10;
 
-        let public_keys = key_manager.derive_multiple_winternitz(
-            message_size_in_bytes,
-            key_type,
-            initial_index,
-            number_of_keys,
-        ).unwrap();
-
-        for i in 0..number_of_keys {
-            let public_key = key_manager.derive_winternitz(
+        let public_keys = key_manager
+            .derive_multiple_winternitz(
                 message_size_in_bytes,
                 key_type,
-                initial_index + i,
-            ).unwrap();
+                initial_index,
+                number_of_keys,
+            )
+            .unwrap();
+
+        for i in 0..number_of_keys {
+            let public_key = key_manager
+                .derive_winternitz(message_size_in_bytes, key_type, initial_index + i)
+                .unwrap();
 
             assert_eq!(public_keys[i as usize], public_key);
         }
@@ -1031,7 +1057,10 @@ mod tests {
         cleanup_storage(&store_path);
     }
 
-    fn test_key_manager<K: KeyStore>(keystore: K, store: Rc<Storage>) -> Result<KeyManager<K>, KeyManagerError> {
+    fn test_key_manager<K: KeyStore>(
+        keystore: K,
+        store: Rc<Storage>,
+    ) -> Result<KeyManager<K>, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
 

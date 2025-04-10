@@ -582,6 +582,7 @@ mod tests {
             "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
         );
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -606,6 +607,7 @@ mod tests {
 
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -630,6 +632,7 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -655,6 +658,7 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -680,6 +684,7 @@ mod tests {
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -708,6 +713,7 @@ mod tests {
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -738,6 +744,7 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
         assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -775,6 +782,7 @@ mod tests {
         assert!(pk2 != pk4);
         assert!(pk5 != pk6);
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -909,6 +917,7 @@ mod tests {
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -946,6 +955,7 @@ mod tests {
 
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -982,6 +992,7 @@ mod tests {
 
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -1016,6 +1027,8 @@ mod tests {
             assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
         }
 
+        drop(key_manager_2);
+        drop(key_manager_1);
         cleanup_storage(&keystore_path_1);
         cleanup_storage(&keystore_path_2);
         cleanup_storage(&store_path_1);
@@ -1053,6 +1066,7 @@ mod tests {
 
             assert_eq!(public_keys[i as usize], public_key);
         }
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -1099,10 +1113,12 @@ mod tests {
     }
 
     fn cleanup_storage(path: &str) {
+        println!("Cleaning up storage at: {}", path);
         fs::remove_dir_all(path).unwrap();
     }
 
     fn cleanup_file_storage(path: &str) {
+        println!("Cleaning up storage at: {}", path);
         fs::remove_file(path).unwrap();
     }
 

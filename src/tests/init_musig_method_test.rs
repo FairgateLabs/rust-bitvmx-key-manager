@@ -20,7 +20,6 @@ mod tests {
         let key_manager = create_key_manager("test_output/keystore_1", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
         let musig = MuSig2Signer::new(store);
-        let musig_id = "1234567890";
 
         let participant_1 = "026e14224899cf9c780fef5dd200f92a28cc67f71c0af6fe30b5657ffc943f08f4"
             .parse::<PublicKey>()
@@ -31,8 +30,7 @@ mod tests {
 
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
-        let _aggregated_pubkey =
-            musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key)?;
+        let _aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), my_pub_key)?;
 
         clear_output();
 
@@ -47,14 +45,12 @@ mod tests {
 
         let musig = MuSig2Signer::new(store);
 
-        let musig_id = "1234567890";
-
         let participant_1 = "026e14224899cf9c780fef5dd200f92a28cc67f71c0af6fe30b5657ffc943f08f4"
             .parse::<PublicKey>()
             .unwrap();
         let participant_pubkeys = vec![participant_1];
 
-        let result = musig.new_session(musig_id, participant_pubkeys.clone(), participant_1);
+        let result = musig.new_session(participant_pubkeys.clone(), participant_1);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -76,7 +72,6 @@ mod tests {
         let key_manager = create_key_manager("test_output/keystore_3", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
         let musig = MuSig2Signer::new(store);
-        let musig_id = "1234567890";
 
         let participant_1 = "026e14224899cf9c780fef5dd200f92a28cc67f71c0af6fe30b5657ffc943f08f4"
             .parse::<PublicKey>()
@@ -87,7 +82,7 @@ mod tests {
 
         let participant_pubkeys = vec![participant_1, participant_2];
 
-        let result = musig.new_session(musig_id, participant_pubkeys.clone(), my_pub_key);
+        let result = musig.new_session(participant_pubkeys.clone(), my_pub_key);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -107,7 +102,6 @@ mod tests {
         let key_manager = create_key_manager("test_output/keystore_4", store.clone())?;
         let my_pub_key = create_pub_key(&key_manager)?;
         let musig = MuSig2Signer::new(store);
-        let musig_id = "1";
 
         let participant_1 = "026e14224899cf9c780fef5dd200f92a28cc67f71c0af6fe30b5657ffc943f08f4"
             .parse::<PublicKey>()
@@ -119,15 +113,13 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2, my_pub_key];
 
         let aggregated_pub_key = musig
-            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .new_session(participant_pubkeys.clone(), my_pub_key)
             .unwrap();
 
         let participant_pubkeys = vec![participant_2, my_pub_key, participant_1];
 
-        let musig_id = "2";
-
         let aggregated_pub_key_2 = musig
-            .new_session(musig_id, participant_pubkeys.clone(), my_pub_key)
+            .new_session(participant_pubkeys.clone(), my_pub_key)
             .unwrap();
 
         // Check if the aggregated pub keys are the same

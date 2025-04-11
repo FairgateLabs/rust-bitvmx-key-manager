@@ -415,6 +415,13 @@ impl<K: KeyStore> KeyManager<K> {
         self.musig2.new_session(participant_pubkeys, my_pub_key)
     }
 
+    pub fn get_my_public_key(
+        &self,
+        aggregated_pubkey: &PublicKey,
+    ) -> Result<PublicKey, Musig2SignerError> {
+        self.musig2.my_public_key(aggregated_pubkey)
+    }
+
     pub fn aggregate_nonces(
         &self,
         aggregated_pubkey: &PublicKey,

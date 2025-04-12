@@ -351,14 +351,17 @@ impl<K: KeyStore> KeyManager<K> {
 
     pub fn sign_partial_message(
         &self,
-        id: &str,
+        aggregated_pubkey: &PublicKey,
         my_public_key: PublicKey,
         secnonce: SecNonce,
         aggregated_nonce: AggNonce,
         tweak: Option<musig2::secp256k1::Scalar>,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
-        let key_aggregation_context = self.musig2.get_key_agg_context(id, tweak).unwrap();
+        let key_aggregation_context = self
+            .musig2
+            .get_key_agg_context(aggregated_pubkey, tweak)
+            .unwrap();
 
         let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
@@ -406,61 +409,70 @@ impl<K: KeyStore> KeyManager<K> {
 
     pub fn new_musig2_session(
         &self,
-        id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
-        self.musig2.new_session(id, participant_pubkeys, my_pub_key)
+        self.musig2.new_session(participant_pubkeys, my_pub_key)
+    }
+
+    pub fn get_my_public_key(
+        &self,
+        aggregated_pubkey: &PublicKey,
+    ) -> Result<PublicKey, Musig2SignerError> {
+        self.musig2.my_public_key(aggregated_pubkey)
     }
 
     pub fn aggregate_nonces(
         &self,
-        id: &str,
+        aggregated_pubkey: &PublicKey,
         pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
     ) -> Result<(), Musig2SignerError> {
-        self.musig2.aggregate_nonces(id, pub_nonces_map)
+        self.musig2
+            .aggregate_nonces(aggregated_pubkey, pub_nonces_map)
     }
 
     pub fn get_my_pub_nonces(
         &self,
-        id: &str,
+        aggregated_pubkey: &PublicKey,
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
-        self.musig2.get_my_pub_nonces(id)
+        self.musig2.get_my_pub_nonces(aggregated_pubkey)
     }
 
     pub fn save_partial_signatures(
         &self,
-        id: &str,
+        aggregated_pubkey: &PublicKey,
         other_public_key: PublicKey,
         other_partial_signatures: Vec<(MessageId, PartialSignature)>,
     ) -> Result<Vec<(MessageId, PartialSignature)>, Musig2SignerError> {
         let mut partial_signatures = HashMap::new();
         partial_signatures.insert(other_public_key, other_partial_signatures);
 
-        let my_partial_signatures = self.get_my_partial_signatures(id)?;
-        let my_pub_key = self.musig2.my_public_key(id)?;
+        let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey)?;
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
         partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
 
         self.musig2
-            .save_partial_signatures(id, partial_signatures)?;
+            .save_partial_signatures(aggregated_pubkey, partial_signatures)?;
 
         Ok(my_partial_signatures)
     }
 
     pub fn get_my_partial_signatures(
         &self,
-        id: &str,
+        aggregated_pubkey: &PublicKey,
     ) -> Result<Vec<(MessageId, PartialSignature)>, Musig2SignerError> {
         let mut my_partial_signatures = Vec::new();
 
-        let data_to_iterate = self.musig2.get_data_for_partial_signatures(id)?;
-        let my_pub_key = self.musig2.my_public_key(id)?;
+        let data_to_iterate = self
+            .musig2
+            .get_data_for_partial_signatures(aggregated_pubkey)?;
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
         for (message_id, (message, sec_nonce, tweak, aggregated_nonce)) in data_to_iterate.iter() {
             let sig = self
                 .sign_partial_message(
-                    id,
+                    aggregated_pubkey,
                     my_pub_key,
                     sec_nonce.clone(),
                     aggregated_nonce.clone(),
@@ -477,40 +489,34 @@ impl<K: KeyStore> KeyManager<K> {
 
     pub fn get_aggregated_signature(
         &self,
-        musig_id: &str,
+        aggregated_pubkey: &PublicKey,
         message_id: &str,
     ) -> Result<secp256k1::schnorr::Signature, Musig2SignerError> {
-        self.musig2.get_aggregated_signature(musig_id, message_id)
+        self.musig2
+            .get_aggregated_signature(aggregated_pubkey, message_id)
     }
 
     pub fn generate_nonce(
         &self,
-        musig_id: &str,
         message_id: &str,
         message: Vec<u8>,
         aggregated_pubkey: &PublicKey,
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<(), Musig2SignerError> {
-        let index = self.musig2.get_index(musig_id)?;
-        let public_key = self.musig2.my_public_key(musig_id)?;
+        let index = self.musig2.get_index(aggregated_pubkey)?;
+        let public_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
         let nonce_seed: [u8; 32] = self
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 
-        self.musig2.generate_nonce(
-            musig_id,
-            message_id,
-            message,
-            aggregated_pubkey,
-            tweak,
-            nonce_seed,
-        )
+        self.musig2
+            .generate_nonce(message_id, message, aggregated_pubkey, tweak, nonce_seed)
     }
 
-    pub fn get_aggregated_pubkey(&self, id: &str) -> Result<PublicKey, Musig2SignerError> {
+    /*pub fn get_aggregated_pubkey(&self, id: &str) -> Result<PublicKey, Musig2SignerError> {
         self.musig2.get_aggregated_pubkey(id)
-    }
+    }*/
 }
 
 #[cfg(test)]
@@ -582,6 +588,7 @@ mod tests {
             "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
         );
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -606,6 +613,7 @@ mod tests {
 
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -630,6 +638,7 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -655,6 +664,7 @@ mod tests {
 
         assert!(signature_verifier.verify_schnorr_signature(&signature, &message, tweaked_key));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -680,6 +690,7 @@ mod tests {
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -708,6 +719,7 @@ mod tests {
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -738,6 +750,7 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
         assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -775,6 +788,7 @@ mod tests {
         assert!(pk2 != pk4);
         assert!(pk5 != pk6);
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -909,6 +923,7 @@ mod tests {
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         Ok(())
@@ -946,6 +961,7 @@ mod tests {
 
         assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -982,6 +998,7 @@ mod tests {
 
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
 
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -1016,6 +1033,8 @@ mod tests {
             assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
         }
 
+        drop(key_manager_2);
+        drop(key_manager_1);
         cleanup_storage(&keystore_path_1);
         cleanup_storage(&keystore_path_2);
         cleanup_storage(&store_path_1);
@@ -1053,6 +1072,7 @@ mod tests {
 
             assert_eq!(public_keys[i as usize], public_key);
         }
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
@@ -1099,10 +1119,12 @@ mod tests {
     }
 
     fn cleanup_storage(path: &str) {
+        println!("Cleaning up storage at: {}", path);
         fs::remove_dir_all(path).unwrap();
     }
 
     fn cleanup_file_storage(path: &str) {
+        println!("Cleaning up storage at: {}", path);
         fs::remove_file(path).unwrap();
     }
 

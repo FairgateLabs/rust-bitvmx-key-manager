@@ -209,7 +209,7 @@ impl WinternitzSignature {
     pub fn message_digits(&self) -> Vec<u8> {
         let mut copy = self.digits.clone();
         copy.reverse();
-        copy[self.message_length - 1..].to_vec()
+        copy[self.checksum_length()..].to_vec()
     }
 
     pub fn message_bytes(&self) -> Vec<u8> {

@@ -437,7 +437,25 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
         self.musig2.get_my_pub_nonces(aggregated_pubkey)
     }
+   
+    pub fn save_partial_signatures_multi(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        mut partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    ) -> Result<(), Musig2SignerError> {
+        //TODO: Fix this
+        //this is a workaround bacause the as leader I got all the partial before sending mine
+        //and therefore have it computed.
+        //this should change in program
+        let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey)?;
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
+        partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
+        Ok(self
+            .musig2
+            .save_partial_signatures(aggregated_pubkey, partial_signatures_mapping)?)
+    }
+    
     pub fn save_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,

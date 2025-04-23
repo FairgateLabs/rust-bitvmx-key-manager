@@ -349,6 +349,19 @@ impl<K: KeyStore> KeyManager<K> {
     /*********** MuSig2 **************/
     /*********************************/
 
+    //TODO: Revisit this decision. The private key is used for the TOO protoocl.
+    pub fn get_key_pair_for_too_insecure(
+        &self,
+        aggregated_pubkey: &PublicKey,
+    ) -> Result<(PrivateKey, PublicKey), KeyManagerError> {
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey).unwrap();
+
+        match self.keystore.load_keypair(&my_pub_key)? {
+            Some(entry) => Ok(entry),
+            None => Err(KeyManagerError::EntryNotFound),
+        }
+    }
+
     pub fn sign_partial_message(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -437,7 +450,7 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
         self.musig2.get_my_pub_nonces(aggregated_pubkey)
     }
-   
+
     pub fn save_partial_signatures_multi(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -455,7 +468,7 @@ impl<K: KeyStore> KeyManager<K> {
             .musig2
             .save_partial_signatures(aggregated_pubkey, partial_signatures_mapping)?)
     }
-    
+
     pub fn save_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,

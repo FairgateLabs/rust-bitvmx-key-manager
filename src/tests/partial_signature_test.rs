@@ -1,36 +1,21 @@
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, path::PathBuf, rc::Rc};
-
-    use bitcoin::PublicKey;
-    use storage_backend::storage::Storage;
+    use std::collections::HashMap;
 
     use crate::{
-        musig2::{
-            errors::Musig2SignerError,
-            musig::{MuSig2Signer, MuSig2SignerApi},
-        },
-        tests::utils::helper::{clear_output, create_key_manager, create_pub_key},
+        musig2::{errors::Musig2SignerError, musig::MuSig2SignerApi},
+        tests::utils::helper::{clear_output, mock_data},
     };
 
     #[test]
     fn test_get_partial_signatures() -> Result<(), anyhow::Error> {
         // Set up test environment
-        let path = PathBuf::from(format!("test_output/test_partial_1"));
-        let store = Rc::new(Storage::new_with_path(&path).unwrap());
-        let key_manager = create_key_manager("test_output/keystore_partial_1", store.clone())?;
-        let participant_2 = create_pub_key(&key_manager)?;
-
-        let musig = MuSig2Signer::new(store);
-        let key_manager = Rc::new(key_manager);
-
-        let participant_1 = "026e14224899cf9c780fef5dd200f92a28cc67f71c0af6fe30b5657ffc943f08f4"
-            .parse::<PublicKey>()
-            .unwrap();
+        let (key_manager, participant_1, musig) = mock_data()?;
+        let (_, participant_2, _) = mock_data()?;
         let participant_pubkeys = vec![participant_1, participant_2];
 
         let aggregated_pubkey = musig
-            .new_session(participant_pubkeys.clone(), participant_2)
+            .new_session(participant_pubkeys.clone(), participant_1)
             .expect("Failed to initialize MuSig session");
 
         let index = musig.get_index(&aggregated_pubkey)?;
@@ -60,7 +45,7 @@ mod tests {
 
         let mut nonces_map = HashMap::new();
         nonces_map.insert(
-            participant_1,
+            participant_2,
             musig.get_my_pub_nonces(&aggregated_pubkey).unwrap(),
         );
 

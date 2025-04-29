@@ -1,30 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, path::PathBuf, rc::Rc};
-
-    use storage_backend::storage::Storage;
-
     use crate::{
-        musig2::musig::{MuSig2Signer, MuSig2SignerApi},
-        tests::utils::helper::{clear_output, create_key_manager, create_pub_key},
+        musig2::musig::MuSig2SignerApi,
+        tests::utils::helper::{clear_output, mock_data},
     };
+    use std::collections::HashMap;
 
     #[test]
     fn test_final_signature() -> Result<(), anyhow::Error> {
         // Set up test environment
-        let path = PathBuf::from(format!("test_output/test_final_signature_1"));
-        let store = Rc::new(Storage::new_with_path(&path).unwrap());
-        let key_manager_1 = create_key_manager("test_output/keystore_1", store.clone())?;
-
-        let pub_key_part_1 = create_pub_key(&key_manager_1)?;
-        let musig_1 = MuSig2Signer::new(store);
-
-        let path = PathBuf::from(format!("test_output/test_final_signature_2"));
-        let store = Rc::new(Storage::new_with_path(&path).unwrap());
-        let key_manager_2 = create_key_manager("test_output/keystore_2", store.clone())?;
-
-        let pub_key_part_2 = create_pub_key(&key_manager_2)?;
-        let musig_2 = MuSig2Signer::new(store);
+        let (key_manager_1, pub_key_part_1, musig_1) = mock_data()?;
+        let (key_manager_2, pub_key_part_2, musig_2) = mock_data()?;
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
         let aggregated_pub_key_1 =

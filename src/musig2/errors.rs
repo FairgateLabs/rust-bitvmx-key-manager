@@ -5,8 +5,11 @@ pub enum Musig2SignerError {
     #[error("Storage error: {0}")]
     StorageError(#[from] storage_backend::error::StorageError),
 
-    #[error("Musig ID not found")]
-    MuSig2IdNotFound,
+    #[error("Aggregated public key not found")]
+    AggregatedPubkeyNotFound,
+
+    #[error("ID not found")]
+    IdNotFound,
 
     #[error("Partial signature already exists")]
     PartialSignatureAlreadyExists,

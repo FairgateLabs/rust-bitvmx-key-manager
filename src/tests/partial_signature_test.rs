@@ -59,7 +59,10 @@ mod tests {
 
         // Test getting partial signatures for non-existent ID
         let result = key_manager.get_my_partial_signatures(&public_key);
-        assert!(matches!(result, Err(Musig2SignerError::MuSig2IdNotFound)));
+        assert!(matches!(
+            result,
+            Err(Musig2SignerError::AggregatedPubkeyNotFound)
+        ));
 
         clear_output();
 

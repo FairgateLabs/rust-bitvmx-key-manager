@@ -5,16 +5,13 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MuSig2Session {
-    /// Musig ID
     pub id: String,
 
     pub my_pub_key: PublicKey,
 
-    /// Public keys of all participants including the current one for each message
-    pub participant_pub_keys: Vec<PublicKey>,
+    pub participant_pubkeys: Vec<PublicKey>,
 
-    // Data of the current session
-    pub data: HashMap<MessageId, Musig2Data>,
+    pub data: HashMap<String, HashMap<MessageId, Musig2Data>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -64,11 +61,19 @@ impl Musig2Data {
 }
 
 impl MuSig2Session {
-    pub fn new(id: String, participant_pubkeys: Vec<PublicKey>, my_pub_key: PublicKey) -> Self {
+    pub fn new(
+        aggregated_pubkey: PublicKey,
+        id: String,
+        participant_pubkeys: Vec<PublicKey>,
+        my_pub_key: PublicKey,
+    ) -> Self {
+        let mut data = HashMap::new();
+        data.insert(id, HashMap::new());
+
         Self {
-            id,
-            participant_pub_keys: participant_pubkeys,
-            data: HashMap::new(),
+            id: aggregated_pubkey.to_string(),
+            participant_pubkeys,
+            data,
             my_pub_key,
         }
     }

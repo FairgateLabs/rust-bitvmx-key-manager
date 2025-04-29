@@ -20,7 +20,7 @@ mod tests {
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
         let aggregated_pub_key = musig.new_session(participant_pubkeys.clone(), pub_key_part_1)?;
-        let messages = vec!["1 test message", "2 test message", "3 test message"];
+        let messages = ["1 test message", "2 test message", "3 test message"];
 
         // Generate pub nonces for all messages
         key_manager.generate_nonce(
@@ -108,15 +108,15 @@ mod tests {
             my_partial_sigs_1,
         )?;
 
-        let signature_1 = musig.get_aggregated_signature(&aggregated_pub_key, &messages[0])?;
-        let signature_2 = musig2.get_aggregated_signature(&aggregated_pub_key_2, &messages[1])?;
+        let signature_1 = musig.get_aggregated_signature(&aggregated_pub_key, messages[0])?;
+        let signature_2 = musig2.get_aggregated_signature(&aggregated_pub_key_2, messages[1])?;
         // Check that signatures length matches number of messages
 
         let verification_1 =
-            musig.verify_final_signature(&messages[0], signature_1, aggregated_pub_key)?;
+            musig.verify_final_signature(messages[0], signature_1, aggregated_pub_key)?;
 
         let verification_2 =
-            musig2.verify_final_signature(&messages[1], signature_2, aggregated_pub_key)?;
+            musig2.verify_final_signature(messages[1], signature_2, aggregated_pub_key)?;
 
         assert!(verification_1);
         assert!(verification_2);

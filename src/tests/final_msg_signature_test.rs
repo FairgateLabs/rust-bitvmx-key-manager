@@ -64,10 +64,10 @@ mod tests {
         let signature_2 = musig_2.get_aggregated_signature(&aggregated_pub_key_2, "message_1")?;
 
         let verification_1 =
-            musig_1.verify_final_signature(&"message_1", signature_1, aggregated_pub_key_1)?;
+            musig_1.verify_final_signature("message_1", signature_1, aggregated_pub_key_1)?;
 
         let verification_2 =
-            musig_2.verify_final_signature(&"message_1", signature_2, aggregated_pub_key_2)?;
+            musig_2.verify_final_signature("message_1", signature_2, aggregated_pub_key_2)?;
 
         assert!(verification_1);
         assert!(verification_2);

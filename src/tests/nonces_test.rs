@@ -27,7 +27,10 @@ mod tests {
 
         // Test getting nonces for non-existent id fails
         let result = musig.get_my_pub_nonces(&participant_1);
-        assert!(matches!(result, Err(Musig2SignerError::MuSig2IdNotFound)));
+        assert!(matches!(
+            result,
+            Err(Musig2SignerError::MuSig2IdNotFound(_))
+        ));
 
         clear_output();
 
@@ -63,7 +66,10 @@ mod tests {
 
         // Test adding nonces for non-existent id fails
         let result = musig.aggregate_nonces(&participant_1, pub_nonces_map.clone());
-        assert!(matches!(result, Err(Musig2SignerError::MuSig2IdNotFound)));
+        assert!(matches!(
+            result,
+            Err(Musig2SignerError::MuSig2IdNotFound(_))
+        ));
 
         let result = musig.aggregate_nonces(&aggregated_pubkey, pub_nonces_map.clone());
         assert!(matches!(result, Err(Musig2SignerError::InvalidPublicKey)));

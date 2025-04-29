@@ -219,7 +219,7 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
         };
 
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
@@ -248,7 +248,9 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(public_key.to_string()));
+            }
         };
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -265,7 +267,7 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
         };
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -287,7 +289,7 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
         };
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -358,7 +360,7 @@ impl<K: KeyStore> KeyManager<K> {
 
         match self.keystore.load_keypair(&my_pub_key)? {
             Some(entry) => Ok(entry),
-            None => Err(KeyManagerError::EntryNotFound),
+            None => Err(KeyManagerError::KeyPairNotFound(my_pub_key.to_string())),
         }
     }
 
@@ -378,7 +380,7 @@ impl<K: KeyStore> KeyManager<K> {
 
         let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => return Err(KeyManagerError::KeyPairNotFound(my_public_key.to_string())),
         };
 
         let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
@@ -396,7 +398,7 @@ impl<K: KeyStore> KeyManager<K> {
             Ok(signature) => Ok(signature),
             Err(e) => {
                 debug!("Failed to sign message: {:?}", e);
-                return Err(KeyManagerError::FailedToSignMessage);
+                Err(KeyManagerError::FailedToSignMessage)
             }
         }
     }
@@ -408,7 +410,7 @@ impl<K: KeyStore> KeyManager<K> {
     ) -> Result<[u8; 32], KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::EntryNotFound),
+            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
         };
 
         let mut data = Vec::new();
@@ -464,9 +466,8 @@ impl<K: KeyStore> KeyManager<K> {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self
-            .musig2
-            .save_partial_signatures(aggregated_pubkey, partial_signatures_mapping)?)
+        self.musig2
+            .save_partial_signatures(aggregated_pubkey, partial_signatures_mapping)
     }
 
     pub fn save_partial_signatures(
@@ -507,7 +508,7 @@ impl<K: KeyStore> KeyManager<K> {
                     my_pub_key,
                     sec_nonce.clone(),
                     aggregated_nonce.clone(),
-                    tweak.clone(),
+                    *tweak,
                     message.clone(),
                 )
                 .map_err(|_| Musig2SignerError::InvalidSignature)?;
@@ -952,7 +953,7 @@ mod tests {
             "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         )?;
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
-        assert!(matches!(result, Err(KeyManagerError::EntryNotFound)));
+        assert!(matches!(result, Err(KeyManagerError::KeyPairNotFound(_))));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);

@@ -72,10 +72,10 @@ fn decode_winternitz_seed(seed: &str) -> Result<[u8; 32], ConfigError> {
     if winternitz_seed.len() > 32 {
         return Err(ConfigError::InvalidWinternitzSeed);
     }
-    Ok(winternitz_seed
+    winternitz_seed
         .as_slice()
         .try_into()
-        .map_err(|_| ConfigError::InvalidWinternitzSeed)?)
+        .map_err(|_| ConfigError::InvalidWinternitzSeed)
 }
 
 fn decode_key_derivation_seed(seed: &str) -> Result<[u8; 32], ConfigError> {
@@ -84,8 +84,8 @@ fn decode_key_derivation_seed(seed: &str) -> Result<[u8; 32], ConfigError> {
     if key_derivation_seed.len() > 32 {
         return Err(ConfigError::InvalidKeyDerivationSeed);
     }
-    Ok(key_derivation_seed
+    key_derivation_seed
         .as_slice()
         .try_into()
-        .map_err(|_| ConfigError::InvalidKeyDerivationSeed)?)
+        .map_err(|_| ConfigError::InvalidKeyDerivationSeed)
 }

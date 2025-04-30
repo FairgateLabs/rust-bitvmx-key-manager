@@ -38,6 +38,16 @@ pub struct MuSig2Signer {
     store: Rc<Storage>,
 }
 
+pub type PartialSignatureData = HashMap<
+    String,
+    (
+        Vec<u8>,
+        SecNonce,
+        Option<musig2::secp256k1::Scalar>,
+        AggNonce,
+    ),
+>;
+
 #[allow(dead_code)]
 pub trait MuSig2SignerApi {
     /// Initializes a new MuSig2 signing session.
@@ -132,18 +142,7 @@ pub trait MuSig2SignerApi {
         &self,
         aggregated_pubkey: &PublicKey,
         id: &str,
-    ) -> Result<
-        HashMap<
-            String,
-            (
-                Vec<u8>,
-                SecNonce,
-                Option<musig2::secp256k1::Scalar>,
-                AggNonce,
-            ),
-        >,
-        Musig2SignerError,
-    >;
+    ) -> Result<PartialSignatureData, Musig2SignerError>;
 
     /// Verifies partial signatures from a participant.
     ///
@@ -572,7 +571,7 @@ impl MuSig2SignerApi for MuSig2Signer {
                 .get(&message_id)
                 .ok_or(Musig2SignerError::InvalidMessageId)?;
 
-            let key_agg_ctx = self.get_key_agg_context(aggregated_pubkey, tweak.clone())?;
+            let key_agg_ctx = self.get_key_agg_context(aggregated_pubkey, *tweak)?;
 
             let result = verify_partial(
                 &key_agg_ctx,
@@ -648,7 +647,7 @@ impl MuSig2Signer {
         nonce_seed: [u8; 32],
     ) -> Result<(), Musig2SignerError> {
         let mut musig_data = self
-            .get_musig_data(&aggregated_pubkey)?
+            .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
         let musig_id_data = musig_data
@@ -663,7 +662,7 @@ impl MuSig2Signer {
         }
 
         let sec_nonce = musig2::SecNonceBuilder::new(nonce_seed)
-            .with_pubkey(to_musig_pubkey(aggregated_pubkey.clone())?)
+            .with_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
             .with_message(&message)
             .build();
 
@@ -740,7 +739,7 @@ impl MuSig2Signer {
 
     pub fn get_index(&self, aggregated_pubkey: &PublicKey) -> Result<u32, Musig2SignerError> {
         let musig_data = self
-            .get_musig_data(&aggregated_pubkey)?
+            .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
         let key_index_used_by_me =
@@ -805,10 +804,12 @@ impl MuSig2Signer {
     fn save_musig_data(&self, musig_data: &MuSig2Session) -> Result<(), Musig2SignerError> {
         debug!(
             "Saving musig data for aggregated pubkey: {} {:?}",
-            musig_data.id, musig_data
+            musig_data.aggregated_pubkey_id, musig_data
         );
         self.store.set(
-            self.get_key(StoreKey::MuSig2Session(musig_data.id.clone())),
+            self.get_key(StoreKey::MuSig2Session(
+                musig_data.aggregated_pubkey_id.clone(),
+            )),
             musig_data,
             None,
         )?;

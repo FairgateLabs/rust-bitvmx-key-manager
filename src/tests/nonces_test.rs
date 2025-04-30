@@ -42,13 +42,13 @@ mod tests {
 
     #[test]
     fn test_add_nonces() -> Result<(), anyhow::Error> {
-        let (_, participant_1, _) = mock_data()?;
-        let (key_manager, participant_2, musig) = mock_data()?;
-        let participant_pubkeys = vec![participant_1, participant_2];
+        let (key_manager, participant_1, musig) = mock_data()?;
+        let (_, participant_2, _) = mock_data()?;
+        let participant_pubkeys = vec![participant_2, participant_1];
 
         let id = "test_id";
         let aggregated_pubkey =
-            musig.new_session(participant_pubkeys.clone(), id, participant_2)?;
+            musig.new_session(participant_pubkeys.clone(), id, participant_1)?;
 
         //For now we use the same nonces that we get from the first participant.
         let nonces = musig.get_my_pub_nonces(&aggregated_pubkey, id);
@@ -68,10 +68,10 @@ mod tests {
 
         // Create nonces map for second participant
         let mut pub_nonces_map = HashMap::new();
-        pub_nonces_map.insert(participant_2, nonces.clone());
+        pub_nonces_map.insert(participant_1, nonces.clone());
 
         // Test adding nonces for non-existent id fails
-        let result = musig.aggregate_nonces(&participant_1, id, pub_nonces_map.clone());
+        let result = musig.aggregate_nonces(&participant_2, id, pub_nonces_map.clone());
         assert!(matches!(
             result,
             Err(Musig2SignerError::AggregatedPubkeyNotFound)
@@ -81,7 +81,7 @@ mod tests {
         assert!(matches!(result, Err(Musig2SignerError::InvalidPublicKey)));
 
         let mut pub_nonces_map = HashMap::new();
-        pub_nonces_map.insert(participant_1, nonces.clone());
+        pub_nonces_map.insert(participant_2, nonces.clone());
 
         // Test adding duplicate nonces fails
         musig.aggregate_nonces(&aggregated_pubkey, id, pub_nonces_map.clone())?;

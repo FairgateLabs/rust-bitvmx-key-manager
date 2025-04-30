@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MuSig2Session {
-    pub id: String,
+    pub aggregated_pubkey_id: String,
 
     pub my_pub_key: PublicKey,
 
@@ -62,7 +62,7 @@ impl Musig2Data {
 
 impl MuSig2Session {
     pub fn new(
-        aggregated_pubkey: PublicKey,
+        aggregated_pubkey_id: PublicKey,
         id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
@@ -71,7 +71,7 @@ impl MuSig2Session {
         data.insert(id.to_string(), HashMap::new());
 
         Self {
-            id: aggregated_pubkey.to_string(),
+            aggregated_pubkey_id: aggregated_pubkey_id.to_string(),
             participant_pubkeys,
             data,
             my_pub_key,

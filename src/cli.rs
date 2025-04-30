@@ -457,7 +457,7 @@ impl Cli {
             &self.config.key_manager.network,
         )?;
 
-        let path = PathBuf::from(format!("/tmp/key_manager_storage"));
+        let path = PathBuf::from("/tmp/key_manager_storage".to_string());
         let store = Rc::new(Storage::new_with_path(&path).unwrap());
 
         Ok(create_key_manager_from_config(

@@ -396,7 +396,7 @@ impl<K: KeyStore> KeyManager<K> {
             Ok(signature) => Ok(signature),
             Err(e) => {
                 debug!("Failed to sign message: {:?}", e);
-                return Err(KeyManagerError::FailedToSignMessage);
+                Err(KeyManagerError::FailedToSignMessage)
             }
         }
     }
@@ -468,11 +468,8 @@ impl<K: KeyStore> KeyManager<K> {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self.musig2.save_partial_signatures(
-            aggregated_pubkey,
-            id,
-            partial_signatures_mapping,
-        )?)
+        self.musig2
+            .save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)
     }
 
     pub fn save_partial_signatures(
@@ -515,7 +512,7 @@ impl<K: KeyStore> KeyManager<K> {
                     my_pub_key,
                     sec_nonce.clone(),
                     aggregated_nonce.clone(),
-                    tweak.clone(),
+                    *tweak,
                     message.clone(),
                 )
                 .map_err(|_| Musig2SignerError::InvalidSignature)?;

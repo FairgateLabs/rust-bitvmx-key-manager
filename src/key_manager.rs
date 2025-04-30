@@ -423,7 +423,7 @@ impl<K: KeyStore> KeyManager<K> {
     pub fn new_musig2_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: String,
+        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
         self.musig2.new_session(participant_pubkeys, id, my_pub_key)
@@ -760,9 +760,6 @@ mod tests {
         let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 0)?;
         let signature =
             key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
-
-        println!("Pk size: {:?}", pk.total_len());
-        println!("Msg: {:?}", &message[..]);
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 

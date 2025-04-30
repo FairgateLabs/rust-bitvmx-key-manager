@@ -14,8 +14,9 @@ mod tests {
         let (_, participant_2, _) = mock_data()?;
         let participant_pubkeys = vec![participant_1, participant_2];
 
+        let id = "test_id";
         let aggregated_pubkey = musig
-            .new_session(participant_pubkeys.clone(), participant_1)
+            .new_session(participant_pubkeys.clone(), id, participant_1)
             .expect("Failed to initialize MuSig session");
 
         let index = musig.get_index(&aggregated_pubkey)?;
@@ -29,13 +30,14 @@ mod tests {
             "message_1",
             "message_1".as_bytes().to_vec(),
             &aggregated_pubkey,
+            id,
             None,
             nonce_seed,
         )?;
 
-        musig.get_my_pub_nonces(&aggregated_pubkey).unwrap();
+        musig.get_my_pub_nonces(&aggregated_pubkey, id)?;
 
-        let result = key_manager.get_my_partial_signatures(&aggregated_pubkey);
+        let result = key_manager.get_my_partial_signatures(&aggregated_pubkey, id);
         assert!(matches!(
             result,
             Err(Musig2SignerError::IncompleteParticipantNonces)
@@ -44,21 +46,16 @@ mod tests {
         // Use same nonces for both participants
 
         let mut nonces_map = HashMap::new();
-        nonces_map.insert(
-            participant_2,
-            musig.get_my_pub_nonces(&aggregated_pubkey).unwrap(),
-        );
-
-        musig
-            .aggregate_nonces(&aggregated_pubkey, nonces_map)
-            .unwrap();
+        let mypub_nonces = musig.get_my_pub_nonces(&aggregated_pubkey, id)?;
+        nonces_map.insert(participant_2, mypub_nonces);
+        musig.aggregate_nonces(&aggregated_pubkey, id, nonces_map)?;
 
         // Test getting partial signatures
-        let result = key_manager.get_my_partial_signatures(&aggregated_pubkey);
+        let result = key_manager.get_my_partial_signatures(&aggregated_pubkey, id);
         assert!(result.is_ok());
 
         // Test getting partial signatures for non-existent ID
-        let result = key_manager.get_my_partial_signatures(&public_key);
+        let result = key_manager.get_my_partial_signatures(&public_key, id);
         assert!(matches!(
             result,
             Err(Musig2SignerError::AggregatedPubkeyNotFound)

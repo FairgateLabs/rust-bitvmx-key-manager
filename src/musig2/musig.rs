@@ -55,7 +55,7 @@ pub trait MuSig2SignerApi {
     fn new_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: String,
+        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError>;
 
@@ -227,7 +227,7 @@ impl MuSig2SignerApi for MuSig2Signer {
     fn new_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: String,
+        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
         if participant_pubkeys.len() < 2 {
@@ -260,13 +260,6 @@ impl MuSig2SignerApi for MuSig2Signer {
         Ok(aggregated_pubkey)
     }
 
-    //fn get_aggregated_pubkey(&self, session_id: &str) -> Result<PublicKey, Musig2SignerError> {
-    // // Sort participants by public key
-    // let mut sorted_participants = participant_pubkeys.clone();
-    // sorted_participants.sort();
-
-    //
-
     fn get_my_pub_nonces(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -276,17 +269,17 @@ impl MuSig2SignerApi for MuSig2Signer {
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
+        let musig_id_data = musig_data
+            .data
+            .get(id)
+            .ok_or(Musig2SignerError::IdNotFound)?;
+
         let mut pub_nonces = Vec::new();
 
-        for (message_id, data) in musig_data.data.iter() {
+        for (message_id, data) in musig_id_data.iter() {
             pub_nonces.push((
                 message_id.clone(),
-                data.get(id)
-                    .unwrap()
-                    .pub_nonces
-                    .get(&musig_data.my_pub_key)
-                    .unwrap()
-                    .clone(),
+                data.pub_nonces.get(&musig_data.my_pub_key).unwrap().clone(),
             ));
         }
 
@@ -387,16 +380,9 @@ impl MuSig2SignerApi for MuSig2Signer {
             }
         }
 
-        let aggregated_nonces = self.get_aggregated_nonces(aggregated_pubkey)?;
-        let mut data_to_sign: HashMap<
-            String,
-            (
-                Vec<u8>,
-                SecNonce,
-                Option<musig2::secp256k1::Scalar>,
-                AggNonce,
-            ),
-        > = HashMap::new();
+        let aggregated_nonces = self.get_aggregated_nonces(aggregated_pubkey, id)?;
+
+        let mut data_to_sign = HashMap::new();
 
         for (message_id, data) in musig_id_data.iter() {
             let aggregated_nonce = aggregated_nonces
@@ -520,7 +506,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         }
 
         let key_agg_ctx = self.get_key_agg_context(aggregated_pubkey, data.tweak())?;
-        let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, message_id)?;
+        let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, id, message_id)?;
 
         let mut partial_signatures = Vec::new();
 
@@ -563,18 +549,10 @@ impl MuSig2SignerApi for MuSig2Signer {
             return Err(Musig2SignerError::InvalidPublicKey);
         }
 
-        let mut data_to_iterate: HashMap<
-            MessageId,
-            (
-                Vec<u8>,
-                AggNonce,
-                PubNonce,
-                Option<musig2::secp256k1::Scalar>,
-            ),
-        > = HashMap::new();
+        let mut data_to_iterate = HashMap::new();
 
         for (message_id, data) in musig_id_data.iter() {
-            let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, message_id)?;
+            let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, id, message_id)?;
 
             data_to_iterate.insert(
                 message_id.clone(),
@@ -684,9 +662,6 @@ impl MuSig2Signer {
             return Ok(());
         }
 
-        // let key_agg_context = self.get_key_agg_context(session_id, tweak)?;
-        // let aggregated_pubkey: musig2::secp256k1::PublicKey = key_agg_context.aggregated_pubkey();
-
         let sec_nonce = musig2::SecNonceBuilder::new(nonce_seed)
             .with_pubkey(to_musig_pubkey(aggregated_pubkey.clone())?)
             .with_message(&message)
@@ -708,17 +683,23 @@ impl MuSig2Signer {
     fn get_aggregated_nonces(
         &self,
         aggregated_pubkey: &PublicKey,
+        id: &str,
     ) -> Result<Vec<(MessageId, AggNonce)>, Musig2SignerError> {
         let musig_data = self
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
+        let musig_id_data = musig_data
+            .data
+            .get(id)
+            .ok_or(Musig2SignerError::IdNotFound)?;
+
         let mut aggregated_nonces: Vec<(MessageId, AggNonce)> = Vec::new();
 
-        for (message_id, _) in musig_data.data.iter() {
+        for (message_id, _) in musig_id_data.iter() {
             aggregated_nonces.push((
                 message_id.clone(),
-                self.get_aggregated_nonce(aggregated_pubkey, message_id)?,
+                self.get_aggregated_nonce(aggregated_pubkey, id, message_id)?,
             ));
         }
 
@@ -728,6 +709,7 @@ impl MuSig2Signer {
     fn get_aggregated_nonce(
         &self,
         aggregated_pubkey: &PublicKey,
+        id: &str,
         message_id: &str,
     ) -> Result<AggNonce, Musig2SignerError> {
         let musig_data = self
@@ -736,18 +718,17 @@ impl MuSig2Signer {
 
         let musig_id_data = musig_data
             .data
+            .get(id)
+            .ok_or(Musig2SignerError::IdNotFound)?;
+
+        let data = musig_id_data
             .get(message_id)
             .ok_or(Musig2SignerError::InvalidMessageId)?;
 
         let mut ordered_pub_nonces = Vec::new();
 
         for participant_key in musig_data.participant_pubkeys.iter() {
-            if let Some(nonce) = musig_id_data
-                .get(message_id)
-                .unwrap()
-                .pub_nonces
-                .get(participant_key)
-            {
+            if let Some(nonce) = data.pub_nonces.get(participant_key) {
                 ordered_pub_nonces.push(nonce);
             }
         }

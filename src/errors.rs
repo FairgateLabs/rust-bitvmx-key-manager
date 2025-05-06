@@ -23,8 +23,8 @@ pub enum KeyManagerError {
     #[error("Failed to access secure storage")]
     KeyStorageError(#[from] KeyStoreError),
 
-    #[error("Entry not found for public key")]
-    EntryNotFound,
+    #[error("KeyPair not found for public key {0}")]
+    KeyPairNotFound(String),
 
     #[error("Error in configuration")]
     ConfigError(#[from] ConfigError),

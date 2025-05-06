@@ -56,7 +56,7 @@ fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
     let keystore = database_keystore(&storage_path).unwrap();
 
-    let store_path = PathBuf::from(format!("/tmp/key_manager_storage"));
+    let store_path = PathBuf::from("/tmp/key_manager_storage".to_string());
     let store = Rc::new(Storage::new_with_path(&store_path).unwrap());
 
     let key_manager = test_key_manager(keystore, store).unwrap();

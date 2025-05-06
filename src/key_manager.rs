@@ -425,10 +425,9 @@ impl<K: KeyStore> KeyManager<K> {
     pub fn new_musig2_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
-        self.musig2.new_session(participant_pubkeys, id, my_pub_key)
+        self.musig2.new_session(participant_pubkeys, my_pub_key)
     }
 
     pub fn get_my_public_key(

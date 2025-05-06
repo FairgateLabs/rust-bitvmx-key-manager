@@ -13,8 +13,7 @@ mod tests {
         let participant_pubkeys = vec![participant_1, participant_2];
 
         let id = "test_id";
-        let aggregated_pubkey =
-            musig.new_session(participant_pubkeys.clone(), id, participant_1)?;
+        let aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), participant_1)?;
 
         key_manager.generate_nonce(
             "message_1",
@@ -47,8 +46,7 @@ mod tests {
         let participant_pubkeys = vec![participant_2, participant_1];
 
         let id = "test_id";
-        let aggregated_pubkey =
-            musig.new_session(participant_pubkeys.clone(), id, participant_1)?;
+        let aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), participant_1)?;
 
         //For now we use the same nonces that we get from the first participant.
         let nonces = musig.get_my_pub_nonces(&aggregated_pubkey, id);
@@ -107,8 +105,7 @@ mod tests {
 
         // Initialize first musig session
         let id = "test_id";
-        let aggregated_pubkey =
-            musig.new_session(participant_pubkeys.clone(), id, participant_1)?;
+        let aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), participant_1)?;
 
         key_manager.generate_nonce(
             "message_1",
@@ -125,8 +122,7 @@ mod tests {
 
         // Test nonce uniqueness - different session should give different nonce
         let participant_pubkeys = vec![participant_3, participant_2];
-        let aggregated_pubkey =
-            musig2.new_session(participant_pubkeys.clone(), id, participant_2)?;
+        let aggregated_pubkey = musig2.new_session(participant_pubkeys.clone(), participant_2)?;
         key_manager2.generate_nonce(
             "message_1",
             "message_1".as_bytes().to_vec(),

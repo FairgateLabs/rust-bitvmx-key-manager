@@ -63,17 +63,13 @@ impl Musig2Data {
 impl MuSig2Session {
     pub fn new(
         aggregated_pubkey_id: PublicKey,
-        id: &str,
         participant_pubkeys: Vec<PublicKey>,
         my_pub_key: PublicKey,
     ) -> Self {
-        let mut data = HashMap::new();
-        data.insert(id.to_string(), HashMap::new());
-
         Self {
             aggregated_pubkey_id: aggregated_pubkey_id.to_string(),
             participant_pubkeys,
-            data,
+            data: HashMap::new(),
             my_pub_key,
         }
     }

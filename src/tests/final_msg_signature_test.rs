@@ -16,9 +16,9 @@ mod tests {
         let id = "test_id";
         let id2 = "test_id2";
         let aggregated_pub_key_1 =
-            musig_1.new_session(participant_pubkeys.clone(), id, pub_key_part_1)?;
+            musig_1.new_session(participant_pubkeys.clone(), pub_key_part_1)?;
         let aggregated_pub_key_2 =
-            musig_2.new_session(participant_pubkeys.clone(), id2, pub_key_part_2)?;
+            musig_2.new_session(participant_pubkeys.clone(), pub_key_part_2)?;
 
         key_manager_1.generate_nonce(
             "message_1",

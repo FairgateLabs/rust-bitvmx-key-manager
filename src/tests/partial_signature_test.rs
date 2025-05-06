@@ -16,7 +16,7 @@ mod tests {
 
         let id = "test_id";
         let aggregated_pubkey = musig
-            .new_session(participant_pubkeys.clone(), id, participant_1)
+            .new_session(participant_pubkeys.clone(), participant_1)
             .expect("Failed to initialize MuSig session");
 
         let index = musig.get_index(&aggregated_pubkey)?;

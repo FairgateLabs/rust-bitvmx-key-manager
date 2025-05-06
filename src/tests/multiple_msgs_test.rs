@@ -20,8 +20,7 @@ mod tests {
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
         let id = "test_id";
-        let aggregated_pub_key =
-            musig.new_session(participant_pubkeys.clone(), id, pub_key_part_1)?;
+        let aggregated_pub_key = musig.new_session(participant_pubkeys.clone(), pub_key_part_1)?;
         let messages = vec!["1 test message", "2 test message", "3 test message"];
 
         // Generate pub nonces for all messages
@@ -50,7 +49,7 @@ mod tests {
         )?;
 
         let aggregated_pub_key_2 =
-            musig2.new_session(participant_pubkeys.clone(), id, pub_key_part_2)?;
+            musig2.new_session(participant_pubkeys.clone(), pub_key_part_2)?;
 
         key_manager2.generate_nonce(
             messages[0],

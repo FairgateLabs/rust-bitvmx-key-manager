@@ -12,8 +12,7 @@ mod tests {
         let (_, my_pub_key3, _) = mock_data()?;
 
         let participant_pubkeys = vec![my_pub_key, my_pub_key2, my_pub_key3];
-        let id = "test_id";
-        let _aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), id, my_pub_key)?;
+        let _aggregated_pubkey = musig.new_session(participant_pubkeys.clone(), my_pub_key)?;
 
         clear_output();
 
@@ -24,8 +23,7 @@ mod tests {
     fn test_init_musig_invalid_participants() -> Result<(), anyhow::Error> {
         let (_, my_pub_key, musig) = mock_data()?;
         let participant_pubkeys = vec![my_pub_key];
-        let id = "test_id";
-        let result = musig.new_session(participant_pubkeys.clone(), id, my_pub_key);
+        let result = musig.new_session(participant_pubkeys.clone(), my_pub_key);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -44,9 +42,7 @@ mod tests {
         let (_, my_pub_key2, _) = mock_data()?;
         let (_, my_pub_key3, _) = mock_data()?;
         let participant_pubkeys = vec![my_pub_key, my_pub_key2];
-        let id = "test_id";
-
-        let result = musig.new_session(participant_pubkeys.clone(), id, my_pub_key3);
+        let result = musig.new_session(participant_pubkeys.clone(), my_pub_key3);
 
         assert!(result.is_err());
         assert!(matches!(
@@ -66,15 +62,14 @@ mod tests {
         let (_, participant_3, _) = mock_data()?;
 
         let participant_pubkeys = vec![participant_1, participant_2, participant_3];
-        let id = "test_id";
         let aggregated_pub_key = musig
-            .new_session(participant_pubkeys.clone(), id, participant_1)
+            .new_session(participant_pubkeys.clone(), participant_1)
             .unwrap();
 
         let participant_pubkeys = vec![participant_3, participant_1, participant_2];
 
         let aggregated_pub_key_2 = musig
-            .new_session(participant_pubkeys.clone(), id, participant_1)
+            .new_session(participant_pubkeys.clone(), participant_1)
             .unwrap();
 
         // Check if the aggregated pub keys are the same

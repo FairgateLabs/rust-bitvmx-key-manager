@@ -65,7 +65,6 @@ pub trait MuSig2SignerApi {
     fn new_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError>;
 
@@ -226,7 +225,6 @@ impl MuSig2SignerApi for MuSig2Signer {
     fn new_session(
         &self,
         participant_pubkeys: Vec<PublicKey>,
-        id: &str,
         my_pub_key: PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
         if participant_pubkeys.len() < 2 {
@@ -253,7 +251,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             aggregated_pubkey.to_string()
         );
 
-        let musig = MuSig2Session::new(aggregated_pubkey, id, sorted_participants, my_pub_key);
+        let musig = MuSig2Session::new(aggregated_pubkey, sorted_participants, my_pub_key);
 
         self.save_musig_data(&musig)?;
         Ok(aggregated_pubkey)
@@ -264,14 +262,16 @@ impl MuSig2SignerApi for MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         id: &str,
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
-        let musig_data = self
+        let mut musig_data = self
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
-        let musig_id_data = musig_data
-            .data
-            .get(id)
-            .ok_or(Musig2SignerError::IdNotFound)?;
+        if !musig_data.data.contains_key(id) {
+            musig_data.data.insert(id.to_string(), HashMap::new());
+            self.save_musig_data(&musig_data)?;
+        }
+
+        let musig_id_data = musig_data.data.get(id).unwrap();
 
         let mut pub_nonces = Vec::new();
 
@@ -318,10 +318,12 @@ impl MuSig2SignerApi for MuSig2Signer {
         // Validate that all nonces are valid
         for (pub_key, nonces) in &pub_nonces_map {
             for (message_id_nonce, nonce) in nonces {
-                let musig_id_data = musig_session
-                    .data
-                    .get_mut(id)
-                    .ok_or(Musig2SignerError::IdNotFound)?;
+                if !musig_session.data.contains_key(id) {
+                    // Create a new empty HashMap for this message ID
+                    musig_session.data.insert(id.to_string(), HashMap::new());
+                }
+
+                let musig_id_data = musig_session.data.get_mut(id).unwrap();
 
                 let message_data = musig_id_data
                     .get_mut(message_id_nonce)
@@ -650,10 +652,11 @@ impl MuSig2Signer {
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
-        let musig_id_data = musig_data
-            .data
-            .get_mut(id)
-            .ok_or(Musig2SignerError::IdNotFound)?;
+        if !musig_data.data.contains_key(id) {
+            musig_data.data.insert(id.to_string(), HashMap::new());
+        }
+
+        let musig_id_data = musig_data.data.get_mut(id).unwrap();
 
         // If message exists then nonces are already generated
         let data = musig_id_data.get(message_id);

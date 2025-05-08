@@ -13,7 +13,7 @@ use tracing::debug;
 
 use crate::{
     errors::KeyManagerError,
-    keystorage::keystore::KeyStore,
+    key_store::KeyStore,
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
@@ -30,21 +30,21 @@ use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
 /// using ECDSA, Schnorr and Winternitz algorithms. The key manager uses a secure storage mechanism
 /// to store the keys.
-pub struct KeyManager<K: KeyStore> {
+pub struct KeyManager {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
     key_derivation_path: String,
     musig2: MuSig2Signer,
-    keystore: K,
+    keystore: KeyStore,
 }
 
-impl<K: KeyStore> KeyManager<K> {
+impl KeyManager {
     pub fn new(
         network: Network,
         key_derivation_path: &str,
         key_derivation_seed: [u8; 32],
         winternitz_seed: [u8; 32],
-        keystore: K,
+        keystore: KeyStore,
         store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
@@ -66,7 +66,6 @@ impl<K: KeyStore> KeyManager<K> {
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
-
         self.keystore.store_keypair(private_key, public_key)?;
 
         Ok(public_key)
@@ -572,12 +571,12 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
-    use std::{env, fs, panic, path::PathBuf, rc::Rc, str::FromStr};
-    use storage_backend::storage::Storage;
+    use std::{env, fs, panic, rc::Rc, str::FromStr};
+    use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, KeyStoreError, WinternitzError},
-        keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore},
+        errors::{KeyManagerError, WinternitzError},
+        key_store::KeyStore,
         verifier::SignatureVerifier,
         winternitz::{to_checksummed_message, WinternitzType},
     };
@@ -591,9 +590,9 @@ mod tests {
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let mut rng = StepRng::new(1, 0);
@@ -645,7 +644,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -670,7 +670,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -695,7 +696,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -721,7 +723,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -747,7 +750,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -773,7 +777,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -804,7 +809,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let mut rng = secp256k1::rand::thread_rng();
@@ -839,12 +845,14 @@ mod tests {
     #[test]
     fn test_keystore() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = b"secret password".to_vec();
+        let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
 
-        let keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
+        let config = StorageConfig::new(path.clone(), Some(password));
+        let store = Rc::new(Storage::new(&config).unwrap());
+        let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
@@ -857,7 +865,9 @@ mod tests {
 
             let (restored_sk, restored_pk) = match keystore.load_keypair(&public_key)? {
                 Some(entry) => entry,
-                None => panic!("Failed to find key"),
+                None => {
+                    panic!("Failed to find key");
+                }
             };
 
             assert_eq!(restored_sk.to_string(), private_key.to_string());
@@ -870,19 +880,21 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
-        cleanup_file_storage(&path);
+        cleanup_storage(&path);
         Ok(())
     }
 
     #[test]
     fn test_keystore_index() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = b"secret password".to_vec();
+        let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
 
-        let keystore = FileKeyStore::new(&path, password, Network::Regtest)?;
+        let config = StorageConfig::new(path.clone(), Some(password.clone()));
+        let store = Rc::new(Storage::new(&config)?);
+        let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
 
@@ -899,30 +911,18 @@ mod tests {
 
         assert_eq!(recovered_public_key.to_string(), public_key.to_string());
 
-        // Create a second SecureStorage instance to test that the indexes are restored correctly by loading the same storage file let password = b"secret password".to_vec();
-        let password = b"secret password".to_vec();
-        let keystore_2 = FileKeyStore::new(&path, password, Network::Regtest)?;
-
-        let (_, recovered_public_key_2) = match keystore_2.load_keypair(&public_key)? {
-            Some(entry) => entry,
-            None => panic!("Failed to find key"),
-        };
-
-        assert_eq!(recovered_public_key_2.to_string(), public_key.to_string());
-
-        cleanup_file_storage(&path);
+        cleanup_storage(&path);
         Ok(())
     }
 
     #[test]
     fn test_error_handling() -> Result<(), KeyManagerError> {
         let message = random_message();
-
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config)?);
 
         let mut key_manager = test_key_manager(keystore, store)?;
 
@@ -938,10 +938,6 @@ mod tests {
         key_manager.key_derivation_path = invalid_derivation_path.to_string();
         let result = key_manager.derive_keypair(0);
         assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
-
-        // Case 3 a: Storage error when creating file keystore (invalid path)
-        let result = file_keystore("/invalid/path");
-        assert!(matches!(result, Err(KeyStoreError::StorageError(_))));
 
         // Case 3 b: Write error when creating database keystore (invalid path)
         //TODO: FIX THIS TEST is not working in windows envs
@@ -977,7 +973,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path).unwrap();
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).unwrap());
 
         let key_manager = test_key_manager(keystore, store).unwrap();
 
@@ -1014,7 +1011,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path).unwrap();
 
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).unwrap());
 
         let key_manager = test_key_manager(keystore, store).unwrap();
 
@@ -1051,7 +1049,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path_1).unwrap();
 
         let store_path_1 = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path_1.clone())).unwrap());
+        let config = StorageConfig::new(store_path_1.clone(), None);
+        let store = Rc::new(Storage::new(&config).unwrap());
 
         let key_manager_1 = test_key_manager(keystore, store).unwrap();
 
@@ -1059,7 +1058,8 @@ mod tests {
         let keystore = database_keystore(&keystore_path_2).unwrap();
 
         let store_path_2 = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path_2.clone())).unwrap());
+        let config = StorageConfig::new(store_path_2.clone(), None);
+        let store = Rc::new(Storage::new(&config).unwrap());
 
         let key_manager_2 = test_key_manager(keystore, store).unwrap();
 
@@ -1087,10 +1087,9 @@ mod tests {
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-
         let store_path = temp_storage();
-        let store = Rc::new(Storage::new_with_path(&PathBuf::from(store_path.clone())).unwrap());
-
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).unwrap());
         let key_manager = test_key_manager(keystore, store).unwrap();
 
         let message_size_in_bytes = 32;
@@ -1119,10 +1118,10 @@ mod tests {
         cleanup_storage(&store_path);
     }
 
-    fn test_key_manager<K: KeyStore>(
-        keystore: K,
+    fn test_key_manager(
+        keystore: KeyStore,
         store: Rc<Storage>,
-    ) -> Result<KeyManager<K>, KeyManagerError> {
+    ) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
 
@@ -1138,14 +1137,11 @@ mod tests {
         Ok(key_manager)
     }
 
-    fn file_keystore(storage_path: &str) -> Result<FileKeyStore, KeyStoreError> {
-        let password = b"secret password".to_vec();
-        FileKeyStore::new(storage_path, password, Network::Regtest)
-    }
-
-    fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreError> {
-        let password = b"secret password".to_vec();
-        DatabaseKeyStore::new(storage_path, password, Network::Regtest)
+    fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
+        let password = "secret password".to_string();
+        let config = StorageConfig::new(storage_path.to_string(), Some(password));
+        let store = Rc::new(Storage::new(&config)?);
+        Ok(KeyStore::new(store))
     }
 
     fn random_message() -> Message {
@@ -1163,11 +1159,6 @@ mod tests {
     fn cleanup_storage(path: &str) {
         println!("Cleaning up storage at: {}", path);
         fs::remove_dir_all(path).unwrap();
-    }
-
-    fn cleanup_file_storage(path: &str) {
-        println!("Cleaning up storage at: {}", path);
-        fs::remove_file(path).unwrap();
     }
 
     fn temp_storage() -> String {

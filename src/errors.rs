@@ -5,6 +5,9 @@ use config as settings;
 
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
+    #[error("Failed from storage")]
+    StorageError(#[from] storage_backend::error::StorageError),
+
     #[error("Invalid private key: {0}")]
     FailedToParsePublicKey(#[from] ParsePublicKeyError),
 
@@ -20,9 +23,6 @@ pub enum KeyManagerError {
     #[error("Failed to tweak secret key")]
     FailedToTweakKey(#[from] secp256k1::Error),
 
-    #[error("Failed to access secure storage")]
-    KeyStorageError(#[from] KeyStoreError),
-
     #[error("KeyPair not found for public key {0}")]
     KeyPairNotFound(String),
 
@@ -34,18 +34,9 @@ pub enum KeyManagerError {
 
     #[error("Invalid private key")]
     InvalidPrivateKey,
-}
-
-#[derive(Error, Debug)]
-pub enum KeyStoreError {
-    #[error("Failed to access secure storage")]
-    StorageError(#[from] std::io::Error),
 
     #[error("Failed to open secure storage")]
     OpenError,
-
-    #[error("Failed to write secure storage")]
-    WriteError(#[from] storage_backend::error::StorageError),
 
     #[error("Failed to read secure storage")]
     ReadError(storage_backend::error::StorageError),
@@ -53,17 +44,8 @@ pub enum KeyStoreError {
     #[error("Failed to decode data")]
     FailedToDecodeData(#[from] FromSliceError),
 
-    #[error("Failed to decode private key")]
-    FailedToDecodePrivateKey(#[from] secp256k1::Error),
-
     #[error("Failed to decode public key")]
     FailedToDecodePublicKey(#[from] bitcoin::key::FromSliceError),
-
-    #[error("Failed to encrypt data")]
-    FailedToEncryptData { error: cocoon::Error },
-
-    #[error("Failed to decrypt data")]
-    FailedToDecryptData { error: cocoon::Error },
 
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,

@@ -669,6 +669,10 @@ pub fn message_digits_length(message_size_in_bytes: usize) -> usize {
     message_size_in_bytes * 8 / NBITS
 }
 
+pub fn message_bytes_length(message_digits_len: usize) -> usize {
+    message_digits_len * NBITS / 8
+}
+
 fn split_byte(byte: u8) -> (u8, u8) {
     let high_nibble: u8 = (byte & 0xF0) >> 4;
     let low_nibble: u8 = byte & 0x0F;

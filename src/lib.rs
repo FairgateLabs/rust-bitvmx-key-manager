@@ -1,54 +1,27 @@
-use std::str::FromStr;
-use std::{path::PathBuf, rc::Rc};
-
 use bitcoin::Network;
-use config::{KeyManagerConfig, KeyStorageConfig};
+use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
-use keystorage::{database::DatabaseKeyStore, file::FileKeyStore, keystore::KeyStore};
+use key_store::KeyStore;
+use std::rc::Rc;
+use std::str::FromStr;
 use storage_backend::storage::Storage;
 
 pub mod cli;
 pub mod config;
 pub mod errors;
 pub mod key_manager;
-pub mod keystorage;
+pub mod key_store;
 pub mod musig2;
 pub mod tests;
 pub mod verifier;
 pub mod winternitz;
 
-fn decode_data(
-    store_config: &KeyStorageConfig,
-    network: &str,
-) -> Result<(PathBuf, Vec<u8>, Network), KeyManagerError> {
-    let path = PathBuf::from(&store_config.path);
-    let password: Vec<u8> = store_config.password.as_bytes().to_vec();
-    let network = Network::from_str(network).map_err(|_| ConfigError::InvalidNetwork)?;
-    Ok((path, password, network))
-}
-
-pub fn create_file_key_store_from_config(
-    store_config: &KeyStorageConfig,
-    network: &str,
-) -> Result<FileKeyStore, KeyManagerError> {
-    let (path, password, network) = decode_data(store_config, network)?;
-    Ok(FileKeyStore::new(path, password, network)?)
-}
-
-pub fn create_database_key_store_from_config(
-    store_config: &KeyStorageConfig,
-    network: &str,
-) -> Result<DatabaseKeyStore, KeyManagerError> {
-    let (path, password, network) = decode_data(store_config, network)?;
-    Ok(DatabaseKeyStore::new(path, password, network)?)
-}
-
-pub fn create_key_manager_from_config<K: KeyStore>(
+pub fn create_key_manager_from_config(
     key_manager_config: &KeyManagerConfig,
-    keystore: K,
+    keystore: KeyStore,
     store: Rc<Storage>,
-) -> Result<KeyManager<K>, KeyManagerError> {
+) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = decode_key_derivation_seed(&key_manager_config.key_derivation_seed)?;
     let key_derivation_path = &key_manager_config.key_derivation_path;
     let winternitz_seed = decode_winternitz_seed(&key_manager_config.winternitz_seed)?;

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use bitcoin::key::rand;
@@ -8,12 +7,11 @@ use bitcoin::{
 };
 use rand::Rng;
 use storage_backend::storage::Storage;
+use storage_backend::storage_config::StorageConfig;
 
+use crate::key_manager::{self, KeyManager};
+use crate::key_store::KeyStore;
 use crate::musig2::musig::MuSig2Signer;
-use crate::{
-    key_manager::{self, KeyManager},
-    keystorage::{self, database::DatabaseKeyStore},
-};
 
 pub fn random_bytes() -> [u8; 32] {
     let mut seed = [0u8; 32];
@@ -24,18 +22,15 @@ pub fn random_bytes() -> [u8; 32] {
 pub fn create_key_manager(
     store_keystore_path: &str,
     store: Rc<Storage>,
-) -> Result<KeyManager<DatabaseKeyStore>, anyhow::Error> {
+) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
     let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
-    let password = b"secret password".to_vec();
-    let storage_path = std::path::PathBuf::from(store_keystore_path);
-    let keystore = keystorage::database::DatabaseKeyStore::new(
-        storage_path,
-        password,
-        bitcoin::Network::Regtest,
-    )?;
+    let password = "secret password".to_string();
+    let config = StorageConfig::new(store_keystore_path.to_string(), Some(password));
+    let key_store = Rc::new(Storage::new(&config)?);
+    let keystore = KeyStore::new(key_store);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
@@ -49,9 +44,7 @@ pub fn create_key_manager(
     Ok(key_manager)
 }
 
-pub fn create_pub_key(
-    key_manager: &KeyManager<DatabaseKeyStore>,
-) -> Result<PublicKey, anyhow::Error> {
+pub fn create_pub_key(key_manager: &KeyManager) -> Result<PublicKey, anyhow::Error> {
     let mut rng = thread_rng();
     let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
     Ok(pub_key)
@@ -66,10 +59,10 @@ pub fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-pub fn mock_data() -> Result<(KeyManager<DatabaseKeyStore>, PublicKey, MuSig2Signer), anyhow::Error>
-{
-    let path = PathBuf::from(format!("test_output/{}", generate_random_string()));
-    let store = Rc::new(Storage::new_with_path(&path)?);
+pub fn mock_data() -> Result<(KeyManager, PublicKey, MuSig2Signer), anyhow::Error> {
+    let path = format!("test_output/{}", generate_random_string());
+    let config = StorageConfig::new(path, None);
+    let store = Rc::new(Storage::new(&config)?);
     let ket_manager_key = format!("test_output/{}", generate_random_string());
     let key_manager = create_key_manager(ket_manager_key.as_str(), store.clone())?;
     let pub_key = create_pub_key(&key_manager)?;

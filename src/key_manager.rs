@@ -281,7 +281,7 @@ impl KeyManager {
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
         let tweaked_keypair = keypair.tap_tweak(&self.secp, merkle_root);
-        let keypair = tweaked_keypair.to_inner();
+        let keypair = tweaked_keypair.to_keypair();
         Ok((
             self.secp.sign_schnorr(message, &keypair),
             PublicKey::new(keypair.public_key()),

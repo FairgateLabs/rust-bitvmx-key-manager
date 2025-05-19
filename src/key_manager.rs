@@ -71,6 +71,15 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    pub fn import_secret_key(&self, secret_key: &str, network: Network) -> Result<PublicKey, KeyManagerError> {
+        let secret_key = SecretKey::from_str(secret_key)?;
+        let private_key = PrivateKey::new(secret_key, network);
+        let public_key = PublicKey::from_private_key(&self.secp, &private_key);
+
+        self.keystore.store_keypair(private_key, public_key)?;
+        Ok(public_key)
+    }
+
     /*********************************/
     /******* Key Generation **********/
     /*********************************/

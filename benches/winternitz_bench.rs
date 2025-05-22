@@ -1,21 +1,21 @@
-use std::{env, fs, path::PathBuf, rc::Rc, time::Duration};
+use std::{env, fs, rc::Rc, time::Duration};
 
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{
-    errors::{KeyManagerError, KeyStoreError},
+    errors::{KeyManagerError},
     key_manager::KeyManager,
-    keystorage::{database::DatabaseKeyStore, keystore::KeyStore},
+    key_store::KeyStore,
     winternitz::WinternitzType,
 };
 use storage_backend::storage::Storage;
 const DERIVATION_PATH: &str = "m/101/1/0/0/";
 const REGTEST: Network = Network::Regtest;
 
-fn test_key_manager<K: KeyStore>(
-    keystore: K,
+fn test_key_manager(
+    keystore: KeyStore,
     store: Rc<Storage>,
-) -> Result<KeyManager<K>, KeyManagerError> {
+) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
@@ -47,17 +47,23 @@ fn temp_storage() -> String {
         .to_string()
 }
 
-fn database_keystore(storage_path: &str) -> Result<DatabaseKeyStore, KeyStoreError> {
-    let password = b"secret password".to_vec();
-    DatabaseKeyStore::new(storage_path, password, Network::Regtest)
+fn database_keystore(storage_path: String) -> Result<KeyStore, KeyManagerError> {
+    let password = "secret password".to_string();
+    let config = storage_backend::storage_config::StorageConfig::new(storage_path, Some(password));
+    let store = Rc::new(Storage::new(&config)?);
+    Ok(KeyStore::new(store.clone()))
 }
 
 fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
-    let keystore = database_keystore(&storage_path).unwrap();
+    let keystore = database_keystore(storage_path.clone()).unwrap();
 
-    let store_path = PathBuf::from("/tmp/key_manager_storage".to_string());
-    let store = Rc::new(Storage::new_with_path(&store_path).unwrap());
+    let store_path = "/tmp/key_manager_storage".to_string();
+    let config = storage_backend::storage_config::StorageConfig::new(
+        store_path.clone(),
+        None,
+    );
+    let store = Rc::new(Storage::new(&config).unwrap());
 
     let key_manager = test_key_manager(keystore, store).unwrap();
 

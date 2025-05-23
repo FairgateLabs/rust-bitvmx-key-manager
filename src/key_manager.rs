@@ -7,12 +7,15 @@ use bitcoin::{
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
+
 use itertools::izip;
 use storage_backend::storage::Storage;
 use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError,
+    config::KeyManagerConfig,
+    decode_key_derivation_seed, decode_winternitz_seed,
+    errors::{ConfigError, KeyManagerError},
     key_store::KeyStore,
     musig2::{
         errors::Musig2SignerError,
@@ -47,12 +50,10 @@ impl KeyManager {
         keystore: KeyStore,
         store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
-        let secp = secp256k1::Secp256k1::new();
-
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
-
         let musig2 = MuSig2Signer::new(store.clone());
+        let secp = secp256k1::Secp256k1::new();
 
         Ok(KeyManager {
             secp,
@@ -63,11 +64,63 @@ impl KeyManager {
         })
     }
 
+    pub fn new_from_config(
+        config: &KeyManagerConfig,
+        keystore: KeyStore,
+        store: Rc<Storage>,
+    ) -> Result<KeyManager, KeyManagerError> {
+        let key_derivation_path = config
+            .key_derivation_path
+            .as_deref()
+            .unwrap_or("m/101/1/0/0/")
+            .to_string();
+
+        let network =
+            Network::from_str(&config.network).map_err(|_| ConfigError::InvalidNetwork)?;
+
+        if config.key_derivation_seed.is_some() {
+            let key_derivation_seed =
+                decode_key_derivation_seed(&config.key_derivation_seed.clone().unwrap())?;
+            keystore.store_key_derivation_seed(key_derivation_seed)?;
+        }
+
+        if config.winternitz_seed.is_some() {
+            let winternitz_seed = decode_winternitz_seed(&config.winternitz_seed.clone().unwrap())?;
+            keystore.store_winternitz_seed(winternitz_seed)?;
+        }
+
+        let musig2 = MuSig2Signer::new(store.clone());
+        let secp = secp256k1::Secp256k1::new();
+
+        let key_manager = KeyManager {
+            secp,
+            network,
+            key_derivation_path,
+            musig2,
+            keystore,
+        };
+
+        Ok(key_manager)
+    }
+
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
         self.keystore.store_keypair(private_key, public_key)?;
 
+        Ok(public_key)
+    }
+
+    pub fn import_secret_key(
+        &self,
+        secret_key: &str,
+        network: Network,
+    ) -> Result<PublicKey, KeyManagerError> {
+        let secret_key = SecretKey::from_str(secret_key)?;
+        let private_key = PrivateKey::new(secret_key, network);
+        let public_key = PublicKey::from_private_key(&self.secp, &private_key);
+
+        self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }
 

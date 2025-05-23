@@ -91,6 +91,9 @@ pub enum ConfigError {
 
     #[error("Network is invalid")]
     InvalidNetwork,
+
+    #[error("Key derivation path not found")]
+    KeyDerivationPathNotFound,
 }
 
 #[derive(Error, Debug)]

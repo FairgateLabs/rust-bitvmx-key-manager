@@ -36,7 +36,7 @@ use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 pub struct KeyManager {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    key_derivation_path: String,
+    key_derivation_path: Option<String>,
     musig2: MuSig2Signer,
     keystore: KeyStore,
 }
@@ -58,7 +58,7 @@ impl KeyManager {
         Ok(KeyManager {
             secp,
             network,
-            key_derivation_path: key_derivation_path.to_string(),
+            key_derivation_path: Some(key_derivation_path.to_string()),
             musig2,
             keystore,
         })
@@ -69,23 +69,18 @@ impl KeyManager {
         keystore: KeyStore,
         store: Rc<Storage>,
     ) -> Result<KeyManager, KeyManagerError> {
-        let key_derivation_path = config
-            .key_derivation_path
-            .as_deref()
-            .unwrap_or("m/101/1/0/0/")
-            .to_string();
-
         let network =
             Network::from_str(&config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
         if config.key_derivation_seed.is_some() {
             let key_derivation_seed =
-                decode_key_derivation_seed(&config.key_derivation_seed.clone().unwrap())?;
+                decode_key_derivation_seed(&config.key_derivation_seed.as_ref().unwrap())?;
             keystore.store_key_derivation_seed(key_derivation_seed)?;
         }
 
         if config.winternitz_seed.is_some() {
-            let winternitz_seed = decode_winternitz_seed(&config.winternitz_seed.clone().unwrap())?;
+            let winternitz_seed =
+                decode_winternitz_seed(&config.winternitz_seed.as_ref().unwrap())?;
             keystore.store_winternitz_seed(winternitz_seed)?;
         }
 
@@ -95,7 +90,7 @@ impl KeyManager {
         let key_manager = KeyManager {
             secp,
             network,
-            key_derivation_path,
+            key_derivation_path: config.key_derivation_path.clone(),
             musig2,
             keystore,
         };
@@ -148,10 +143,17 @@ impl KeyManager {
     }
 
     pub fn derive_keypair(&self, index: u32) -> Result<PublicKey, KeyManagerError> {
+        if self.key_derivation_path.is_none() {
+            return Err(ConfigError::KeyDerivationPathNotFound.into());
+        }
+
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path = DerivationPath::from_str(&format!(
+            "{}{}",
+            self.key_derivation_path.as_ref().unwrap(),
+            index
+        ))?;
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -197,8 +199,16 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+
+        if self.key_derivation_path.is_none() {
+            return Err(ConfigError::KeyDerivationPathNotFound.into());
+        }
+
+        let derivation_path = DerivationPath::from_str(&format!(
+            "{}{}",
+            self.key_derivation_path.as_ref().unwrap(),
+            index
+        ))?;
         let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
 
         Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
@@ -988,7 +998,7 @@ mod tests {
 
         // Case 2: Invalid derivation path
         let invalid_derivation_path = "m/44'/invalid'";
-        key_manager.key_derivation_path = invalid_derivation_path.to_string();
+        key_manager.key_derivation_path = Some(invalid_derivation_path.to_string());
         let result = key_manager.derive_keypair(0);
         assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
 

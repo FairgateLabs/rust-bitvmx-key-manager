@@ -22,29 +22,31 @@ pub fn create_key_manager_from_config(
     keystore: KeyStore,
     store: Rc<Storage>,
 ) -> Result<KeyManager, KeyManagerError> {
-    let key_derivation_seed = if let Some(seed) = &key_manager_config.key_derivation_seed {
-        decode_key_derivation_seed(seed)?
-    } else {
-        return Err(ConfigError::InvalidKeyDerivationSeed.into());
-    };
+    let key_derivation_seed = decode_key_derivation_seed(
+        key_manager_config
+            .key_derivation_seed
+            .as_ref()
+            .ok_or(ConfigError::InvalidKeyDerivationSeed)?,
+    )?;
 
-    let key_derivation_path = &key_manager_config
+    let key_derivation_path = key_manager_config
         .key_derivation_path
-        .as_deref()
-        .unwrap_or("m/101/1/0/0/");
+        .as_ref()
+        .ok_or(ConfigError::KeyDerivationPathNotFound)?;
 
-    let winternitz_seed = if let Some(seed) = &key_manager_config.winternitz_seed {
-        decode_winternitz_seed(seed)?
-    } else {
-        return Err(ConfigError::InvalidWinternitzSeed.into());
-    };
+    let winternitz_seed = decode_winternitz_seed(
+        key_manager_config
+            .winternitz_seed
+            .as_ref()
+            .ok_or(ConfigError::InvalidWinternitzSeed)?,
+    )?;
 
     let network =
         Network::from_str(&key_manager_config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
     let key_manager = KeyManager::new(
         network,
-        key_derivation_path,
+        &key_derivation_path,
         key_derivation_seed,
         winternitz_seed,
         keystore,

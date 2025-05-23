@@ -3,7 +3,7 @@ use std::{collections::HashMap, rc::Rc, str::FromStr};
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::Rng, Keypair, Parity, TapTweak},
+    key::{rand::{Rng, RngCore}, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
@@ -78,16 +78,23 @@ impl KeyManager {
         let network =
             Network::from_str(&config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
-        if config.key_derivation_seed.is_some() {
-            let key_derivation_seed =
-                decode_key_derivation_seed(&config.key_derivation_seed.clone().unwrap())?;
-            keystore.store_key_derivation_seed(key_derivation_seed)?;
-        }
+        let key_derivation_seed = if config.key_derivation_seed.is_some() {
+                decode_key_derivation_seed(&config.key_derivation_seed.clone().unwrap())?
+        } else {
+            let mut seed = [0u8; 32];
+            secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+            seed  
+        };
+        keystore.store_key_derivation_seed(key_derivation_seed)?;
 
-        if config.winternitz_seed.is_some() {
-            let winternitz_seed = decode_winternitz_seed(&config.winternitz_seed.clone().unwrap())?;
-            keystore.store_winternitz_seed(winternitz_seed)?;
-        }
+        let winternitz_seed = if config.winternitz_seed.is_some() {
+            decode_winternitz_seed(&config.winternitz_seed.clone().unwrap())?
+        } else {
+            let mut seed = [0u8; 32];
+            secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+            seed
+        };
+        keystore.store_winternitz_seed(winternitz_seed)?;
 
         let musig2 = MuSig2Signer::new(store.clone());
         let secp = secp256k1::Secp256k1::new();

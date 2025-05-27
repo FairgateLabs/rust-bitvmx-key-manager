@@ -48,10 +48,10 @@ impl KeyManager {
         keystore: KeyStore,
         store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
-        match winternitz_seed {
-            Some(seed) => keystore.store_winternitz_seed(seed)?,
-            None => {
-                if keystore.load_winternitz_seed().is_err() {
+        if keystore.load_winternitz_seed().is_err() {
+            match winternitz_seed {
+                Some(seed) => keystore.store_winternitz_seed(seed)?,
+                None => {
                     let mut seed = [0u8; 32];
                     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
                     keystore.store_winternitz_seed(seed)?;
@@ -59,16 +59,16 @@ impl KeyManager {
             }
         }
 
-        match key_derivation_seed {
-            Some(seed) => keystore.store_key_derivation_seed(seed)?,
-            None => {
-                if keystore.load_key_derivation_seed().is_err() {
+        if keystore.load_key_derivation_seed().is_err() {
+            match key_derivation_seed {
+                Some(seed) => keystore.store_key_derivation_seed(seed)?,
+                None => {
                     let mut seed = [0u8; 32];
                     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
                     keystore.store_key_derivation_seed(seed)?;
-                }
-            },
-        };
+                },
+            }
+        }
 
         let musig2 = MuSig2Signer::new(store.clone());
         let secp = secp256k1::Secp256k1::new();

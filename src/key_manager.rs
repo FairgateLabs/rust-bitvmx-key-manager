@@ -399,6 +399,13 @@ impl KeyManager {
         Ok(signature)
     }
 
+    pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
+        match self.keystore.load_keypair(pubkey)? {
+            Some(entry) => Ok(entry.0),
+            None => Err(KeyManagerError::KeyPairNotFound(pubkey.to_string())),
+        }
+    }
+
     /*********************************/
     /*********** MuSig2 **************/
     /*********************************/

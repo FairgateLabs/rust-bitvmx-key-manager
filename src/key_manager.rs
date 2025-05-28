@@ -3,7 +3,7 @@ use std::{collections::HashMap, rc::Rc, str::FromStr};
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::Rng, Keypair, Parity, TapTweak},
+    key::{rand::{Rng, RngCore}, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
@@ -13,9 +13,7 @@ use storage_backend::storage::Storage;
 use tracing::debug;
 
 use crate::{
-    config::KeyManagerConfig,
-    decode_key_derivation_seed, decode_winternitz_seed,
-    errors::{ConfigError, KeyManagerError},
+    errors::KeyManagerError,
     key_store::KeyStore,
     musig2::{
         errors::Musig2SignerError,
@@ -45,13 +43,33 @@ impl KeyManager {
     pub fn new(
         network: Network,
         key_derivation_path: &str,
-        key_derivation_seed: [u8; 32],
-        winternitz_seed: [u8; 32],
+        key_derivation_seed: Option<[u8; 32]>,
+        winternitz_seed: Option<[u8; 32]>,
         keystore: KeyStore,
         store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
-        keystore.store_winternitz_seed(winternitz_seed)?;
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        if keystore.load_winternitz_seed().is_err() {
+            match winternitz_seed {
+                Some(seed) => keystore.store_winternitz_seed(seed)?,
+                None => {
+                    let mut seed = [0u8; 32];
+                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+                    keystore.store_winternitz_seed(seed)?;
+                }
+            }
+        }
+
+        if keystore.load_key_derivation_seed().is_err() {
+            match key_derivation_seed {
+                Some(seed) => keystore.store_key_derivation_seed(seed)?,
+                None => {
+                    let mut seed = [0u8; 32];
+                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+                    keystore.store_key_derivation_seed(seed)?;
+                },
+            }
+        }
+
         let musig2 = MuSig2Signer::new(store.clone());
         let secp = secp256k1::Secp256k1::new();
 
@@ -62,45 +80,6 @@ impl KeyManager {
             musig2,
             keystore,
         })
-    }
-
-    pub fn new_from_config(
-        config: &KeyManagerConfig,
-        keystore: KeyStore,
-        store: Rc<Storage>,
-    ) -> Result<KeyManager, KeyManagerError> {
-        let key_derivation_path = config
-            .key_derivation_path
-            .as_deref()
-            .unwrap_or("m/101/1/0/0/")
-            .to_string();
-
-        let network =
-            Network::from_str(&config.network).map_err(|_| ConfigError::InvalidNetwork)?;
-
-        if config.key_derivation_seed.is_some() {
-            let key_derivation_seed =
-                decode_key_derivation_seed(&config.key_derivation_seed.clone().unwrap())?;
-            keystore.store_key_derivation_seed(key_derivation_seed)?;
-        }
-
-        if config.winternitz_seed.is_some() {
-            let winternitz_seed = decode_winternitz_seed(&config.winternitz_seed.clone().unwrap())?;
-            keystore.store_winternitz_seed(winternitz_seed)?;
-        }
-
-        let musig2 = MuSig2Signer::new(store.clone());
-        let secp = secp256k1::Secp256k1::new();
-
-        let key_manager = KeyManager {
-            secp,
-            network,
-            key_derivation_path,
-            musig2,
-            keystore,
-        };
-
-        Ok(key_manager)
     }
 
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
@@ -1188,8 +1167,8 @@ mod tests {
         let key_manager = KeyManager::new(
             REGTEST,
             DERIVATION_PATH,
-            key_derivation_seed,
-            winternitz_seed,
+            Some(key_derivation_seed),
+            Some(winternitz_seed),
             keystore,
             store,
         )?;

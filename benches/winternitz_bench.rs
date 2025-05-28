@@ -22,8 +22,8 @@ fn test_key_manager(
     let key_manager = KeyManager::new(
         REGTEST,
         DERIVATION_PATH,
-        key_derivation_seed,
-        winternitz_seed,
+        Some(key_derivation_seed),
+        Some(winternitz_seed),
         keystore,
         store,
     )?;

@@ -12,7 +12,7 @@ use musig2::{KeyAggContext, PubNonce};
 use super::{
     errors::Musig2SignerError,
     helper::{to_bitcoin_pubkey, to_musig_pubkey},
-    types::{MessageId, MuSig2Session, Musig2Data},
+    types::{MessageId, /*MuSig2Session, Musig2Data*/},
 };
 
 /// Keys used for storing data in the key-value store
@@ -301,11 +301,15 @@ impl MuSig2SignerApi for MuSig2Signer {
             aggregated_pubkey.to_string(),
             pub_nonces_map
         );
+        
+        let participant_pubkeys = self
+            .get_participant_pub_keys(aggregated_pubkey)?;
+
         let mut musig_session = self
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
 
-        if pub_nonces_map.len() != (musig_session.participant_pubkeys.len() - 1) {
+        if pub_nonces_map.len() != (participant_pubkeys.len() - 1) {
             return Err(Musig2SignerError::InvalidParticipantNonces);
         }
 
@@ -537,6 +541,9 @@ impl MuSig2SignerApi for MuSig2Signer {
         pubkey: PublicKey,
         partial_signatures: Vec<(String, PartialSignature)>,
     ) -> Result<bool, Musig2SignerError> {
+        let participant_pubkeys = self
+            .get_participant_pub_keys(aggregated_pubkey)?;
+
         let musig_data = self
             .get_musig_data(aggregated_pubkey)?
             .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
@@ -546,7 +553,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             .get(id)
             .ok_or(Musig2SignerError::IdNotFound)?;
 
-        if !musig_data.participant_pubkeys.contains(&pubkey) {
+        if !participant_pubkeys.contains(&pubkey) {
             return Err(Musig2SignerError::InvalidPublicKey);
         }
 
@@ -648,18 +655,19 @@ impl MuSig2Signer {
         tweak: Option<musig2::secp256k1::Scalar>,
         nonce_seed: [u8; 32],
     ) -> Result<(), Musig2SignerError> {
-        let mut musig_data = self
-            .get_musig_data(aggregated_pubkey)?
-            .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
-
-        if !musig_data.data.contains_key(id) {
-            musig_data.data.insert(id.to_string(), HashMap::new());
+        match self.check_musig_data(aggregated_pubkey)? {
+            true => {},
+            false => return Err(Musig2SignerError::AggregatedPubkeyNotFound),
         }
+
+        if !self.musig_data_contains_id(&aggregated_pubkey, id)? {
+            musig_data.data.insert(id.to_string(), HashMap::new());
+        }   
 
         let musig_id_data = musig_data.data.get_mut(id).unwrap();
 
         // If message exists then nonces are already generated
-        let data = musig_id_data.get(message_id);
+        let data = musig_id_data.get(message_id)?;
         if data.is_some() {
             return Ok(());
         }
@@ -741,12 +749,10 @@ impl MuSig2Signer {
     }
 
     pub fn get_index(&self, aggregated_pubkey: &PublicKey) -> Result<u32, Musig2SignerError> {
-        let musig_data = self
-            .get_musig_data(aggregated_pubkey)?
-            .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
+        let my_pub_key = self.my_public_key(aggregated_pubkey)?;
 
         let key_index_used_by_me =
-            self.get_key(StoreKey::IndexForNonceGeneration(musig_data.my_pub_key));
+            self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key));
 
         let index_used_by_me = self
             .store
@@ -767,57 +773,55 @@ impl MuSig2Signer {
         &self,
         aggregated_pubkey: &PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
-        let musig_data = self
-            .get_musig_data(aggregated_pubkey)?
-            .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
-
-        Ok(musig_data.my_pub_key)
+        match self.store.get(format!("musig2/session/{aggregated_pubkey}/my_public_key"))?{
+            Some(result) => Ok(result),
+            None => Err(Musig2SignerError::AggregatedPubkeyNotFound),
+        }
     }
 
     pub fn get_participant_pub_keys(
         &self,
         aggregated_pubkey: &PublicKey,
     ) -> Result<Vec<PublicKey>, Musig2SignerError> {
-        let musig_data = self
-            .get_musig_data(aggregated_pubkey)?
-            .ok_or(Musig2SignerError::AggregatedPubkeyNotFound)?;
-
-        Ok(musig_data.participant_pubkeys)
+        match self.store.get(format!("musig2/session/{aggregated_pubkey}/participant_pub_keys"))?{
+            Some(result) => Ok(result),
+            None => Err(Musig2SignerError::AggregatedPubkeyNotFound),
+        }
     }
 
-    fn get_musig_data(
-        &self,
-        aggregated_pubkey: &PublicKey,
-    ) -> Result<Option<MuSig2Session>, Musig2SignerError> {
-        debug!(
-            "Triying to get musig data for aggregated pubkey: {:?}",
-            aggregated_pubkey.to_string()
-        );
-        let musig_data: Option<MuSig2Session> = self.store.get::<String, MuSig2Session>(
-            self.get_key(StoreKey::MuSig2Session(aggregated_pubkey.to_string())),
-        )?;
-        debug!(
-            "Get musig data for aggregated pubkey: {} {:?}",
-            aggregated_pubkey.to_string(),
-            musig_data
-        );
-        Ok(musig_data)
-    }
+    // fn get_musig_data(
+    //     &self,
+    //     aggregated_pubkey: &PublicKey,
+    // ) -> Result<Option<MuSig2Session>, Musig2SignerError> {
+    //     debug!(
+    //         "Triying to get musig data for aggregated pubkey: {:?}",
+    //         aggregated_pubkey.to_string()
+    //     );
+    //     let musig_data: Option<MuSig2Session> = self.store.get::<String, MuSig2Session>(
+    //         self.get_key(StoreKey::MuSig2Session(aggregated_pubkey.to_string())),
+    //     )?;
+    //     debug!(
+    //         "Get musig data for aggregated pubkey: {} {:?}",
+    //         aggregated_pubkey.to_string(),
+    //         musig_data
+    //     );
+    //     Ok(musig_data)
+    // }
 
-    fn save_musig_data(&self, musig_data: &MuSig2Session) -> Result<(), Musig2SignerError> {
-        debug!(
-            "Saving musig data for aggregated pubkey: {} {:?}",
-            musig_data.aggregated_pubkey_id, musig_data
-        );
-        self.store.set(
-            self.get_key(StoreKey::MuSig2Session(
-                musig_data.aggregated_pubkey_id.clone(),
-            )),
-            musig_data,
-            None,
-        )?;
-        Ok(())
-    }
+    // fn save_musig_data(&self, musig_data: &MuSig2Session) -> Result<(), Musig2SignerError> {
+    //     debug!(
+    //         "Saving musig data for aggregated pubkey: {} {:?}",
+    //         musig_data.aggregated_pubkey_id, musig_data
+    //     );
+    //     self.store.set(
+    //         self.get_key(StoreKey::MuSig2Session(
+    //             musig_data.aggregated_pubkey_id.clone(),
+    //         )),
+    //         musig_data,
+    //         None,
+    //     )?;
+    //     Ok(())
+    // }
 
     pub fn get_key_agg_context_aux(
         &self,
@@ -866,5 +870,21 @@ impl MuSig2Signer {
             }
             StoreKey::MuSig2Session(id) => format!("{prefix}/session/{id}"),
         }
+    }
+
+    fn musig_data_contains_id(&self, aggregated_pubkey: &PublicKey, id: &str)-> Result<bool, Musig2SignerError>{
+        let prefix = "musig2";
+        let result = self.store.has_key(&format!("{prefix}/session/{aggregated_pubkey}/{id}"))?;
+        Ok(result)
+    }
+
+    fn check_musig_data(&self, aggregated_pubkey: &PublicKey)->Result<bool, Musig2SignerError>{
+        let prefix = "musig2";
+        let result = self.store.partial_compare_keys(&format!("{prefix}/session/{aggregated_pubkey}"))?;
+        if result.is_empty() {
+            return Ok(false);
+        }
+
+        Ok(true)
     }
 }

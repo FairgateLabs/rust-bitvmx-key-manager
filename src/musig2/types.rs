@@ -75,4 +75,7 @@
 //     }
 // }
 
+use bitcoin::PublicKey;
+
 pub type MessageId = String;
+pub type Musig2Session = (PublicKey, Vec<PublicKey>, PublicKey);

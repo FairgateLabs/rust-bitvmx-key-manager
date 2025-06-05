@@ -3,19 +3,14 @@ use std::{env, fs, rc::Rc, time::Duration};
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{
-    errors::KeyManagerError,
-    key_manager::KeyManager,
-    key_store::KeyStore,
+    errors::KeyManagerError, key_manager::KeyManager, key_store::KeyStore,
     winternitz::WinternitzType,
 };
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 const DERIVATION_PATH: &str = "m/101/1/0/0/";
 const REGTEST: Network = Network::Regtest;
 
-fn test_key_manager(
-    keystore: KeyStore,
-    store: Rc<Storage>,
-) -> Result<KeyManager, KeyManagerError> {
+fn test_key_manager(keystore: KeyStore, store: Rc<Storage>) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 

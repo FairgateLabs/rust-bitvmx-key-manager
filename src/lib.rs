@@ -32,7 +32,7 @@ pub fn create_key_manager_from_config(
         .as_deref()
         .unwrap_or("m/101/1/0/0/");
 
-    let winternitz_seed = match &key_manager_config.winternitz_seed{
+    let winternitz_seed = match &key_manager_config.winternitz_seed {
         Some(seed) => Some(decode_winternitz_seed(seed)?),
         None => None,
     };

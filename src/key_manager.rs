@@ -224,6 +224,19 @@ impl KeyManager {
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
     }
 
+    pub fn sign_ecdsa_recoverable_message(
+        &self,
+        message: &Message,
+        public_key: &PublicKey,
+    ) -> Result<secp256k1::ecdsa::RecoverableSignature, KeyManagerError> {
+        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+            Some(entry) => entry,
+            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+        };
+
+        Ok(self.secp.sign_ecdsa_recoverable(message, &sk.inner))
+    }
+
     pub fn sign_ecdsa_messages(
         &self,
         messages: Vec<Message>,
@@ -233,6 +246,21 @@ impl KeyManager {
 
         for (message, public_key) in izip!(messages.iter(), public_keys.iter(),) {
             let signature = self.sign_ecdsa_message(message, public_key)?;
+            signatures.push(signature);
+        }
+
+        Ok(signatures)
+    }
+
+    pub fn sign_ecdsa_recoverable_messages(
+        &self,
+        messages: Vec<Message>,
+        public_keys: Vec<PublicKey>,
+    ) -> Result<Vec<secp256k1::ecdsa::RecoverableSignature>, KeyManagerError> {
+        let mut signatures = Vec::new();
+
+        for (message, public_key) in izip!(messages.iter(), public_keys.iter(),) {
+            let signature = self.sign_ecdsa_recoverable_message(message, public_key)?;
             signatures.push(signature);
         }
 
@@ -655,6 +683,33 @@ mod tests {
 
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, &pk)?;
+
+        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_sign_ecdsa_recoverable_message() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
+
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.to_string(), None);
+        let store = Rc::new(Storage::new(&config)?);
+
+        let key_manager = test_key_manager(keystore, store)?;
+        let signature_verifier = SignatureVerifier::new();
+
+        let mut rng = secp256k1::rand::thread_rng();
+        let pk = key_manager.generate_keypair(&mut rng)?;
+
+        let message = random_message();
+        let recoverable_signature = key_manager.sign_ecdsa_recoverable_message(&message, &pk)?;
+        let signature = recoverable_signature.to_standard();
 
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
 

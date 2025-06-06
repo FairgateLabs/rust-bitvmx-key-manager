@@ -3,7 +3,10 @@ use std::{collections::HashMap, rc::Rc, str::FromStr};
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{rand::{Rng, RngCore}, Keypair, Parity, TapTweak},
+    key::{
+        rand::{Rng, RngCore},
+        Keypair, Parity, TapTweak,
+    },
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
@@ -66,7 +69,7 @@ impl KeyManager {
                     let mut seed = [0u8; 32];
                     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
                     keystore.store_key_derivation_seed(seed)?;
-                },
+                }
             }
         }
 

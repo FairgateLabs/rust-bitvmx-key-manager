@@ -58,4 +58,10 @@ pub enum Musig2SignerError {
 
     #[error("Nonces not generated")]
     NoncesNotGenerated,
+
+    #[error("Can't rebuild tweak: {0}")]
+    CantRebuildTweak(#[from] musig2::secp256k1::scalar::OutOfRangeError),
+
+    #[error("Can´t reconstruct value: {0}")]
+    CantReconstructValue(String),
 }

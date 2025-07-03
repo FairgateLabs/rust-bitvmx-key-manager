@@ -3,6 +3,8 @@ use thiserror::Error;
 
 use config as settings;
 
+use crate::musig2::errors::Musig2SignerError;
+
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
     #[error("Failed from storage")]
@@ -55,6 +57,9 @@ pub enum KeyManagerError {
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,
+
+    #[error("Failed MuSig2 Operation: {0}")]
+    Musig2SignerError(#[from] Musig2SignerError),
 }
 
 #[derive(Error, Debug)]

@@ -106,6 +106,18 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    pub fn import_partial_private_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+        let (private_key, public_key) = self.musig2.aggregate_private_keys(partial_keys, network)?;
+        self.keystore.store_keypair(private_key, public_key)?;
+        Ok(public_key)
+    }
+
+    pub fn import_partial_secret_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+        let (private_key, public_key) = self.musig2.aggregate_secret_keys(partial_keys, network)?;
+        self.keystore.store_keypair(private_key, public_key)?;
+        Ok(public_key)
+    }
+
     /*********************************/
     /******* Key Generation **********/
     /*********************************/

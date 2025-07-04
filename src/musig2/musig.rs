@@ -1,7 +1,6 @@
-use bitcoin::{secp256k1::schnorr::Signature, PublicKey};
+use bitcoin::{secp256k1::{schnorr::Signature, SecretKey}, Network, PrivateKey, PublicKey};
 use musig2::{
-    aggregate_partial_signatures, verify_partial, verify_single, AggNonce, CompactSignature,
-    PartialSignature, SecNonce,
+    aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce, CompactSignature, PartialSignature, SecNonce
 };
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -1076,9 +1075,6 @@ impl MuSig2Signer {
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<KeyAggContext, Musig2SignerError> {
         let participant_pubkeys = self.get_participant_pub_keys(aggregated_pubkey)?;
-        //.into_iter()
-        //.map(to_musig_pubkey)
-        //.collect::<Result<Vec<_>, _>>()?;
         self.get_key_agg_context_aux(participant_pubkeys, tweak)
     }
 
@@ -1170,5 +1166,55 @@ impl MuSig2Signer {
         }
 
         Ok(true)
+    }
+
+    pub(crate) fn aggregate_private_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
+        let secp = musig2::secp256k1::Secp256k1::new();
+        let mut partial_secret_keys: Vec<Scalar> = Vec::new();
+        let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
+
+        for partial_key in partial_keys {
+            let private_key = PrivateKey::from_str(&partial_key).unwrap();
+            let scalar = Scalar::from_slice(&private_key.to_bytes()).unwrap();
+            let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, &scalar.as_ref());
+            partial_secret_keys.push(scalar);
+            partial_public_keys.push(public_key);
+        }
+        
+        let ctx = KeyAggContext::new(partial_public_keys)
+            .unwrap();
+        let aggregated_secret_key: musig2::secp256k1::SecretKey = ctx.aggregated_seckey(partial_secret_keys)
+            .unwrap();
+        let aggregated_public_key = to_bitcoin_pubkey(aggregated_secret_key.public_key(&secp)).unwrap();
+        let aggregated_seckey = SecretKey::from_str(&aggregated_secret_key.display_secret().to_string()).unwrap();
+        let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
+
+
+        Ok((aggregated_private_key, aggregated_public_key))
+    }
+
+    pub(crate) fn aggregate_secret_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
+        let secp = musig2::secp256k1::Secp256k1::new();
+        let mut partial_secret_keys: Vec<Scalar> = Vec::new();
+        let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
+
+        for partial_key in partial_keys {
+            let secret_key = SecretKey::from_str(&partial_key).unwrap();
+            let scalar = Scalar::from_slice(&secret_key.secret_bytes()).unwrap();
+            let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, &scalar.as_ref());
+            partial_secret_keys.push(scalar);
+            partial_public_keys.push(public_key);
+        }
+        
+        let ctx = KeyAggContext::new(partial_public_keys)
+            .unwrap();
+        let aggregated_secret_key: musig2::secp256k1::SecretKey = ctx.aggregated_seckey(partial_secret_keys)
+            .unwrap();
+        let aggregated_public_key = to_bitcoin_pubkey(aggregated_secret_key.public_key(&secp)).unwrap();
+        let aggregated_seckey = SecretKey::from_str(&aggregated_secret_key.display_secret().to_string()).unwrap();
+        let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
+
+
+        Ok((aggregated_private_key, aggregated_public_key))
     }
 }

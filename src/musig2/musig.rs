@@ -5,7 +5,7 @@ use musig2::{
 };
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use musig2::{KeyAggContext, PubNonce};
 
@@ -310,11 +310,19 @@ impl MuSig2SignerApi for MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         id: &str,
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError> {
+        warn!(
+            "MuSig2::get_my_pub_nonces - START - aggregated_pubkey: {}, id: {}",
+            aggregated_pubkey, id
+        );
+
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
         let message_ids = self.get_message_ids(aggregated_pubkey, id);
 
         let message_ids = match message_ids {
-            Ok(ids) => ids,
+            Ok(ids) => {
+                warn!("MuSig2::get_my_pub_nonces - found {} message IDs", ids.len());
+                ids
+            }
             Err(_) => {
                 error!(
                     "Failed to get message IDs for aggregated pubkey: {}",
@@ -327,14 +335,25 @@ impl MuSig2SignerApi for MuSig2Signer {
         let mut pub_nonces = Vec::new();
 
         for message_id in message_ids.iter() {
+            warn!("MuSig2::get_my_pub_nonces - getting nonce for message_id: {}", message_id);
             let pub_nonce =
                 match self.get_pub_nonce(aggregated_pubkey, id, message_id, &my_pub_key)? {
-                    Some(pub_nonce) => pub_nonce,
-                    None => return Err(Musig2SignerError::NoncesNotGenerated),
+                    Some(pub_nonce) => {
+                        warn!("MuSig2::get_my_pub_nonces - found nonce for message_id: {}", message_id);
+                        pub_nonce
+                    }
+                    None => {
+                        warn!("MuSig2::get_my_pub_nonces - no nonce found for message_id: {}", message_id);
+                        return Err(Musig2SignerError::NoncesNotGenerated);
+                    }
                 };
             pub_nonces.push((message_id.clone(), pub_nonce));
         }
 
+        warn!(
+            "MuSig2::get_my_pub_nonces - SUCCESS - returning {} nonces",
+            pub_nonces.len()
+        );
         Ok(pub_nonces)
     }
 
@@ -344,30 +363,53 @@ impl MuSig2SignerApi for MuSig2Signer {
         id: &str,
         pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
     ) -> Result<(), Musig2SignerError> {
-        debug!(
-            "Aggregating nonces for aggregated pubkey: {} 
-                with nonces: {:?}",
-            aggregated_pubkey.to_string(),
-            pub_nonces_map
+        warn!(
+            "MuSig2::aggregate_nonces - START - aggregated_pubkey: {}, id: {}, nonces_map size: {}", 
+            aggregated_pubkey, id, pub_nonces_map.len()
         );
 
         let participant_pubkeys = self.get_participant_pub_keys(aggregated_pubkey)?;
+        warn!(
+            "MuSig2::aggregate_nonces - participant_pubkeys: {:?}", 
+            participant_pubkeys
+        );
 
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
+        warn!(
+            "MuSig2::aggregate_nonces - my_pub_key: {}", 
+            my_pub_key
+        );
+
+        warn!(
+            "MuSig2::aggregate_nonces - Expected {} participants, got {} nonces",
+            participant_pubkeys.len() - 1, pub_nonces_map.len()
+        );
 
         if pub_nonces_map.len() != (participant_pubkeys.len() - 1) {
+            error!(
+                "MuSig2::aggregate_nonces - NONCE COUNT MISMATCH: expected {}, got {}",
+                participant_pubkeys.len() - 1, pub_nonces_map.len()
+            );
             return Err(Musig2SignerError::InvalidParticipantNonces);
         }
 
         for pub_key in pub_nonces_map.keys() {
+            warn!("MuSig2::aggregate_nonces - Processing nonces from pubkey: {}", pub_key);
             if *pub_key == my_pub_key {
+                error!("MuSig2::aggregate_nonces - ERROR: Found my own pubkey {} in nonces map", pub_key);
+                return Err(Musig2SignerError::InvalidPublicKey);
+            }
+            if !participant_pubkeys.contains(pub_key) {
+                error!("MuSig2::aggregate_nonces - ERROR: Pubkey {} not in participant list", pub_key);
                 return Err(Musig2SignerError::InvalidPublicKey);
             }
         }
 
         // Validate that all nonces are valid
         for (pub_key, nonces) in &pub_nonces_map {
+            warn!("MuSig2::aggregate_nonces - Validating {} nonces from pubkey {}", nonces.len(), pub_key);
             for (message_id_nonce, nonce) in nonces {
+                warn!("MuSig2::aggregate_nonces - Processing nonce for message_id: {}", message_id_nonce);
                 let key = self.get_key(StoreKey::MuSig2PubNonce{
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
@@ -377,14 +419,17 @@ impl MuSig2SignerApi for MuSig2Signer {
                 let exist_nonce = self.store.has_key(&key)?;
 
                 if exist_nonce {
+                    error!("MuSig2::aggregate_nonces - ERROR: Nonce already exists for key: {}", key);
                     return Err(Musig2SignerError::NonceAlreadyExists);
                 } else {
+                    warn!("MuSig2::aggregate_nonces - Saving new nonce for key: {}", key);
                     // Save the public nonce
                     self.store.set(key, nonce.clone(), None)?;
                 }
             }
         }
 
+        warn!("MuSig2::aggregate_nonces - SUCCESS");
         Ok(())
     }
 
@@ -656,6 +701,11 @@ impl MuSig2Signer {
         tweak: Option<musig2::secp256k1::Scalar>,
         nonce_seed: [u8; 32],
     ) -> Result<(), Musig2SignerError> {
+        warn!(
+            "MuSig2::generate_nonce - START - message_id: {}, aggregated_pubkey: {}, id: {}, tweak: {:?}",
+            message_id, aggregated_pubkey, id, tweak.is_some()
+        );
+
         match self.check_musig_data(aggregated_pubkey)? {
             true => {}
             false => return Err(Musig2SignerError::AggregatedPubkeyNotFound),
@@ -667,6 +717,7 @@ impl MuSig2Signer {
             session_id: id.to_string(),
             message_id: message_id.to_string(),
         }))? {
+            warn!("MuSig2::generate_nonce - nonces already exist for message_id: {}", message_id);
             return Ok(());
         }
 
@@ -683,7 +734,13 @@ impl MuSig2Signer {
 
         let data = (message, pub_nonces, sec_nonce, tweak);
 
+        warn!("MuSig2::generate_nonce - saving message data for message_id: {}", message_id);
         self.save_musig_message_data(message_id, aggregated_pubkey, id, data)?;
+        
+        warn!(
+            "MuSig2::generate_nonce - SUCCESS - message_id: {}, aggregated_pubkey: {}",
+            message_id, aggregated_pubkey
+        );
         Ok(())
     }
 
@@ -1171,4 +1228,6 @@ impl MuSig2Signer {
 
         Ok(true)
     }
+
+
 }

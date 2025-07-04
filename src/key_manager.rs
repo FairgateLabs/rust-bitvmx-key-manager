@@ -506,10 +506,6 @@ impl KeyManager {
         self.musig2.my_public_key(aggregated_pubkey)
     }
 
-    pub fn get_pubkey(&self, aggregated_pubkey: &PublicKey) -> Result<PublicKey, KeyManagerError> {
-        Ok(self.musig2.my_public_key(aggregated_pubkey).unwrap())
-    }
-
     pub fn aggregate_nonces(
         &self,
         aggregated_pubkey: &PublicKey,

@@ -106,14 +106,30 @@ impl KeyManager {
         Ok(public_key)
     }
 
-    pub fn import_partial_private_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
-        let (private_key, public_key) = self.musig2.aggregate_private_keys(partial_keys, network)?;
+    pub fn import_partial_secret_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
+            .into_iter()
+            .map(|key| {
+                SecretKey::from_str(&key)
+                    .map(|sk| sk.secret_bytes().to_vec())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        let (private_key, public_key) = self.musig2.aggregate_private_key(partial_keys_bytes, network)?;
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }
 
-    pub fn import_partial_secret_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
-        let (private_key, public_key) = self.musig2.aggregate_secret_keys(partial_keys, network)?;
+    pub fn import_partial_private_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
+            .into_iter()
+            .map(|key| {
+                PrivateKey::from_str(&key)
+                    .map(|pk| pk.to_bytes().to_vec())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let (private_key, public_key) = self.musig2.aggregate_private_key(partial_keys_bytes, network)?;
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }

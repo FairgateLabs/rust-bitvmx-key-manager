@@ -62,6 +62,18 @@ pub enum Musig2SignerError {
     #[error("Can't rebuild tweak: {0}")]
     CantRebuildTweak(#[from] musig2::secp256k1::scalar::OutOfRangeError),
 
-    #[error("Can´t reconstruct value: {0}")]
+    #[error("Can't reconstruct value: {0}")]
     CantReconstructValue(String),
+
+    #[error("Failed to create Scalar: {0}")]
+    FailedToCreateScalar(#[from] musig2::secp::errors::InvalidScalarBytes),
+
+    #[error("Failed to create KeyAggContext: {0}")]
+    FailedToCreateKeyAggContext(#[from] musig2::errors::KeyAggError),
+
+    #[error("Failed to create AggregatedSecretKey: {0}")]
+    FailedToCreateAggregatedSecretKey(#[from] musig2::errors::InvalidSecretKeysError),
+
+    #[error("Secp256k1 error: {0}")]
+    Secp256k1Error(#[from] bitcoin::secp256k1::Error),
 }

@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use bitcoin::Network;
 use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};

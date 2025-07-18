@@ -106,30 +106,36 @@ impl KeyManager {
         Ok(public_key)
     }
 
-    pub fn import_partial_secret_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+    pub fn import_partial_secret_keys(
+        &self,
+        partial_keys: Vec<String>,
+        network: Network,
+    ) -> Result<PublicKey, KeyManagerError> {
         let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
             .into_iter()
-            .map(|key| {
-                SecretKey::from_str(&key)
-                    .map(|sk| sk.secret_bytes().to_vec())
-            })
+            .map(|key| SecretKey::from_str(&key).map(|sk| sk.secret_bytes().to_vec()))
             .collect::<Result<Vec<_>, _>>()?;
-        
-        let (private_key, public_key) = self.musig2.aggregate_private_key(partial_keys_bytes, network)?;
+
+        let (private_key, public_key) = self
+            .musig2
+            .aggregate_private_key(partial_keys_bytes, network)?;
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }
 
-    pub fn import_partial_private_keys(&self, partial_keys: Vec<String>, network: Network) -> Result<PublicKey, KeyManagerError>{
+    pub fn import_partial_private_keys(
+        &self,
+        partial_keys: Vec<String>,
+        network: Network,
+    ) -> Result<PublicKey, KeyManagerError> {
         let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
             .into_iter()
-            .map(|key| {
-                PrivateKey::from_str(&key)
-                    .map(|pk| pk.to_bytes().to_vec())
-            })
+            .map(|key| PrivateKey::from_str(&key).map(|pk| pk.to_bytes().to_vec()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (private_key, public_key) = self.musig2.aggregate_private_key(partial_keys_bytes, network)?;
+        let (private_key, public_key) = self
+            .musig2
+            .aggregate_private_key(partial_keys_bytes, network)?;
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }
@@ -363,7 +369,7 @@ impl KeyManager {
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
         let tweaked_keypair = keypair.tap_tweak(&self.secp, merkle_root);
-        let keypair = tweaked_keypair.to_inner();
+        let keypair = tweaked_keypair.to_keypair();
         Ok((
             self.secp.sign_schnorr(message, &keypair),
             PublicKey::new(keypair.public_key()),
@@ -470,9 +476,7 @@ impl KeyManager {
         tweak: Option<musig2::secp256k1::Scalar>,
         message: Vec<u8>,
     ) -> Result<PartialSignature, KeyManagerError> {
-        let key_aggregation_context = self
-            .musig2
-            .get_key_agg_context(aggregated_pubkey, tweak)?;
+        let key_aggregation_context = self.musig2.get_key_agg_context(aggregated_pubkey, tweak)?;
 
         let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
@@ -543,7 +547,9 @@ impl KeyManager {
         id: &str,
         pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
     ) -> Result<(), KeyManagerError> {
-        Ok(self.musig2.aggregate_nonces(aggregated_pubkey, id, pub_nonces_map)?)
+        Ok(self
+            .musig2
+            .aggregate_nonces(aggregated_pubkey, id, pub_nonces_map)?)
     }
 
     pub fn get_my_pub_nonces(
@@ -568,8 +574,11 @@ impl KeyManager {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self.musig2
-            .save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)?)
+        Ok(self.musig2.save_partial_signatures(
+            aggregated_pubkey,
+            id,
+            partial_signatures_mapping,
+        )?)
     }
 
     pub fn save_partial_signatures(
@@ -629,7 +638,9 @@ impl KeyManager {
         id: &str,
         message_id: &str,
     ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
-        Ok(self.musig2.get_aggregated_signature(aggregated_pubkey, id, message_id)?)
+        Ok(self
+            .musig2
+            .get_aggregated_signature(aggregated_pubkey, id, message_id)?)
     }
 
     pub fn generate_nonce(

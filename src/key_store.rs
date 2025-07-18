@@ -35,7 +35,7 @@ impl KeyStore {
 
         if let Some(private_key) = data {
             let private_key = PrivateKey::from_str(&private_key)?;
-            return Ok(Some((private_key, public_key.clone())));
+            return Ok(Some((private_key, *public_key)));
         }
 
         Ok(None)

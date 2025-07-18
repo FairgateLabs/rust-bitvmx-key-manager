@@ -2,6 +2,12 @@
 
 BitVMX Key Manager is a comprehensive Rust library designed for managing cryptographic keys used in BitVMX protocol transactions. It offers robust methods for generating, importing, and deriving keys, as well as signing messages using ECDSA, Schnorr, Winternitz, and MuSig2 algorithms. The library ensures secure storage of keys, making it a reliable choice for blockchain and cryptographic applications.
 
+## ⚠️ Disclaimer
+
+This library is currently under development and may not be fully stable.
+It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
+
+
 ## Features
 
 - 🔑 **Key Generation and Storage**: Generate new keys and store them securely.

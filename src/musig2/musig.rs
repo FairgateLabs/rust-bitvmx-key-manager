@@ -1,6 +1,10 @@
-use bitcoin::{secp256k1::{schnorr::Signature, SecretKey}, Network, PrivateKey, PublicKey};
+use bitcoin::{
+    secp256k1::{schnorr::Signature, SecretKey},
+    Network, PrivateKey, PublicKey,
+};
 use musig2::{
-    aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce, CompactSignature, PartialSignature, SecNonce
+    aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
+    CompactSignature, PartialSignature, SecNonce,
 };
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
@@ -367,7 +371,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         // Validate that all nonces are valid
         for (pub_key, nonces) in &pub_nonces_map {
             for (message_id_nonce, nonce) in nonces {
-                let key = self.get_key(StoreKey::MuSig2PubNonce{
+                let key = self.get_key(StoreKey::MuSig2PubNonce {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id_nonce.to_string(),
@@ -458,9 +462,9 @@ impl MuSig2SignerApi for MuSig2Signer {
         // Validate that all partial signatures were not already inserted, and that each partial signature has a valid message id
         for message_id in message_ids.iter() {
             let partial_signatures =
-                self.get_partial_signatures(aggregated_pubkey, id, &message_id)?;
+                self.get_partial_signatures(aggregated_pubkey, id, message_id)?;
             for (pub_key, signatures) in &partial_signatures_to_save {
-                if signatures.iter().find(|(id, _)| id == message_id).is_some() {
+                if signatures.iter().any(|(id, _)| id == message_id) {
                     if partial_signatures.contains_key(pub_key) {
                         return Err(Musig2SignerError::PartialSignatureAlreadyExists);
                     }
@@ -487,7 +491,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         for (pubkey, sigs) in partial_signatures_to_save {
             for (message_id, sig) in sigs {
                 self.store.set(
-                    self.get_key(StoreKey::MuSig2PartialSignature{
+                    self.get_key(StoreKey::MuSig2PartialSignature {
                         aggregated_pubkey: aggregated_pubkey.to_string(),
                         session_id: id.to_string(),
                         message_id: message_id.to_string(),
@@ -661,7 +665,7 @@ impl MuSig2Signer {
         }
 
         // If message exists then nonces are already generated
-        if self.store.has_key(&self.get_key(StoreKey::MuSig2Message{
+        if self.store.has_key(&self.get_key(StoreKey::MuSig2Message {
             aggregated_pubkey: aggregated_pubkey.to_string(),
             session_id: id.to_string(),
             message_id: message_id.to_string(),
@@ -695,7 +699,7 @@ impl MuSig2Signer {
     ) -> Result<(), Musig2SignerError> {
         let transaction_id = self.store.begin_transaction();
         self.store.set(
-            self.get_key(StoreKey::MuSig2Message{
+            self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -705,7 +709,7 @@ impl MuSig2Signer {
         )?;
         for (pub_key, pub_nonce) in data.1.iter() {
             self.store.set(
-                self.get_key(StoreKey::MuSig2PubNonce{
+                self.get_key(StoreKey::MuSig2PubNonce {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
@@ -716,7 +720,7 @@ impl MuSig2Signer {
             )?;
         }
         self.store.set(
-            self.get_key(StoreKey::MuSig2SecretNonce{
+            self.get_key(StoreKey::MuSig2SecretNonce {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -726,7 +730,7 @@ impl MuSig2Signer {
         )?;
         if let Some(tweak_value) = data.3 {
             self.store.set(
-                self.get_key(StoreKey::MuSig2Tweak{
+                self.get_key(StoreKey::MuSig2Tweak {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
@@ -737,14 +741,15 @@ impl MuSig2Signer {
         }
         let message_ids =
             self.store
-                .get::<String, Vec<MessageId>>(self.get_key(StoreKey::MuSig2MessageIds{
+                .get::<String, Vec<MessageId>>(self.get_key(StoreKey::MuSig2MessageIds {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                 }))?;
-        let mut message_ids = message_ids.unwrap_or_else(|| Vec::new());
+
+        let mut message_ids = message_ids.unwrap_or(Vec::new());
         message_ids.push(message_id.to_string());
         self.store.set(
-            self.get_key(StoreKey::MuSig2MessageIds{
+            self.get_key(StoreKey::MuSig2MessageIds {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
             }),
@@ -820,12 +825,9 @@ impl MuSig2Signer {
         &self,
         aggregated_pubkey: &PublicKey,
     ) -> Result<PublicKey, Musig2SignerError> {
-        match self
-            .store
-            .get(self.get_key(StoreKey::MuSig2MyPublicKey{
-                aggregated_pubkey: aggregated_pubkey.to_string(),
-            }))?
-        {
+        match self.store.get(self.get_key(StoreKey::MuSig2MyPublicKey {
+            aggregated_pubkey: aggregated_pubkey.to_string(),
+        }))? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::AggregatedPubkeyNotFound),
         }
@@ -837,7 +839,7 @@ impl MuSig2Signer {
     ) -> Result<Vec<PublicKey>, Musig2SignerError> {
         match self
             .store
-            .get(self.get_key(StoreKey::MuSig2ParticipantPubKeys{
+            .get(self.get_key(StoreKey::MuSig2ParticipantPubKeys {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
             }))? {
             Some(result) => Ok(result),
@@ -853,7 +855,7 @@ impl MuSig2Signer {
     ) -> Result<Option<musig2::secp256k1::Scalar>, Musig2SignerError> {
         match self
             .store
-            .get::<String, [u8; 32]>(self.get_key(StoreKey::MuSig2Tweak{
+            .get::<String, [u8; 32]>(self.get_key(StoreKey::MuSig2Tweak {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -874,7 +876,7 @@ impl MuSig2Signer {
     ) -> Result<SecNonce, Musig2SignerError> {
         match self
             .store
-            .get::<String, SecNonce>(self.get_key(StoreKey::MuSig2SecretNonce{
+            .get::<String, SecNonce>(self.get_key(StoreKey::MuSig2SecretNonce {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -893,11 +895,11 @@ impl MuSig2Signer {
         let mut partial_signatures = HashMap::new();
         let result =
             self.store
-                .partial_compare(&self.get_key(StoreKey::MuSig2PartialSignatures{
-                aggregated_pubkey: aggregated_pubkey.to_string(),
-                session_id: id.to_string(),
-                message_id: message_id.to_string(),
-            }))?;
+                .partial_compare(&self.get_key(StoreKey::MuSig2PartialSignatures {
+                    aggregated_pubkey: aggregated_pubkey.to_string(),
+                    session_id: id.to_string(),
+                    message_id: message_id.to_string(),
+                }))?;
 
         for (key, value) in result {
             let pubkey_str = key.split('/').last().unwrap_or("");
@@ -921,12 +923,11 @@ impl MuSig2Signer {
     ) -> Result<Vec<u8>, Musig2SignerError> {
         match self
             .store
-            .get::<String, Vec<u8>>(self.get_key(StoreKey::MuSig2Message{
+            .get::<String, Vec<u8>>(self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
-            }
-            ))? {
+            }))? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::InvalidMessageId),
         }
@@ -941,7 +942,7 @@ impl MuSig2Signer {
     ) -> Result<Option<PubNonce>, Musig2SignerError> {
         match self
             .store
-            .get::<String, PubNonce>(self.get_key(StoreKey::MuSig2PubNonce{
+            .get::<String, PubNonce>(self.get_key(StoreKey::MuSig2PubNonce {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -960,7 +961,7 @@ impl MuSig2Signer {
     ) -> Result<usize, Musig2SignerError> {
         let result = self
             .store
-            .partial_compare(&self.get_key(StoreKey::MuSig2PubNonces{
+            .partial_compare(&self.get_key(StoreKey::MuSig2PubNonces {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
@@ -974,12 +975,12 @@ impl MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         id: &str,
     ) -> Result<Vec<MessageId>, Musig2SignerError> {
-        match self
-            .store
-            .get::<String, Vec<MessageId>>(self.get_key(StoreKey::MuSig2MessageIds{
+        match self.store.get::<String, Vec<MessageId>>(self.get_key(
+            StoreKey::MuSig2MessageIds {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
-            }))? {
+            },
+        ))? {
             Some(ids) => Ok(ids),
             None => Err(Musig2SignerError::IdNotFound),
         }
@@ -995,7 +996,7 @@ impl MuSig2Signer {
 
         for participant_key in participant_pubkeys.iter() {
             for message_id in message_ids.iter() {
-                if !self.store.has_key(&self.get_key(StoreKey::MuSig2PubNonce{
+                if !self.store.has_key(&self.get_key(StoreKey::MuSig2PubNonce {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
@@ -1024,15 +1025,15 @@ impl MuSig2Signer {
 
         let transaction_id = self.store.begin_transaction();
         self.store.set(
-            self.get_key(StoreKey::MuSig2ParticipantPubKeys{
-                aggregated_pubkey: musig2_data.0.to_string()
+            self.get_key(StoreKey::MuSig2ParticipantPubKeys {
+                aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.1,
             Some(transaction_id),
         )?;
         self.store.set(
-            self.get_key(StoreKey::MuSig2MyPublicKey{
-                aggregated_pubkey: musig2_data.0.to_string()
+            self.get_key(StoreKey::MuSig2MyPublicKey {
+                aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.2,
             Some(transaction_id),
@@ -1168,22 +1169,28 @@ impl MuSig2Signer {
         Ok(true)
     }
 
-    pub(crate) fn aggregate_private_key(&self, partial_keys_bytes: Vec<Vec<u8>>, network: Network) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
+    pub(crate) fn aggregate_private_key(
+        &self,
+        partial_keys_bytes: Vec<Vec<u8>>,
+        network: Network,
+    ) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
         let secp = musig2::secp256k1::Secp256k1::new();
         let mut partial_secret_keys: Vec<Scalar> = Vec::new();
         let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
 
         for partial_key_bytes in partial_keys_bytes {
             let scalar = Scalar::from_slice(&partial_key_bytes)?;
-            let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, &scalar.as_ref());
+            let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, scalar.as_ref());
             partial_secret_keys.push(scalar);
             partial_public_keys.push(public_key);
         }
-        
+
         let ctx = KeyAggContext::new(partial_public_keys)?;
-        let aggregated_secret_key: musig2::secp256k1::SecretKey = ctx.aggregated_seckey(partial_secret_keys)?;
+        let aggregated_secret_key: musig2::secp256k1::SecretKey =
+            ctx.aggregated_seckey(partial_secret_keys)?;
         let aggregated_public_key = to_bitcoin_pubkey(aggregated_secret_key.public_key(&secp))?;
-        let aggregated_seckey = SecretKey::from_str(&aggregated_secret_key.display_secret().to_string())?;
+        let aggregated_seckey =
+            SecretKey::from_str(&aggregated_secret_key.display_secret().to_string())?;
         let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
 
         Ok((aggregated_private_key, aggregated_public_key))

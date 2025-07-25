@@ -13,6 +13,7 @@ pub mod errors;
 pub mod key_manager;
 pub mod key_store;
 pub mod musig2;
+pub mod rsa;
 pub mod tests;
 pub mod verifier;
 pub mod winternitz;

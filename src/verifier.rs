@@ -1,10 +1,11 @@
+use crate::{
+    errors::KeyManagerError,
+    rsa::{RSAKeyPair, Signature},
+    winternitz::{to_checksummed_message, Winternitz, WinternitzPublicKey, WinternitzSignature},
+};
 use bitcoin::{
     secp256k1::{self, All},
     PublicKey,
-};
-
-use crate::winternitz::{
-    to_checksummed_message, Winternitz, WinternitzPublicKey, WinternitzSignature,
 };
 
 pub struct SignatureVerifier {
@@ -60,5 +61,15 @@ impl SignatureVerifier {
             .unwrap_or(false)
 
         // verification && (my_msg_with_checksum == message_with_checksum)
+    }
+
+    pub fn verify_rsa_signature(
+        &self,
+        signature: &Signature,
+        message: &[u8],
+        public_key: &String, // PEM format
+    ) -> Result<bool, KeyManagerError> {
+        let verify = RSAKeyPair::verify(message, public_key, signature)?;
+        Ok(verify)
     }
 }

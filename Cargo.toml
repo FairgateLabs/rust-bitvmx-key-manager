@@ -35,9 +35,13 @@ thiserror = "2.0.12"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 hex = "0.4.3"
+rsa = "0.9.8"
+sha2 = "0.10"
+base64 = "0.22.0"
+musig2 = { version = "0.2.3", features = ["serde", "rand"] }
+
 rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
 bitvmx-settings = { path = "../rust-bitvmx-settings" }
-musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 
 [dev-dependencies]
 criterion = "0.6.0"

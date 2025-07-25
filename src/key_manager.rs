@@ -23,6 +23,7 @@ use crate::{
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
     },
+    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
     },
@@ -138,6 +139,16 @@ impl KeyManager {
             .aggregate_private_key(partial_keys_bytes, network)?;
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
+    }
+
+    pub fn import_rsa_private_key(
+        &self,
+        private_key: &str, // PEM format
+        index: usize,
+    ) -> Result<RSAKeyPair, KeyManagerError> {
+        let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
+        Ok(rsa_keypair)
     }
 
     /*********************************/
@@ -275,6 +286,25 @@ impl KeyManager {
     fn generate_private_key<R: Rng + ?Sized>(&self, network: Network, rng: &mut R) -> PrivateKey {
         let secret_key = SecretKey::new(rng);
         PrivateKey::new(secret_key, network)
+    }
+
+    pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+        index: usize,
+    ) -> Result<RSAKeyPair, KeyManagerError> {
+        let rsa_keypair = RSAKeyPair::new(rng, 2048)?; //TODO: magic number
+        self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
+        Ok(rsa_keypair)
+    }
+
+    /// pubkey in PEM format
+    pub fn get_rsa_pubkey(&self, index: usize) -> Result<Option<String>, KeyManagerError> {
+        let rsa_keypair = self.keystore.load_rsa_key(index)?;
+        match rsa_keypair {
+            Some(keypair) => Ok(Some(keypair.export_public_pem()?)),
+            None => Ok(None),
+        }
     }
 
     /*********************************/
@@ -447,6 +477,46 @@ impl KeyManager {
         match self.keystore.load_keypair(pubkey)? {
             Some(entry) => Ok(entry.0),
             None => Err(KeyManagerError::KeyPairNotFound(pubkey.to_string())),
+        }
+    }
+
+    pub fn sign_rsa_message(
+        &self,
+        message: &[u8],
+        index: usize,
+    ) -> Result<Signature, KeyManagerError> {
+        let rsa_key = self.keystore.load_rsa_key(index)?;
+        match rsa_key {
+            Some(rsa_key) => Ok(rsa_key.sign(message)),
+            None => return Err(KeyManagerError::RsaKeyIndexNotFound(index)),
+        }
+    }
+
+    pub fn encrypt_rsa_message(
+        &self,
+        message: &[u8],
+        index: usize,
+    ) -> Result<Vec<u8>, KeyManagerError> {
+        let rsa_key = self.keystore.load_rsa_key(index)?;
+        match rsa_key {
+            Some(rsa_key) => Ok(RSAKeyPair::encrypt(
+                message,
+                &rsa_key.public_key(),
+                &mut OsRng,
+            )?),
+            None => return Err(KeyManagerError::RsaKeyIndexNotFound(index)),
+        }
+    }
+
+    pub fn decrypt_rsa_message(
+        &self,
+        encrypted_message: &[u8],
+        index: usize,
+    ) -> Result<Vec<u8>, KeyManagerError> {
+        let rsa_key = self.keystore.load_rsa_key(index)?;
+        match rsa_key {
+            Some(rsa_key) => Ok(rsa_key.decrypt(encrypted_message)?),
+            None => return Err(KeyManagerError::RsaKeyIndexNotFound(index)),
         }
     }
 
@@ -1309,5 +1379,36 @@ mod tests {
             .to_str()
             .expect("Failed to get path to temp file")
             .to_string()
+    }
+
+    #[test]
+    pub fn test_rsa_signature() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path)?;
+
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config)?);
+
+        let key_manager = test_key_manager(keystore, store)?;
+        let signature_verifier = SignatureVerifier::new();
+
+        let mut rng = secp256k1::rand::thread_rng();
+        let idx = 0;
+        let pubkey = key_manager
+            .generate_rsa_keypair(&mut rng, idx)?
+            .export_public_pem()
+            .unwrap();
+        let message = random_message().to_string().as_bytes().to_vec();
+        let signature = key_manager.sign_rsa_message(&message, idx).unwrap();
+
+        assert!(signature_verifier
+            .verify_rsa_signature(&signature, &message, &pubkey)
+            .unwrap());
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        Ok(())
     }
 }

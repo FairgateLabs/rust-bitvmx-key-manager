@@ -1,6 +1,6 @@
 use anyhow::{Ok, Result};
 use bitvmx_settings::settings::ConfigurationFile;
-use std::{rc::Rc, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use storage_backend::storage::Storage;
 
 use crate::{
@@ -450,7 +450,7 @@ impl Cli {
     }
 
     fn key_manager(&self) -> Result<KeyManager> {
-        let store = Rc::new(Storage::new(&self.config.storage)?);
+        let store = Arc::new(Storage::new(&self.config.storage)?);
         let keystore = KeyStore::new(store.clone());
 
         Ok(create_key_manager_from_config(

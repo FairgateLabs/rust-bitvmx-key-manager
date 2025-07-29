@@ -3,7 +3,7 @@ use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
 use key_store::KeyStore;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
 
@@ -20,7 +20,7 @@ pub mod winternitz;
 pub fn create_key_manager_from_config(
     key_manager_config: &KeyManagerConfig,
     keystore: KeyStore,
-    store: Rc<Storage>,
+    store: Arc<Storage>,
 ) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = match &key_manager_config.key_derivation_seed {
         Some(seed) => Some(decode_key_derivation_seed(seed)?),

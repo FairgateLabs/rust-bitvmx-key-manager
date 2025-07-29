@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use bitcoin::key::rand;
 use bitcoin::{
@@ -21,7 +21,7 @@ pub fn random_bytes() -> [u8; 32] {
 
 pub fn create_key_manager(
     store_keystore_path: &str,
-    store: Rc<Storage>,
+    store: Arc<Storage>,
 ) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
@@ -29,7 +29,7 @@ pub fn create_key_manager(
     let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
     let password = "secret password".to_string();
     let config = StorageConfig::new(store_keystore_path.to_string(), Some(password));
-    let key_store = Rc::new(Storage::new(&config)?);
+    let key_store = Arc::new(Storage::new(&config)?);
     let keystore = KeyStore::new(key_store);
 
     let key_manager = key_manager::KeyManager::new(
@@ -62,7 +62,7 @@ pub fn generate_random_string() -> String {
 pub fn mock_data() -> Result<(KeyManager, PublicKey, MuSig2Signer), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
     let config = StorageConfig::new(path, None);
-    let store = Rc::new(Storage::new(&config)?);
+    let store = Arc::new(Storage::new(&config)?);
     let ket_manager_key = format!("test_output/{}", generate_random_string());
     let key_manager = create_key_manager(ket_manager_key.as_str(), store.clone())?;
     let pub_key = create_pub_key(&key_manager)?;

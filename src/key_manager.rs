@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
@@ -49,7 +49,7 @@ impl KeyManager {
         key_derivation_seed: Option<[u8; 32]>,
         winternitz_seed: Option<[u8; 32]>,
         keystore: KeyStore,
-        store: Rc<Storage>,
+        store: Arc<Storage>,
     ) -> Result<Self, KeyManagerError> {
         if keystore.load_winternitz_seed().is_err() {
             match winternitz_seed {
@@ -681,7 +681,7 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
-    use std::{env, fs, panic, rc::Rc, str::FromStr};
+    use std::{env, fs, panic, str::FromStr, sync::Arc};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
@@ -702,7 +702,7 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let mut rng = StepRng::new(1, 0);
@@ -755,7 +755,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -781,7 +781,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -808,7 +808,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -834,7 +834,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -861,7 +861,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -888,7 +888,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -915,7 +915,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let signature_verifier = SignatureVerifier::new();
@@ -947,7 +947,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let key_manager = test_key_manager(keystore, store)?;
         let mut rng = secp256k1::rand::thread_rng();
@@ -988,7 +988,7 @@ mod tests {
         let key_derivation_seed = random_bytes();
 
         let config = StorageConfig::new(path.clone(), Some(password));
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
@@ -1030,7 +1030,7 @@ mod tests {
         let key_derivation_seed = random_bytes();
 
         let config = StorageConfig::new(path.clone(), Some(password.clone()));
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
@@ -1059,7 +1059,7 @@ mod tests {
         let keystore = database_keystore(&keystore_path)?;
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
 
         let mut key_manager = test_key_manager(keystore, store)?;
 
@@ -1111,7 +1111,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
 
         let key_manager = test_key_manager(keystore, store).unwrap();
 
@@ -1149,7 +1149,7 @@ mod tests {
 
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
 
         let key_manager = test_key_manager(keystore, store).unwrap();
 
@@ -1187,7 +1187,7 @@ mod tests {
 
         let store_path_1 = temp_storage();
         let config = StorageConfig::new(store_path_1.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
 
         let key_manager_1 = test_key_manager(keystore, store).unwrap();
 
@@ -1196,7 +1196,7 @@ mod tests {
 
         let store_path_2 = temp_storage();
         let config = StorageConfig::new(store_path_2.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
 
         let key_manager_2 = test_key_manager(keystore, store).unwrap();
 
@@ -1226,7 +1226,7 @@ mod tests {
         let keystore = database_keystore(&keystore_path).unwrap();
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let store = Arc::new(Storage::new(&config).unwrap());
         let key_manager = test_key_manager(keystore, store).unwrap();
 
         let message_size_in_bytes = 32;
@@ -1257,7 +1257,7 @@ mod tests {
 
     fn test_key_manager(
         keystore: KeyStore,
-        store: Rc<Storage>,
+        store: Arc<Storage>,
     ) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
@@ -1277,7 +1277,7 @@ mod tests {
     fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
         let password = "secret password".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
-        let store = Rc::new(Storage::new(&config)?);
+        let store = Arc::new(Storage::new(&config)?);
         Ok(KeyStore::new(store))
     }
 

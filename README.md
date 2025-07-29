@@ -28,7 +28,7 @@ let key_derivation_path = "m/101/1/0/0/";
 let winternitz_seed = random_bytes();
 
 let config = StorageConfig::new(keystore_path, Some(password));
-let store = Rc::new(Storage::new(&config).unwrap());
+let store = Arc::new(Storage::new(&config).unwrap());
 let keystore = KeyStore::new(store);
 
 let manager = KeyManager::new(

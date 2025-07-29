@@ -6,7 +6,7 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{debug, error};
 
@@ -86,7 +86,7 @@ enum StoreKey {
 /// 6. Aggregate all partial signatures with `aggregate_partial_signatures()`
 /// 7. Get final signature for a message with `get_aggregate_partial_signature()`
 pub struct MuSig2Signer {
-    store: Rc<Storage>,
+    store: Arc<Storage>,
 }
 
 pub type PartialSignatureData = HashMap<
@@ -646,7 +646,7 @@ impl MuSig2SignerApi for MuSig2Signer {
 }
 
 impl MuSig2Signer {
-    pub fn new(store: Rc<Storage>) -> Self {
+    pub fn new(store: Arc<Storage>) -> Self {
         Self { store }
     }
 

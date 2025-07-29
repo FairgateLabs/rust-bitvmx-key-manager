@@ -1,17 +1,17 @@
 use crate::errors::KeyManagerError;
 use bitcoin::{PrivateKey, PublicKey};
-use std::{rc::Rc, str::FromStr};
+use std::{str::FromStr, sync::Arc};
 use storage_backend::storage::{KeyValueStore, Storage};
 
 pub struct KeyStore {
-    store: Rc<Storage>,
+    store: Arc<Storage>,
 }
 
 impl KeyStore {
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
 
-    pub fn new(store: Rc<Storage>) -> Self {
+    pub fn new(store: Arc<Storage>) -> Self {
         Self { store }
     }
 

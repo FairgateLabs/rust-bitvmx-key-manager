@@ -35,8 +35,8 @@ thiserror = "2.0.12"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 hex = "0.4.3"
-rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
-bitvmx-settings = { path = "../rust-bitvmx-settings" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.1" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.1" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 
 [dev-dependencies]

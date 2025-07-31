@@ -31,6 +31,8 @@ use crate::{
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
+const RSA_BITS: usize = 2048; // RSA key size in bits
+
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
 /// using ECDSA, Schnorr and Winternitz algorithms. The key manager uses a secure storage mechanism
@@ -293,7 +295,7 @@ impl KeyManager {
         rng: &mut R,
         index: usize,
     ) -> Result<RSAKeyPair, KeyManagerError> {
-        let rsa_keypair = RSAKeyPair::new(rng, 2048)?; //TODO: magic number
+        let rsa_keypair = RSAKeyPair::new(rng, RSA_BITS)?; //TODO: magic number
         self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
         Ok(rsa_keypair)
     }

@@ -160,6 +160,22 @@ enum Commands {
         #[arg(value_name = "size", short = 's', long = "size")]
         size: usize,
     },
+
+    EncryptRsa {
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: usize,
+    },
+
+    DecryptRsa {
+        #[arg(value_name = "ciphertext", short = 'c', long = "ciphertext")]
+        ciphertext: String,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: usize,
+    },
 }
 
 impl Cli {
@@ -277,6 +293,24 @@ impl Cli {
             Commands::RandomMessage { size } => {
                 let message = hex::encode(self.get_random_bytes(*size));
                 info!("Random message: {}", message);
+            }
+
+            Commands::EncryptRsa { message, key_index } => {
+                let key_manager = self.key_manager()?;
+                let bytes = hex::decode(message)?;
+                let ciphertext = key_manager.encrypt_rsa_message(bytes.as_slice(), *key_index)?;
+                info!("Encrypted message: {}", hex::encode(ciphertext));
+            }
+
+            Commands::DecryptRsa {
+                ciphertext,
+                key_index,
+            } => {
+                let key_manager = self.key_manager()?;
+                let bytes = hex::decode(ciphertext)?;
+                let decrypted_message =
+                    key_manager.decrypt_rsa_message(bytes.as_slice(), *key_index)?;
+                info!("Decrypted message: {}", hex::encode(decrypted_message));
             }
         }
 

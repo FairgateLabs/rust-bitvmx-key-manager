@@ -1,0 +1,22 @@
+name: 'Test action'
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: ${{ !contains(github.event.pull_request.title, '[cov]') }}
+    uses: FairgateLabs/BitVMX-CI/.github/workflows/ci_template.yml@main
+    with:
+      repo: 'FairgateLabs/rust-bitvmx-workspace'
+      submodule_path: 'rust-bitvmx-key-manager'      
+    secrets: inherit

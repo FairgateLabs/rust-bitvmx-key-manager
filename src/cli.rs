@@ -165,8 +165,8 @@ enum Commands {
         #[arg(value_name = "message", short = 'm', long = "message")]
         message: String,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: usize,
+        #[arg(value_name = "public_key", short = 'k', long = "public_key")]
+        pub_key: String, // PEM format
     },
 
     DecryptRsa {
@@ -295,10 +295,11 @@ impl Cli {
                 info!("Random message: {}", message);
             }
 
-            Commands::EncryptRsa { message, key_index } => {
+            Commands::EncryptRsa { message, pub_key } => {
                 let key_manager = self.key_manager()?;
                 let bytes = hex::decode(message)?;
-                let ciphertext = key_manager.encrypt_rsa_message(bytes.as_slice(), *key_index)?;
+                let ciphertext =
+                    key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key.clone())?;
                 info!("Encrypted message: {}", hex::encode(ciphertext));
             }
 
@@ -357,11 +358,11 @@ impl Cli {
         let key_manager = self.key_manager()?;
 
         let mut rng = secp256k1::rand::thread_rng();
-        let keypair = key_manager.generate_rsa_keypair(&mut rng, key_index)?;
+        let pubkey = key_manager.generate_rsa_keypair(&mut rng, key_index)?;
 
         info!(
             "New RSA key pair created and stored. Public key is: {}",
-            keypair.export_public_pem()?
+            pubkey
         );
 
         Ok(())

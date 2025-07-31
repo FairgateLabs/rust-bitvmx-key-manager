@@ -64,7 +64,7 @@ impl RSAKeyPair {
     /// Verify a signature using the public key
     pub fn verify(
         message: &[u8],
-        public_key: &String,
+        public_key: &str, // PEM format public key
         signature: &Signature,
     ) -> Result<bool, RSAError> {
         let pubk = RsaPublicKey::from_public_key_pem(public_key)?;
@@ -75,10 +75,11 @@ impl RSAKeyPair {
     /// Encrypt a message using RSA
     pub fn encrypt<R: RngCore + CryptoRng>(
         message: &[u8],
-        pubkey: &RsaPublicKey,
+        public_key: &str,
         rng: &mut R,
     ) -> Result<Vec<u8>, RSAError> {
-        let encrypt = pubkey.encrypt(rng, Pkcs1v15Encrypt, message).unwrap();
+        let pubk = RsaPublicKey::from_public_key_pem(public_key)?;
+        let encrypt = pubk.encrypt(rng, Pkcs1v15Encrypt, message).unwrap();
         Ok(encrypt)
     }
 
@@ -137,8 +138,12 @@ mod tests {
             RSAKeyPair::verify(message, &keypair.export_public_pem().unwrap(), &signature).unwrap()
         );
 
-        let ciphertext =
-            RSAKeyPair::encrypt(&message[..], keypair2.public_key(), &mut rng).unwrap();
+        let ciphertext = RSAKeyPair::encrypt(
+            &message[..],
+            &keypair2.export_public_pem().unwrap(),
+            &mut rng,
+        )
+        .unwrap();
         let decrypted_message = keypair2.decrypt(&ciphertext).unwrap();
         assert_eq!(decrypted_message, message);
     }

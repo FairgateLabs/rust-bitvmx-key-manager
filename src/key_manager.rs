@@ -498,7 +498,7 @@ impl KeyManager {
     pub fn encrypt_rsa_message(
         &self,
         message: &[u8],
-        pub_key: String,
+        pub_key: String, // PEM format
     ) -> Result<Vec<u8>, KeyManagerError> {
         Ok(RSAKeyPair::encrypt(message, &pub_key, &mut OsRng)?)
     }

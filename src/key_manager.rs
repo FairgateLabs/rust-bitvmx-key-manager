@@ -147,10 +147,11 @@ impl KeyManager {
         &self,
         private_key: &str, // PEM format
         index: usize,
-    ) -> Result<RSAKeyPair, KeyManagerError> {
+    ) -> Result<String, KeyManagerError> {
         let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
         self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
-        Ok(rsa_keypair)
+        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
+        Ok(rsa_pubkey_pem)
     }
 
     /*********************************/
@@ -299,15 +300,6 @@ impl KeyManager {
         self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)
-    }
-
-    /// pubkey in PEM format
-    pub fn get_rsa_pubkey(&self, index: usize) -> Result<Option<String>, KeyManagerError> {
-        let rsa_keypair = self.keystore.load_rsa_key(index)?;
-        match rsa_keypair {
-            Some(keypair) => Ok(Some(keypair.export_public_pem()?)),
-            None => Ok(None),
-        }
     }
 
     /*********************************/

@@ -152,8 +152,8 @@ enum Commands {
         #[arg(value_name = "signature", short = 's', long = "signature")]
         signature: String,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: usize,
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        pub_key: String, // PEM format
     },
 
     RandomMessage {
@@ -285,9 +285,9 @@ impl Cli {
             Commands::VerifyRsa {
                 message,
                 signature,
-                key_index,
+                pub_key,
             } => {
-                self.verify_rsa_signature(signature, message, *key_index)?;
+                self.verify_rsa_signature(signature, message, &pub_key)?;
             }
 
             Commands::RandomMessage { size } => {
@@ -541,7 +541,7 @@ impl Cli {
         Ok(())
     }
 
-    fn verify_rsa_signature(&self, signature: &str, message: &str, key_index: usize) -> Result<()> {
+    fn verify_rsa_signature(&self, signature: &str, message: &str, public_key: &str) -> Result<()> {
         let verifier = SignatureVerifier::new();
         let signature_bytes = hex::decode(signature)
             .map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
@@ -549,12 +549,7 @@ impl Cli {
 
         let message_bytes = hex::decode(message)?;
 
-        let public_key = self
-            .key_manager()?
-            .get_rsa_pubkey(key_index)?
-            .ok_or(CliError::InvalidRsaKey(key_index))?;
-
-        match verifier.verify_rsa_signature(&signature, &message_bytes, &public_key)? {
+        match verifier.verify_rsa_signature(&signature, &message_bytes, public_key)? {
             true => info!("RSA Signature is valid"),
             false => info!("RSA Signature is invalid"),
         };

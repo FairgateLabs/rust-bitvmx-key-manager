@@ -67,7 +67,7 @@ impl SignatureVerifier {
         &self,
         signature: &Signature,
         message: &[u8],
-        public_key: &String, // PEM format
+        public_key: &str, // PEM format
     ) -> Result<bool, KeyManagerError> {
         let verify = RSAKeyPair::verify(message, public_key, signature)?;
         Ok(verify)

@@ -1074,6 +1074,7 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
+        drop(keystore);
         cleanup_storage(&path);
         Ok(())
     }
@@ -1105,6 +1106,7 @@ mod tests {
 
         assert_eq!(recovered_public_key.to_string(), public_key.to_string());
 
+        drop(keystore);
         cleanup_storage(&path);
         Ok(())
     }

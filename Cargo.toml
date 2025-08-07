@@ -25,7 +25,7 @@ name = "key_manager"
 
 [dependencies]
 anyhow = "1.0.97"
-bitcoin = { version = "0.32.5", features = ["std", "rand-std", "serde"] }
+bitcoin = { version = "0.32.6", features = ["std", "rand-std", "serde"] }
 clap = { version = "4.5.32", features = ["derive"] }
 config = "0.15.11"
 itertools = "0.14.0"
@@ -38,10 +38,9 @@ hex = "0.4.3"
 rsa = "0.9.8"
 sha2 = "0.10"
 base64 = "0.22.0"
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.1" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.1" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
-
-rust-bitvmx-storage-backend = { path = "../rust-bitvmx-storage-backend" }
-bitvmx-settings = { path = "../rust-bitvmx-settings" }
 
 [dev-dependencies]
 criterion = "0.6.0"

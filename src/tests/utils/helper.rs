@@ -35,7 +35,7 @@ pub fn create_key_manager(
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
         derivation_path.as_str(),
-        Some(key_derivation_seed),
+        Some(key_derivation_seed.to_vec()),
         Some(winternitz_seed),
         keystore,
         store,

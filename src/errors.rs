@@ -60,6 +60,9 @@ pub enum KeyManagerError {
 
     #[error("Failed MuSig2 Operation: {0}")]
     Musig2SignerError(#[from] Musig2SignerError),
+
+    #[error("Failed to parse BIP39 mnemonic {0}")]
+    FailedToParseBip39Mnemonic(#[from] bip39::Error),
 }
 
 #[derive(Error, Debug)]

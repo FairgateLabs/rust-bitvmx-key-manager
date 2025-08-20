@@ -1,5 +1,5 @@
 use std::{collections::HashMap, rc::Rc, str::FromStr};
-
+use bip39::{Language, Mnemonic};
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
@@ -16,16 +16,14 @@ use storage_backend::storage::Storage;
 use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError,
-    key_store::KeyStore,
+    errors::KeyManagerError, key_store::KeyStore, 
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    },
-    winternitz::{
+    }, winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    },
+    }
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -46,7 +44,7 @@ impl KeyManager {
     pub fn new(
         network: Network,
         key_derivation_path: &str,
-        key_derivation_seed: Option<[u8; 32]>,
+        key_derivation_seed: Option<Vec<u8>>,
         winternitz_seed: Option<[u8; 32]>,
         keystore: KeyStore,
         store: Rc<Storage>,
@@ -66,9 +64,9 @@ impl KeyManager {
             match key_derivation_seed {
                 Some(seed) => keystore.store_key_derivation_seed(seed)?,
                 None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_key_derivation_seed(seed)?;
+                    let mnemonic = Mnemonic::generate_in(Language::English, 12)?;
+                    let seed = mnemonic.to_seed("");
+                    keystore.store_key_derivation_seed(seed.to_vec())?;
                 }
             }
         }
@@ -991,7 +989,7 @@ mod tests {
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_key_derivation_seed(key_derivation_seed.to_vec())?;
 
         for _ in 0..10 {
             let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -1034,7 +1032,7 @@ mod tests {
         let store = Rc::new(Storage::new(&config)?);
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_key_derivation_seed(key_derivation_seed.to_vec())?;
 
         let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
         let private_key = PrivateKey::new(secret_key, Network::Regtest);
@@ -1267,7 +1265,7 @@ mod tests {
         let key_manager = KeyManager::new(
             REGTEST,
             DERIVATION_PATH,
-            Some(key_derivation_seed),
+            Some(key_derivation_seed.to_vec()),
             Some(winternitz_seed),
             keystore,
             store,

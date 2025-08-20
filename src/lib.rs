@@ -6,6 +6,7 @@ use key_store::KeyStore;
 use std::rc::Rc;
 use std::str::FromStr;
 use storage_backend::storage::Storage;
+use bip39::{Language, Mnemonic};
 
 pub mod cli;
 pub mod config;
@@ -22,9 +23,20 @@ pub fn create_key_manager_from_config(
     keystore: KeyStore,
     store: Rc<Storage>,
 ) -> Result<KeyManager, KeyManagerError> {
-    let key_derivation_seed = match &key_manager_config.key_derivation_seed {
-        Some(seed) => Some(decode_key_derivation_seed(seed)?),
-        None => None,
+    let key_derivation_seed = match &key_manager_config.key_derivation_mnemonic {
+        Some(mnemonic_config) => {
+            let mnemonic = Mnemonic::parse_in(Language::English, mnemonic_config.words.to_string())?;
+            // Optional BIP39 passphrase (not the same as a wallet password!)
+            let passphrase = mnemonic_config.passphrase.clone().unwrap_or("".to_string());
+            let seed = mnemonic.to_seed(passphrase);
+            Some(seed.to_vec())
+        }
+        None => {
+            match &key_manager_config.key_derivation_seed {
+                Some(seed) => Some(decode_key_derivation_seed(seed)?),
+                None => None,
+            }
+        }
     };
 
     let key_derivation_path = &key_manager_config
@@ -63,14 +75,12 @@ fn decode_winternitz_seed(seed: &str) -> Result<[u8; 32], ConfigError> {
         .map_err(|_| ConfigError::InvalidWinternitzSeed)
 }
 
-fn decode_key_derivation_seed(seed: &str) -> Result<[u8; 32], ConfigError> {
+fn decode_key_derivation_seed(seed: &str) -> Result<Vec<u8>, ConfigError> {
     let key_derivation_seed =
         hex::decode(seed).map_err(|_| ConfigError::InvalidKeyDerivationSeed)?;
-    if key_derivation_seed.len() > 32 {
+    let seed_len = key_derivation_seed.len();
+    if seed_len != 32 && seed_len != 64 {
         return Err(ConfigError::InvalidKeyDerivationSeed);
     }
-    key_derivation_seed
-        .as_slice()
-        .try_into()
-        .map_err(|_| ConfigError::InvalidKeyDerivationSeed)
+    Ok(key_derivation_seed)
 }

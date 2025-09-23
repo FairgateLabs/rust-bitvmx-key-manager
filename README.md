@@ -7,7 +7,6 @@ BitVMX Key Manager is a comprehensive Rust library designed for managing cryptog
 This library is currently under development and may not be fully stable.
 It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
 
-
 ## Features
 
 - 🔑 **Key Generation and Storage**: Generate new keys and store them securely.
@@ -19,6 +18,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 ## Usage
 
 ### Creating a KeyManager 
+
 ```rust
 let network = Network::Regtest;
 let password = "secret password".to_string();
@@ -41,6 +41,7 @@ let manager = KeyManager::new(
 ```
 
 ### Key Importing
+
 ```rust
 use bitcoin::secp256k1::SecretKey;
 
@@ -56,6 +57,7 @@ manager.import_partial_secret_keys(secret_key);
 ```
 
 ### Key Generation & Derivation
+
 Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.
 
 ```rust
@@ -77,6 +79,7 @@ let path = manager.key_derivation_path(42);
 ```
 
 #### Deriving Winternitz OTS keys
+
 The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
 
 ```rust
@@ -108,6 +111,7 @@ let recoverable_sig = manager.sign_ecdsa_recoverable_message(&message, pk);
 ```
 
 ### Signing and verifying a message using Schnorr
+
 ```rust
 // Create a random Message.
 let mut digest = [0u8; 32];
@@ -126,6 +130,7 @@ signature_verifier.verify_schnorr_signature(&signature, &message, pk);
 ```
 
 ### Signing and verifying a message using Winternitz
+
 ```rust
 // Create a random Message.
 let mut digest = [0u8; 32];
@@ -162,11 +167,13 @@ let (sig, tweaked_pubkey) = manager.sign_schnorr_message_with_tweak(&msg, &pubke
 
 1. Clone the repository
 2. Install dependencies: `cargo build`
-3. Run tests: `cargo test`
+3. Run tests: `cargo test -- --test-threads=1`
 
 ## Contributing
+
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
 
 ## License
+
 This project is licensed under the MIT License.
 

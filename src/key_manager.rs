@@ -287,7 +287,13 @@ impl KeyManager {
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_ecdsa_message compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )))
+            }
         };
 
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
@@ -300,7 +306,13 @@ impl KeyManager {
     ) -> Result<secp256k1::ecdsa::RecoverableSignature, KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_ecdsa_recoverable_message compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )))
+            }
         };
 
         Ok(self.secp.sign_ecdsa_recoverable(message, &sk.inner))
@@ -345,7 +357,11 @@ impl KeyManager {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
-                return Err(KeyManagerError::KeyPairNotFound(public_key.to_string()));
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_schnorr_message compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )));
             }
         };
 
@@ -363,7 +379,13 @@ impl KeyManager {
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_schnorr_message_with_tap_tweak compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )))
+            }
         };
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -385,7 +407,13 @@ impl KeyManager {
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_schnorr_message_with_tweak compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )))
+            }
         };
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
@@ -446,7 +474,11 @@ impl KeyManager {
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
             Some(entry) => Ok(entry.0),
-            None => Err(KeyManagerError::KeyPairNotFound(pubkey.to_string())),
+            None => Err(KeyManagerError::KeyPairNotFound(format!(
+                "export_secret compressed {} public key: {:?}",
+                pubkey.to_string(),
+                pubkey
+            ))),
         }
     }
 
@@ -463,7 +495,11 @@ impl KeyManager {
 
         match self.keystore.load_keypair(&my_pub_key)? {
             Some(entry) => Ok(entry),
-            None => Err(KeyManagerError::KeyPairNotFound(my_pub_key.to_string())),
+            None => Err(KeyManagerError::KeyPairNotFound(format!(
+                "get_key_pair_for_too_insecure compressed {} public key: {:?}",
+                my_pub_key.to_string(),
+                my_pub_key
+            ))),
         }
     }
 
@@ -480,7 +516,13 @@ impl KeyManager {
 
         let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(my_public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "sign_partial_message compressed {} public key: {:?}",
+                    my_public_key.to_string(),
+                    my_public_key
+                )))
+            }
         };
 
         let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
@@ -510,7 +552,13 @@ impl KeyManager {
     ) -> Result<[u8; 32], KeyManagerError> {
         let (sk, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
-            None => return Err(KeyManagerError::KeyPairNotFound(public_key.to_string())),
+            None => {
+                return Err(KeyManagerError::KeyPairNotFound(format!(
+                    "generate_nonce_seed compressed {} public key: {:?}",
+                    public_key.to_string(),
+                    public_key
+                )))
+            }
         };
 
         let mut data = Vec::new();

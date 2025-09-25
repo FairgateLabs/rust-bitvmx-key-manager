@@ -62,6 +62,11 @@ enum Commands {
         key_index: u32,
     },
 
+    NewRsaKey {
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: usize,
+    },
+
     SignECDSA {
         #[arg(value_name = "message", short = 'm', long = "message")]
         message: String,
@@ -87,6 +92,14 @@ enum Commands {
 
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
+    },
+
+    SignRsa {
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: usize,
     },
 
     VerifyEcdsa {
@@ -132,9 +145,36 @@ enum Commands {
         key_index: u32,
     },
 
+    VerifyRsa {
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "signature", short = 's', long = "signature")]
+        signature: String,
+
+        #[arg(value_name = "public_key", short = 'p', long = "public_key")]
+        pub_key: String, // PEM format
+    },
+
     RandomMessage {
         #[arg(value_name = "size", short = 's', long = "size")]
         size: usize,
+    },
+
+    EncryptRsa {
+        #[arg(value_name = "message", short = 'm', long = "message")]
+        message: String,
+
+        #[arg(value_name = "public_key", short = 'k', long = "public_key")]
+        pub_key: String, // PEM format
+    },
+
+    DecryptRsa {
+        #[arg(value_name = "ciphertext", short = 'c', long = "ciphertext")]
+        ciphertext: String,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: usize,
     },
 }
 
@@ -180,6 +220,10 @@ impl Cli {
                 self.generate_winternitz_key(winternitz_type, *message_length, *key_index)?;
             }
 
+            Commands::NewRsaKey { key_index } => {
+                self.generate_rsa_key(*key_index)?;
+            }
+
             Commands::SignECDSA {
                 message,
                 public_key,
@@ -200,6 +244,10 @@ impl Cli {
                 key_index,
             } => {
                 self.sign_winternitz(message, winternitz_type, *key_index)?;
+            }
+
+            Commands::SignRsa { message, key_index } => {
+                self.sign_rsa(message, *key_index)?;
             }
 
             Commands::VerifyEcdsa {
@@ -234,9 +282,36 @@ impl Cli {
                 )?;
             }
 
+            Commands::VerifyRsa {
+                message,
+                signature,
+                pub_key,
+            } => {
+                self.verify_rsa_signature(signature, message, &pub_key)?;
+            }
+
             Commands::RandomMessage { size } => {
                 let message = hex::encode(self.get_random_bytes(*size));
                 info!("Random message: {}", message);
+            }
+
+            Commands::EncryptRsa { message, pub_key } => {
+                let key_manager = self.key_manager()?;
+                let bytes = hex::decode(message)?;
+                let ciphertext =
+                    key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key.clone())?;
+                info!("Encrypted message: {}", hex::encode(ciphertext));
+            }
+
+            Commands::DecryptRsa {
+                ciphertext,
+                key_index,
+            } => {
+                let key_manager = self.key_manager()?;
+                let bytes = hex::decode(ciphertext)?;
+                let decrypted_message =
+                    key_manager.decrypt_rsa_message(bytes.as_slice(), *key_index)?;
+                info!("Decrypted message: {}", hex::encode(decrypted_message));
             }
         }
 
@@ -274,6 +349,20 @@ impl Cli {
         info!(
             "New key pair created of Winternitz Key. Public key is: {}",
             hex::encode(public_key.to_bytes())
+        );
+
+        Ok(())
+    }
+
+    fn generate_rsa_key(&self, key_index: usize) -> Result<()> {
+        let key_manager = self.key_manager()?;
+
+        let mut rng = secp256k1::rand::thread_rng();
+        let pubkey = key_manager.generate_rsa_keypair(&mut rng, key_index)?;
+
+        info!(
+            "New RSA key pair created and stored. Public key is: {}",
+            pubkey
         );
 
         Ok(())
@@ -338,6 +427,17 @@ impl Cli {
         )?;
 
         info!("Schnorr Message signed. Signature is: {:?}", signature);
+
+        Ok(())
+    }
+
+    fn sign_rsa(&self, message: &str, key_index: usize) -> Result<()> {
+        let key_manager = self.key_manager()?;
+        let bytes = hex::decode(message)?;
+
+        let signature = key_manager.sign_rsa_message(bytes.as_slice(), key_index)?;
+
+        info!("RSA Message signed. Signature is: {:?}", signature);
 
         Ok(())
     }
@@ -436,6 +536,22 @@ impl Cli {
         match verifier.verify_winternitz_signature(&signature, &message_bytes, &public_key) {
             true => info!("Winternitz Signature is valid"),
             false => info!("Winternitz Signature is invalid"),
+        };
+
+        Ok(())
+    }
+
+    fn verify_rsa_signature(&self, signature: &str, message: &str, public_key: &str) -> Result<()> {
+        let verifier = SignatureVerifier::new();
+        let signature_bytes = hex::decode(signature)
+            .map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
+        let signature = rsa::pkcs1v15::Signature::try_from(signature_bytes.as_slice())?;
+
+        let message_bytes = hex::decode(message)?;
+
+        match verifier.verify_rsa_signature(&signature, &message_bytes, public_key)? {
+            true => info!("RSA Signature is valid"),
+            false => info!("RSA Signature is invalid"),
         };
 
         Ok(())

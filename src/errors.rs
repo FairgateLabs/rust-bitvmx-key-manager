@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use config as settings;
 
-use crate::musig2::errors::Musig2SignerError;
+use crate::{musig2::errors::Musig2SignerError, rsa::RSAError};
 
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
@@ -60,6 +60,12 @@ pub enum KeyManagerError {
 
     #[error("Failed MuSig2 Operation: {0}")]
     Musig2SignerError(#[from] Musig2SignerError),
+
+    #[error("Rsa Error: {0}")]
+    RsaError(#[from] RSAError),
+
+    #[error("Rsa index not found: {0}")]
+    RsaKeyIndexNotFound(usize),
 }
 
 #[derive(Error, Debug)]
@@ -81,6 +87,9 @@ pub enum CliError {
 
     #[error("Invalid Hex String: {0}")]
     InvalidHexString(String),
+
+    #[error("Invalid RSA Key index: {0}")]
+    InvalidRsaKey(usize),
 }
 
 #[derive(Error, Debug)]

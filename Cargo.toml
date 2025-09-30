@@ -1,7 +1,7 @@
 [package]
 name = "bitvmx-key-manager"
 description = "A library for managing the collection of keys for the BitVMX protocol transactions"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = [
     "Diego Masini <diego.masini@gmail.com>",
@@ -38,8 +38,8 @@ hex = "0.4.3"
 rsa = "0.9.8"
 sha2 = "0.10"
 base64 = "0.22.0"
-rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.1" }
-bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.1" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.2" }
+bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.2" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 
 [dev-dependencies]

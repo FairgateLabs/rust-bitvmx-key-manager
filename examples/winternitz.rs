@@ -1,13 +1,12 @@
-#![allow(unused_imports)]
 use std::rc::Rc;
 
 use bitcoin::{
-    key::rand::{Rng, RngCore},
-    secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey,
+    key::rand::RngCore,
+    secp256k1::{self, Message},
+    Network,
 };
 use key_manager::{
-    key_manager::KeyManager, key_store::KeyStore, verifier::SignatureVerifier, winternitz::{WinternitzSignature, WinternitzType}
+    key_manager::KeyManager, key_store::KeyStore, verifier::SignatureVerifier, winternitz::WinternitzType
 };
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 

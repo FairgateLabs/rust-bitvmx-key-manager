@@ -5,3 +5,9 @@
 mod winternitz_example {
     include!("../examples/winternitz.rs");
 }
+
+// Compile-check import example
+#[allow(dead_code)]
+mod import_example {
+    include!("../examples/import.rs");
+}

@@ -176,6 +176,9 @@ let (sig, tweaked_pubkey) = manager.sign_schnorr_message_with_tweak(&msg, &pubke
     1. run with `cargo run --example import`
 - **keygen:**
     1. run with `cargo run --example keygen`
+- **signing_ecdsa:**
+    1. run with `cargo run --example signing_ecdsa`
+
 
 ## Contributing
 

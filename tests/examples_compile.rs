@@ -17,3 +17,9 @@ mod import_example {
 mod keygen_example {
     include!("../examples/keygen.rs");
 }
+
+// Compile-check signing_ecdsa example
+#[allow(dead_code)]
+mod signing_ecdsa_example {
+    include!("../examples/signing_ecdsa.rs");
+}

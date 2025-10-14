@@ -6,7 +6,8 @@ use bitcoin::{
     Network,
 };
 use key_manager::{
-    key_manager::KeyManager, key_store::KeyStore, verifier::SignatureVerifier, winternitz::WinternitzType
+    key_manager::KeyManager, key_store::KeyStore, verifier::SignatureVerifier,
+    winternitz::WinternitzType,
 };
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 

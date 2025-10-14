@@ -14,7 +14,7 @@ fn main() {
     // --- Creating a KeyManager
 
     let network = Network::Regtest;
-    let keystore_path = "/tmp/keystore.db".to_string();
+    let keystore_path = "./examples/storage/winternitz-keystore.db".to_string();
     let password = "secret password".to_string();
     let key_derivation_seed = random_bytes();
     let key_derivation_path = "m/101/1/0/0/";

@@ -17,7 +17,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 
 ## Usage
 
-### Creating a KeyManager 
+### Creating a KeyManager
 
 ```rust
 let network = Network::Regtest;
@@ -32,11 +32,11 @@ let store = Rc::new(Storage::new(&config).unwrap());
 let keystore = KeyStore::new(store);
 
 let manager = KeyManager::new(
-    network, 
-    key_derivation_path, 
-    key_derivation_seed, 
-    winternitz_seed, 
-    keystore, 
+    network,
+    key_derivation_path,
+    key_derivation_seed,
+    winternitz_seed,
+    keystore,
 )?;
 ```
 
@@ -85,7 +85,7 @@ The key manager supports Winternitz one-time keys. Winternitz keys can be genera
 ```rust
 // Key size in bytes. A Winternitz key needs to be of the same size as the message that will be signed with it.
 let key_size = 32;
-let index = 0; 
+let index = 0;
 let winternitz_key = key_manager.derive_winternitz(key_size, WinternitzType::SHA256, index)?;
 ```
 
@@ -100,7 +100,7 @@ let message = Message::from_digest(digest);
 // Create a key pair
 let public_key = key_manager.generate_key(&mut rng).unwrap();
 
-// Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter 
+// Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter
 let signature = key_manager.sign_ecdsa_message(&message, public_key);
 
 // Verify the signature
@@ -121,7 +121,7 @@ let message = Message::from_digest(digest);
 // Create a key pair
 let public_key = key_manager.generate_key(&mut rng).unwrap();
 
-// Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter 
+// Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter
 let signature = key_manager.sign_schnorr_message(&message, &pk).unwrap();
 
 // Verify the signature
@@ -168,6 +168,10 @@ let (sig, tweaked_pubkey) = manager.sign_schnorr_message_with_tweak(&msg, &pubke
 1. Clone the repository
 2. Install dependencies: `cargo build`
 3. Run tests: `cargo test -- --test-threads=1`
+
+## Examples
+- **winternitz:**
+    1. run with `cargo run --example winternitz`
 
 ## Contributing
 

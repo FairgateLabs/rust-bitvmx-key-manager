@@ -11,3 +11,9 @@ mod winternitz_example {
 mod import_example {
     include!("../examples/import.rs");
 }
+
+// Compile-check keygen example
+#[allow(dead_code)]
+mod keygen_example {
+    include!("../examples/keygen.rs");
+}

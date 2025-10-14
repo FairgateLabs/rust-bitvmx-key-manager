@@ -41,17 +41,27 @@ fn main() {
     let secret_key2 = SecretKey::from_slice(&random_bytes()).unwrap();
     let private_key2 = PrivateKey::new(secret_key2, network);
 
-    let private_keys: Vec<String> = vec![private_key.to_wif().clone(), private_key2.to_wif().clone()];
+    let private_keys: Vec<String> =
+        vec![private_key.to_wif().clone(), private_key2.to_wif().clone()];
     let pubkey = key_manager
         .import_partial_private_keys(private_keys, network)
         .unwrap();
-    println!("Imported partial aggregated public key from private keys: {}", pubkey);
+    println!(
+        "Imported partial aggregated public key from private keys: {}",
+        pubkey
+    );
 
-    let secret_keys: Vec<String> = vec![secret_key.display_secret().to_string(), secret_key2.display_secret().to_string()];
+    let secret_keys: Vec<String> = vec![
+        secret_key.display_secret().to_string(),
+        secret_key2.display_secret().to_string(),
+    ];
     let pubkey = key_manager
         .import_partial_secret_keys(secret_keys, network)
         .unwrap();
-    println!("Imported partial aggregated public key from secret keys: {}", pubkey);
+    println!(
+        "Imported partial aggregated public key from secret keys: {}",
+        pubkey
+    );
 }
 
 fn random_bytes() -> [u8; 32] {

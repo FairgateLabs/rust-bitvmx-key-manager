@@ -23,3 +23,9 @@ mod keygen_example {
 mod signing_ecdsa_example {
     include!("../examples/signing_ecdsa.rs");
 }
+
+// Compile-check signing_schnorr example
+#[allow(dead_code)]
+mod signing_schnorr_example {
+    include!("../examples/signing_schnorr.rs");
+}

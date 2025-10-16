@@ -26,7 +26,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 ### [Key Generation & Derivation](examples/keymanager_usage.rs#L78-L100)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.
+    Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.
 
 ### [Signing and verifying a message using ECDSA](examples/keymanager_usage.rs#L102-L129)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
@@ -37,13 +37,13 @@ Internally the key manager generates a key pair, stores the private key and the 
 ### [Schnorr & Taproot Signatures](examples/keymanager_usage.rs#L155-L182)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.
+    The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.
 
 
-#### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L186-L201)
+### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L186-L201)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
+    The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
 
 ### [Signing and verifying a message using Winternitz](examples/keymanager_usage.rs#L201-L227)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
@@ -55,7 +55,7 @@ The key manager supports Winternitz one-time keys. Winternitz keys can be genera
 3. Run tests: `cargo test -- --test-threads=1`
 
 ## Examples
-- **signing_ecdsa:**
+- **[keymanager_usage:](examples/keymanager_usage.rs)**
     1. run with `cargo run --example keymanager_usage`
 
 

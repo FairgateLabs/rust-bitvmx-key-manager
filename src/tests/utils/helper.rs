@@ -61,7 +61,9 @@ pub fn generate_random_string() -> String {
 
 pub fn mock_data() -> Result<(KeyManager, PublicKey, MuSig2Signer), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
-    let config = StorageConfig::new(path, None);
+    let password = "secret password".to_string();
+    let config = StorageConfig::new(path, Some(password));
+    // let config = StorageConfig::new(path, None);
     let store = Rc::new(Storage::new(&config)?);
     let ket_manager_key = format!("test_output/{}", generate_random_string());
     let key_manager = create_key_manager(ket_manager_key.as_str(), store.clone())?;

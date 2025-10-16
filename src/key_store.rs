@@ -16,6 +16,10 @@ impl KeyStore {
         Self { store }
     }
 
+    pub fn store_clone(&self) -> Rc<Storage> {
+        Rc::clone(&self.store)
+    }
+
     pub fn store_keypair(
         &self,
         private_key: PrivateKey,

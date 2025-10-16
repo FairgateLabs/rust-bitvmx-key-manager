@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
@@ -12,7 +12,6 @@ use bitcoin::{
 };
 
 use itertools::izip;
-use storage_backend::storage::Storage;
 use tracing::debug;
 
 use crate::{
@@ -52,7 +51,6 @@ impl KeyManager {
         key_derivation_seed: Option<[u8; 32]>,
         winternitz_seed: Option<[u8; 32]>,
         keystore: KeyStore,
-        store: Rc<Storage>,
     ) -> Result<Self, KeyManagerError> {
         if keystore.load_winternitz_seed().is_err() {
             match winternitz_seed {
@@ -76,7 +74,7 @@ impl KeyManager {
             }
         }
 
-        let musig2 = MuSig2Signer::new(store.clone());
+        let musig2 = MuSig2Signer::new(keystore.store_clone());
         let secp = secp256k1::Secp256k1::new();
 
         Ok(KeyManager {
@@ -86,6 +84,14 @@ impl KeyManager {
             musig2,
             keystore,
         })
+    }
+
+    pub fn keystore(&self) -> &KeyStore {
+        &self.keystore
+    }
+
+    pub fn musig2(&self) -> &MuSig2Signer {
+        &self.musig2
     }
 
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
@@ -805,11 +811,8 @@ mod tests {
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
 
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let mut rng = StepRng::new(1, 0);
         let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
 
@@ -849,7 +852,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -858,11 +860,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -875,7 +873,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -884,11 +881,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -902,7 +895,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -911,11 +903,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -928,7 +916,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -937,11 +924,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -955,7 +938,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -964,11 +946,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -982,7 +960,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -991,11 +968,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -1009,7 +982,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1018,11 +990,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let pk_1 = key_manager.derive_keypair(0)?;
@@ -1041,7 +1009,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1050,11 +1017,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let mut rng = secp256k1::rand::thread_rng();
 
         let message = random_message();
@@ -1080,7 +1043,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1164,11 +1126,8 @@ mod tests {
         let message = random_message();
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
 
-        let mut key_manager = test_key_manager(keystore, store)?;
+        let mut key_manager = test_key_manager(keystore)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -1207,7 +1166,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1216,11 +1174,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-
-        let key_manager = test_key_manager(keystore, store).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -1246,7 +1200,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
     #[test]
@@ -1254,11 +1207,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-
-        let key_manager = test_key_manager(keystore, store).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -1284,7 +1233,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
     #[test]
@@ -1292,20 +1240,12 @@ mod tests {
         let keystore_path_1 = temp_storage();
         let keystore = database_keystore(&keystore_path_1).unwrap();
 
-        let store_path_1 = temp_storage();
-        let config = StorageConfig::new(store_path_1.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-
-        let key_manager_1 = test_key_manager(keystore, store).unwrap();
+        let key_manager_1 = test_key_manager(keystore).unwrap();
 
         let keystore_path_2 = temp_storage();
         let keystore = database_keystore(&keystore_path_2).unwrap();
 
-        let store_path_2 = temp_storage();
-        let config = StorageConfig::new(store_path_2.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-
-        let key_manager_2 = test_key_manager(keystore, store).unwrap();
+        let key_manager_2 = test_key_manager(keystore).unwrap();
 
         for i in 0..5 {
             // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
@@ -1323,18 +1263,13 @@ mod tests {
         drop(key_manager_1);
         cleanup_storage(&keystore_path_1);
         cleanup_storage(&keystore_path_2);
-        cleanup_storage(&store_path_1);
-        cleanup_storage(&store_path_2);
     }
 
     #[test]
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).unwrap();
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-        let key_manager = test_key_manager(keystore, store).unwrap();
+        let key_manager = test_key_manager(keystore).unwrap();
 
         let message_size_in_bytes = 32;
         let key_type = WinternitzType::SHA256;
@@ -1359,13 +1294,9 @@ mod tests {
         }
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
-    fn test_key_manager(
-        keystore: KeyStore,
-        store: Rc<Storage>,
-    ) -> Result<KeyManager, KeyManagerError> {
+    fn test_key_manager(keystore: KeyStore) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
 
@@ -1375,7 +1306,6 @@ mod tests {
             Some(key_derivation_seed),
             Some(winternitz_seed),
             keystore,
-            store,
         )?;
 
         Ok(key_manager)
@@ -1423,11 +1353,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -1442,7 +1368,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1451,11 +1376,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_key_manager(keystore)?;
 
         let mut rng = secp256k1::rand::thread_rng();
         let idx = 0;
@@ -1472,7 +1393,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 }

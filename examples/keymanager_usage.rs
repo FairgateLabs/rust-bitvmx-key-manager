@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use bitcoin::{
     key::rand::RngCore,
-    secp256k1::{self, Message},
+    secp256k1::{self, Message, Scalar},
     Network,
 };
 
@@ -13,7 +13,6 @@ use key_manager::{
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
 fn main() {
-    // <!-- anchor:creating-keymanager-start -->
     // --- Creating a KeyManager
 
     let network = Network::Regtest;
@@ -36,6 +35,8 @@ fn main() {
         store, // TODO, get this from the keystore?
     )
     .unwrap();
+
+    // --- ------------------------ --- //
 
     // --- Key importing
     use bitcoin::secp256k1::SecretKey;
@@ -73,7 +74,6 @@ fn main() {
     );
 
     // --- ------------------------ --- //
-    // <!-- anchor:creating-keymanager-end -->
 
     // --- Key generation & Derivation
 
@@ -152,7 +152,36 @@ fn main() {
 
     // --- ------------------------ --- //
 
-    // --- WINTERNITZ ---
+    // --- Schnorr & Taproot Signatures
+
+    // Sign with Taproot Script Path
+    let signature = key_manager
+        .sign_schnorr_message(&message, &public_key)
+        .unwrap();
+    println!("Schnorr signature: {}", signature);
+
+    // Sign with Taproot Key Spend (Optional Merkle Root)
+    let merkle_root = None;
+    let (sig, tweaked_pubkey) = key_manager
+        .sign_schnorr_message_with_tap_tweak(&message, &public_key, merkle_root)
+        .unwrap();
+    println!("Taproot Key Spend signature: {}", sig);
+    println!("Taproot Key Spend tweaked pubkey: {}", tweaked_pubkey);
+
+    // Sign with Custom Tweak
+    let tweak: Scalar = Scalar::ZERO; // Example tweak, replace with actual tweak value
+    let (sig, tweaked_pubkey) = key_manager
+        .sign_schnorr_message_with_tweak(&message, &public_key, &tweak)
+        .unwrap();
+    println!("Taproot custom tweak Key Spend signature: {}", sig);
+    println!(
+        "Taproot custom tweak Key Spend tweaked pubkey: {}",
+        tweaked_pubkey
+    );
+
+    // --- ------------------------ --- //
+
+    // --- Winternitz ---
 
     // --- Deriving Winternitz OTS keys
 

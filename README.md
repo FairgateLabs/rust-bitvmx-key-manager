@@ -17,130 +17,36 @@ It is not production-ready, has not been audited, and future updates may introdu
 
 ## Usage
 
-### [Creating a KeyManager](examples/keymanager_usage.rs#creating-keymanager-start)
+### [Creating a KeyManager](examples/keymanager_usage.rs#L16-L39)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-### Key Importing
+### [Key Importing](examples/keymanager_usage.rs#L41-L76)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-```rust
-use bitcoin::secp256k1::SecretKey;
-
-let mut manager = KeyManager::new();
-
-let secret_key = SecretKey::from_slice(&[0xcd; 32])?;
-manager.import_private_key(secret_key);
-
-let private_key: Vec::<String>() = ...;
-let secret_key: Vec::<String>() = ...;
-manager.import_partial_private_keys(private_key);
-manager.import_partial_secret_keys(secret_key);
-```
-
-### Key Generation & Derivation
+### [Key Generation & Derivation](examples/keymanager_usage.rs#L78-L100)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.
 
-```rust
-let mut rng = secp256k1::rand::thread_rng();
-// Generate a keypair
-let keypair = manager.generate_keypair(&mut thread_rng());
+### [Signing and verifying a message using ECDSA](examples/keymanager_usage.rs#L102-L129)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-// Derive a child keypair (e.g., for indexed wallets)
-let derived = manager.derive_keypair(0);
+### [Signing and verifying a message using Schnorr](examples/keymanager_usage.rs#L131-L153)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-// Derive public key only
-let pubkey = manager.derive_public_key(master_xpub, 1);
-
-// Generate a master extended x public key
-let master_xpub = manager.master_xpub();
-
-// BIP32-like hardened path
-let path = manager.key_derivation_path(42);
-```
-
-#### Deriving Winternitz OTS keys
-
-The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
-
-```rust
-// Key size in bytes. A Winternitz key needs to be of the same size as the message that will be signed with it.
-let key_size = 32;
-let index = 0;
-let winternitz_key = key_manager.derive_winternitz(key_size, WinternitzType::SHA256, index)?;
-```
-
-### Signing and verifying a message using ECDSA
-
-```rust
-// Create a random Message.
-let mut digest = [0u8; 32];
-rng.fill_bytes(&mut digest);
-let message = Message::from_digest(digest);
-
-// Create a key pair
-let public_key = key_manager.generate_key(&mut rng).unwrap();
-
-// Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter
-let signature = key_manager.sign_ecdsa_message(&message, public_key);
-
-// Verify the signature
-signature_verifier.verify_ecdsa_signature(&signature, &message, pk);
-
-// Recover signature
-let recoverable_sig = manager.sign_ecdsa_recoverable_message(&message, pk);
-```
-
-### Signing and verifying a message using Schnorr
-
-```rust
-// Create a random Message.
-let mut digest = [0u8; 32];
-rng.fill_bytes(&mut digest);
-let message = Message::from_digest(digest);
-
-// Create a key pair
-let public_key = key_manager.generate_key(&mut rng).unwrap();
-
-// Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter
-let signature = key_manager.sign_schnorr_message(&message, &pk).unwrap();
-
-// Verify the signature
-let signature_verifier = SignatureVerifier::new();
-signature_verifier.verify_schnorr_signature(&signature, &message, pk);
-```
-
-### Signing and verifying a message using Winternitz
-
-```rust
-// Create a random Message.
-let mut digest = [0u8; 32];
-rng.fill_bytes(&mut digest);
-let message = Message::from_digest(digest);
-
-// Create a Winternitz signature. Internally a Winternitz key pair for the derivation index 0 is created using the SHA-256 hash function
-let signature = key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0).unwrap();
-
-// Get the Winternitz public key for the index 0 using the SHA-256 hash function
-let winternitz_key = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0).unwrap();
-
-// Verify the signature
-let signature_verifier = SignatureVerifier::new();
-signature_verifier.verify_winternitz_signature(&signature, &message[..], &winternitz_key);
-```
-
-### Schnorr & Taproot Signatures
+### [Schnorr & Taproot Signatures](examples/keymanager_usage.rs#L155-L182)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.
 
-```rust
-// Sign with Taproot Script Path
-let signature = manager.sign_schnorr_message(&msg, &pubkey)?;
 
-// Sign with Taproot Key Spend (Optional Merkle Root)
-let (sig, tweaked_pubkey) = manager.sign_schnorr_message_with_tap_tweak(&msg, &pubkey, merkle_root)?;
+#### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L186-L201)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-// Sign with Custom Tweak
-let (sig, tweaked_pubkey) = manager.sign_schnorr_message_with_tweak(&msg, &pubkey, &tweak)?;
-```
+The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.
+
+### [Signing and verifying a message using Winternitz](examples/keymanager_usage.rs#L201-L227)
+<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 ## Development Setup
 

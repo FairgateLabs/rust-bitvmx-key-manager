@@ -24,7 +24,7 @@ fn main() {
 
     let config = StorageConfig::new(keystore_path, Some(password));
     let store = Rc::new(Storage::new(&config).unwrap());
-    let keystore = KeyStore::new(store.clone()); // TODO need the clone for keymanager parameter
+    let keystore = KeyStore::new(store);
 
     let key_manager = KeyManager::new(
         network,
@@ -32,7 +32,6 @@ fn main() {
         Some(key_derivation_seed),
         Some(winternitz_seed),
         keystore,
-        store, // TODO, get this from the keystore?
     )
     .unwrap();
 

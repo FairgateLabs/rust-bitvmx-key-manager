@@ -11,7 +11,6 @@ use storage_backend::storage_config::StorageConfig;
 
 use crate::key_manager::{self, KeyManager};
 use crate::key_store::KeyStore;
-use crate::musig2::musig::MuSig2Signer;
 
 pub fn random_bytes() -> [u8; 32] {
     let mut seed = [0u8; 32];
@@ -19,10 +18,7 @@ pub fn random_bytes() -> [u8; 32] {
     seed
 }
 
-pub fn create_key_manager(
-    store_keystore_path: &str,
-    store: Rc<Storage>,
-) -> Result<KeyManager, anyhow::Error> {
+pub fn create_key_manager(store_keystore_path: &str) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
@@ -38,7 +34,6 @@ pub fn create_key_manager(
         Some(key_derivation_seed),
         Some(winternitz_seed),
         keystore,
-        store,
     )?;
 
     Ok(key_manager)
@@ -59,14 +54,11 @@ pub fn generate_random_string() -> String {
     (0..10).map(|_| rng.gen_range('a'..='z')).collect()
 }
 
-pub fn mock_data() -> Result<(KeyManager, PublicKey, MuSig2Signer), anyhow::Error> {
+pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
-    let config = StorageConfig::new(path, None);
-    let store = Rc::new(Storage::new(&config)?);
-    let ket_manager_key = format!("test_output/{}", generate_random_string());
-    let key_manager = create_key_manager(ket_manager_key.as_str(), store.clone())?;
+    let ket_manager_key = path;
+    let key_manager = create_key_manager(ket_manager_key.as_str())?;
     let pub_key = create_pub_key(&key_manager)?;
-    let musig = MuSig2Signer::new(store.clone());
 
-    Ok((key_manager, pub_key, musig))
+    Ok((key_manager, pub_key))
 }

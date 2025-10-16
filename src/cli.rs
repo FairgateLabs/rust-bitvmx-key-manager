@@ -572,7 +572,6 @@ impl Cli {
         Ok(create_key_manager_from_config(
             &self.config.key_manager,
             keystore,
-            store,
         )?)
     }
 

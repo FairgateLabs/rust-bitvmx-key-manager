@@ -18,13 +18,12 @@ pub fn random_bytes() -> [u8; 32] {
     seed
 }
 
-pub fn create_key_manager(store_keystore_path: &str) -> Result<KeyManager, anyhow::Error> {
+pub fn create_key_manager(store_keystore_path: &str,  encrypt: Option<String>) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
     let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
-    let password = "secret password".to_string();
-    let config = StorageConfig::new(store_keystore_path.to_string(), Some(password));
+    let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
     let key_store = Rc::new(Storage::new(&config)?);
     let keystore = KeyStore::new(key_store);
 
@@ -57,7 +56,8 @@ pub fn generate_random_string() -> String {
 pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
     let ket_manager_key = path;
-    let key_manager = create_key_manager(ket_manager_key.as_str())?;
+    // let password = "secret password".to_string();
+    let key_manager = create_key_manager(ket_manager_key.as_str(), None)?;
     let pub_key = create_pub_key(&key_manager)?;
 
     Ok((key_manager, pub_key))

@@ -13,6 +13,7 @@ use key_manager::{
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
 fn main() {
+    // <!-- anchor:creating-keymanager-start -->
     // --- Creating a KeyManager
 
     let network = Network::Regtest;
@@ -72,6 +73,7 @@ fn main() {
     );
 
     // --- ------------------------ --- //
+    // <!-- anchor:creating-keymanager-end -->
 
     // --- Key generation & Derivation
 

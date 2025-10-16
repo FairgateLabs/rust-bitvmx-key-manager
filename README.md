@@ -17,28 +17,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 
 ## Usage
 
-### Creating a KeyManager
-
-```rust
-let network = Network::Regtest;
-let password = "secret password".to_string();
-let keystore_path = "/some_path/keystore.db"
-let key_derivation_seed = random_bytes();
-let key_derivation_path = "m/101/1/0/0/";
-let winternitz_seed = random_bytes();
-
-let config = StorageConfig::new(keystore_path, Some(password));
-let store = Rc::new(Storage::new(&config).unwrap());
-let keystore = KeyStore::new(store);
-
-let manager = KeyManager::new(
-    network,
-    key_derivation_path,
-    key_derivation_seed,
-    winternitz_seed,
-    keystore,
-)?;
-```
+### [Creating a KeyManager](examples/keymanager_usage.rs#creating-keymanager-start)
 
 ### Key Importing
 

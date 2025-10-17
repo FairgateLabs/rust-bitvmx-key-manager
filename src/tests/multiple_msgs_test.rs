@@ -23,7 +23,8 @@ mod tests {
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
 
         let id = "test_id";
-        let aggregated_pub_key = musig_1.new_session(participant_pubkeys.clone(), pub_key_part_1)?;
+        let aggregated_pub_key =
+            musig_1.new_session(participant_pubkeys.clone(), pub_key_part_1)?;
         let messages = vec!["1 test message", "2 test message", "3 test message"];
 
         // Generate pub nonces for all messages
@@ -82,7 +83,9 @@ mod tests {
         assert_eq!(aggregated_pub_key, aggregated_pub_key_2);
         // Add nonces
         let nonces_1 = musig_1.get_my_pub_nonces(&aggregated_pub_key, id).unwrap();
-        let nonces_2 = musig_2.get_my_pub_nonces(&aggregated_pub_key_2, id).unwrap();
+        let nonces_2 = musig_2
+            .get_my_pub_nonces(&aggregated_pub_key_2, id)
+            .unwrap();
         // Check that nonces length matches number of messages
         assert_eq!(nonces_1.len(), messages.len());
         assert_eq!(nonces_2.len(), messages.len());
@@ -120,7 +123,8 @@ mod tests {
             my_partial_sigs_1,
         )?;
 
-        let signature_1 = musig_1.get_aggregated_signature(&aggregated_pub_key, id, &messages[0])?;
+        let signature_1 =
+            musig_1.get_aggregated_signature(&aggregated_pub_key, id, &messages[0])?;
         let signature_2 =
             musig_2.get_aggregated_signature(&aggregated_pub_key_2, id, &messages[1])?;
         // Check that signatures length matches number of messages

@@ -37,7 +37,9 @@ mod tests {
             nonce_seed,
         )?;
 
-        key_manager.musig2().get_my_pub_nonces(&aggregated_pubkey, id)?;
+        key_manager
+            .musig2()
+            .get_my_pub_nonces(&aggregated_pubkey, id)?;
 
         let result = key_manager.get_my_partial_signatures(&aggregated_pubkey, id);
         assert!(matches!(
@@ -50,9 +52,13 @@ mod tests {
         // Use same nonces for both participants
 
         let mut nonces_map = HashMap::new();
-        let mypub_nonces = key_manager.musig2().get_my_pub_nonces(&aggregated_pubkey, id)?;
+        let mypub_nonces = key_manager
+            .musig2()
+            .get_my_pub_nonces(&aggregated_pubkey, id)?;
         nonces_map.insert(participant_2, mypub_nonces);
-        key_manager.musig2().aggregate_nonces(&aggregated_pubkey, id, nonces_map)?;
+        key_manager
+            .musig2()
+            .aggregate_nonces(&aggregated_pubkey, id, nonces_map)?;
 
         // Test getting partial signatures
         let result = key_manager.get_my_partial_signatures(&aggregated_pubkey, id);

@@ -2,8 +2,8 @@ use bitcoin::Network;
 use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
-use storage_backend::storage_config::StorageConfig;
 use std::str::FromStr;
+use storage_backend::storage_config::StorageConfig;
 
 pub mod cli;
 pub mod config;

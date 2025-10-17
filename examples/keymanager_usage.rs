@@ -5,10 +5,9 @@ use bitcoin::{
 };
 
 use key_manager::{
-    key_manager::KeyManager, verifier::SignatureVerifier,
-    winternitz::WinternitzType,
+    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType,
 };
-use storage_backend::{storage_config::StorageConfig};
+use storage_backend::storage_config::StorageConfig;
 
 fn main() {
     // --- Creating a KeyManager

@@ -1,3 +1,4 @@
+use crate::key_manager::{self, KeyManager};
 use bitcoin::key::rand;
 use bitcoin::{
     key::rand::{thread_rng, RngCore},
@@ -5,7 +6,6 @@ use bitcoin::{
 };
 use rand::Rng;
 use storage_backend::storage_config::StorageConfig;
-use crate::key_manager::{self, KeyManager};
 
 pub fn random_bytes() -> [u8; 32] {
     let mut seed = [0u8; 32];
@@ -13,7 +13,10 @@ pub fn random_bytes() -> [u8; 32] {
     seed
 }
 
-pub fn create_key_manager(store_keystore_path: &str,  encrypt: Option<String>) -> Result<KeyManager, anyhow::Error> {
+pub fn create_key_manager(
+    store_keystore_path: &str,
+    encrypt: Option<String>,
+) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 

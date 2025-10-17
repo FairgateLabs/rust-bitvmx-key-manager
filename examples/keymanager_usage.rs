@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use bitcoin::{
     key::rand::RngCore,
     secp256k1::{self, Message, Scalar},
@@ -7,10 +5,9 @@ use bitcoin::{
 };
 
 use key_manager::{
-    key_manager::KeyManager, key_store::KeyStore, verifier::SignatureVerifier,
-    winternitz::WinternitzType,
+    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType,
 };
-use storage_backend::{storage::Storage, storage_config::StorageConfig};
+use storage_backend::storage_config::StorageConfig;
 
 fn main() {
     // --- Creating a KeyManager
@@ -22,17 +19,14 @@ fn main() {
     let key_derivation_path = "m/101/1/0/0/";
     let winternitz_seed = random_bytes();
 
-    let config = StorageConfig::new(keystore_path, Some(password));
-    let store = Rc::new(Storage::new(&config).unwrap());
-    let keystore = KeyStore::new(store.clone()); // TODO need the clone for keymanager parameter
+    let storage_config = StorageConfig::new(keystore_path, Some(password));
 
     let key_manager = KeyManager::new(
         network,
         key_derivation_path,
         Some(key_derivation_seed),
         Some(winternitz_seed),
-        keystore,
-        store, // TODO, get this from the keystore?
+        storage_config,
     )
     .unwrap();
 

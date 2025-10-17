@@ -9,8 +9,10 @@ mod tests {
     #[test]
     fn test_final_signature() -> Result<(), anyhow::Error> {
         // Set up test environment
-        let (key_manager_1, pub_key_part_1, musig_1) = mock_data()?;
-        let (key_manager_2, pub_key_part_2, musig_2) = mock_data()?;
+        let (key_manager_1, pub_key_part_1) = mock_data()?;
+        let (key_manager_2, pub_key_part_2) = mock_data()?;
+        let musig_1 = key_manager_1.musig2();
+        let musig_2 = key_manager_2.musig2();
 
         let participant_pubkeys = vec![pub_key_part_1, pub_key_part_2];
         let id = "test_id";

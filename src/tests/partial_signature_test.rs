@@ -3,9 +3,9 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{
-        errors::KeyManagerError, 
-        musig2::{errors::Musig2SignerError, musig::MuSig2SignerApi}, 
-        tests::utils::helper::{clear_output, mock_data}
+        errors::KeyManagerError,
+        musig2::{errors::Musig2SignerError, musig::MuSig2SignerApi},
+        tests::utils::helper::{clear_output, mock_data},
     };
 
     #[test]
@@ -41,7 +41,9 @@ mod tests {
         let result = key_manager.get_my_partial_signatures(&aggregated_pubkey, id);
         assert!(matches!(
             result,
-            Err(KeyManagerError::Musig2SignerError(Musig2SignerError::IncompleteParticipantNonces))
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::IncompleteParticipantNonces
+            ))
         ));
 
         // Use same nonces for both participants
@@ -59,7 +61,9 @@ mod tests {
         let result = key_manager.get_my_partial_signatures(&public_key, id);
         assert!(matches!(
             result,
-            Err(KeyManagerError::Musig2SignerError(Musig2SignerError::AggregatedPubkeyNotFound))
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::AggregatedPubkeyNotFound
+            ))
         ));
 
         clear_output();

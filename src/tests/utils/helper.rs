@@ -1,16 +1,11 @@
-use std::rc::Rc;
-
 use bitcoin::key::rand;
 use bitcoin::{
     key::rand::{thread_rng, RngCore},
     secp256k1, PublicKey,
 };
 use rand::Rng;
-use storage_backend::storage::Storage;
 use storage_backend::storage_config::StorageConfig;
-
 use crate::key_manager::{self, KeyManager};
-use crate::key_store::KeyStore;
 
 pub fn random_bytes() -> [u8; 32] {
     let mut seed = [0u8; 32];
@@ -24,15 +19,13 @@ pub fn create_key_manager(store_keystore_path: &str,  encrypt: Option<String>) -
 
     let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
-    let key_store = Rc::new(Storage::new(&config)?);
-    let keystore = KeyStore::new(key_store);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
         derivation_path.as_str(),
         Some(key_derivation_seed),
         Some(winternitz_seed),
-        keystore,
+        config,
     )?;
 
     Ok(key_manager)

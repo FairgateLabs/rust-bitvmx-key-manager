@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{rc::Rc, collections::HashMap, str::FromStr};
 
 use bitcoin::{
     bip32::{DerivationPath, Xpriv, Xpub},
@@ -12,6 +12,7 @@ use bitcoin::{
 };
 
 use itertools::izip;
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
 use crate::{
@@ -50,8 +51,11 @@ impl KeyManager {
         key_derivation_path: &str,
         key_derivation_seed: Option<[u8; 32]>,
         winternitz_seed: Option<[u8; 32]>,
-        keystore: KeyStore,
+        storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
+        let key_store = Rc::new(Storage::new(&storage_config)?);
+        let keystore = KeyStore::new(key_store);
+
         if keystore.load_winternitz_seed().is_err() {
             match winternitz_seed {
                 Some(seed) => keystore.store_winternitz_seed(seed)?,
@@ -810,9 +814,9 @@ mod tests {
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let mut rng = StepRng::new(1, 0);
         let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
 
@@ -858,9 +862,9 @@ mod tests {
     #[test]
     fn test_sign_ecdsa_message() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -879,9 +883,9 @@ mod tests {
     #[test]
     fn test_sign_ecdsa_recoverable_message() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -901,9 +905,9 @@ mod tests {
     #[test]
     fn test_sign_schnorr_message() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -922,9 +926,9 @@ mod tests {
     #[test]
     fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -944,9 +948,9 @@ mod tests {
     #[test]
     fn test_sign_winternitz_message_sha256() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -966,9 +970,9 @@ mod tests {
     #[test]
     fn test_sign_winternitz_message_ripemd160() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -988,9 +992,9 @@ mod tests {
     #[test]
     fn test_derive_key() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let pk_1 = key_manager.derive_keypair(0)?;
@@ -1015,9 +1019,9 @@ mod tests {
     #[test]
     fn test_key_generation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let mut rng = secp256k1::rand::thread_rng();
 
         let message = random_message();
@@ -1125,9 +1129,9 @@ mod tests {
     fn test_error_handling() -> Result<(), KeyManagerError> {
         let message = random_message();
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let mut key_manager = test_key_manager(keystore)?;
+        let mut key_manager = test_key_manager(keystore_storage_config)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -1172,9 +1176,9 @@ mod tests {
     #[test]
     fn test_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let key_manager = test_key_manager(keystore).unwrap();
+        let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -1205,9 +1209,9 @@ mod tests {
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let key_manager = test_key_manager(keystore).unwrap();
+        let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
@@ -1238,14 +1242,14 @@ mod tests {
     #[test]
     fn test_key_derivation_from_xpub_in_different_key_manager() {
         let keystore_path_1 = temp_storage();
-        let keystore = database_keystore(&keystore_path_1).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path_1).unwrap();
 
-        let key_manager_1 = test_key_manager(keystore).unwrap();
+        let key_manager_1 = test_key_manager(keystore_storage_config).unwrap();
 
         let keystore_path_2 = temp_storage();
-        let keystore = database_keystore(&keystore_path_2).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path_2).unwrap();
 
-        let key_manager_2 = test_key_manager(keystore).unwrap();
+        let key_manager_2 = test_key_manager(keystore_storage_config).unwrap();
 
         for i in 0..5 {
             // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
@@ -1268,8 +1272,8 @@ mod tests {
     #[test]
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
-        let key_manager = test_key_manager(keystore).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
+        let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
         let message_size_in_bytes = 32;
         let key_type = WinternitzType::SHA256;
@@ -1296,7 +1300,7 @@ mod tests {
         cleanup_storage(&keystore_path);
     }
 
-    fn test_key_manager(keystore: KeyStore) -> Result<KeyManager, KeyManagerError> {
+    fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
 
@@ -1305,17 +1309,16 @@ mod tests {
             DERIVATION_PATH,
             Some(key_derivation_seed),
             Some(winternitz_seed),
-            keystore,
+            storage_config,
         )?;
 
         Ok(key_manager)
     }
 
-    fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
+    fn database_keystore_config(storage_path: &str) -> Result<StorageConfig, KeyManagerError> {
         let password = "secret password".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
-        let store = Rc::new(Storage::new(&config)?);
-        Ok(KeyStore::new(store))
+        Ok(config)
     }
 
     fn random_message() -> Message {
@@ -1351,9 +1354,9 @@ mod tests {
     #[test]
     pub fn test_rsa_signature() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -1374,9 +1377,9 @@ mod tests {
     #[test]
     pub fn test_rsa_encryption() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
 
         let mut rng = secp256k1::rand::thread_rng();
         let idx = 0;

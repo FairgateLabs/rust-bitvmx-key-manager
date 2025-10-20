@@ -1534,4 +1534,175 @@ mod tests {
         cleanup_storage("test_seed_decoding");
     }
 
+    #[test]
+    pub fn test_seed_decoding_failure() {
+        /*
+        * Objective: Ensure invalid seeds are rejected with precise errors.
+        * Preconditions: Valid base Config except seeds under test.
+        * Input / Test Data: a) Non-hex; b) >32 bytes hex; c) empty string.
+        * Steps / Procedure: For each bad input, invoke create_key_manager_from_config.
+        * Expected Result: Returns ConfigError::InvalidWinternitzSeed or InvalidKeyDerivationSeed accordingly.
+        */
+        
+        use crate::errors::ConfigError;
+        
+        // Valid seed for reference
+        let valid_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
+        
+        // Test Case 1: Non-hex winternitz_seed
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(valid_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some("invalid_non_hex_string_here".to_string()), // Non-hex
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 2: Non-hex key_derivation_seed
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some("not_a_hex_string".to_string()), // Non-hex
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 3: Too long winternitz_seed (>32 bytes = >64 hex chars)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let too_long_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef00".to_string(); // 66 chars
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(valid_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(too_long_seed),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 4: Too long key_derivation_seed (>32 bytes = >64 hex chars)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let too_long_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321ff".to_string(); // 66 chars
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(too_long_seed),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 5: Empty winternitz_seed
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(valid_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some("".to_string()), // Empty string
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 6: Empty key_derivation_seed
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some("".to_string()), // Empty string
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 7: Too short winternitz_seed (<32 bytes = <64 hex chars)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let too_short_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd".to_string(); // 62 chars
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(valid_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(too_short_seed),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 8: Too short key_derivation_seed (<32 bytes = <64 hex chars)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let too_short_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba09876543".to_string(); // 62 chars
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(too_short_seed),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+    }
 }

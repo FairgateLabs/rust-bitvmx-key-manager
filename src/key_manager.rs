@@ -790,10 +790,7 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError},
-        key_store::KeyStore,
-        verifier::SignatureVerifier,
-        winternitz::{to_checksummed_message, WinternitzType},
+        config::KeyManagerConfig, create_key_manager_from_config, errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}
     };
 
     use super::KeyManager;
@@ -1475,4 +1472,66 @@ mod tests {
         cleanup_storage(&store_path);
         Ok(())
     }
+
+        #[test]
+    pub fn test_seed_decoding_success() {
+        /* Objective: Verify 32-byte hex seeds decode and create a working KeyManager.
+         * Preconditions: Valid Config with network set (e.g., regtest); temporary storage available.
+         * Input / Test Data: winternitz_seed and key_derivation_seed as 64-hex-character strings.
+         * Steps / Procedure: 1) Build Config with both seeds. 2) Call create_key_manager_from_config. 3) Read back seeds via KeyStore::load_winternitz_seed and load_key_derivation_seed.
+         * Expected Result: Function succeeds; loaded seeds equal inputs; no errors.
+        */
+        
+        // Generate 64-hex-character strings (32 bytes each)
+        let winternitz_seed_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
+        let key_derivation_seed_hex = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string();
+        
+        // Expected 32-byte arrays
+        let expected_winternitz_seed = [
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+        ];
+        let expected_key_derivation_seed = [
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+        ];
+        
+        // Step 1: Build Config with both seeds
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(key_derivation_seed_hex),
+            Some("m/101/1/0/0/".to_string()),
+            Some(winternitz_seed_hex),
+        );
+        
+        // Set up temporary storage
+        let storage_config = StorageConfig::new("test_seed_decoding".to_string(), None);
+        let storage = Rc::new(Storage::new(&storage_config).expect("Failed to create storage"));
+        let keystore = KeyStore::new(storage.clone());
+        
+        // Step 2: Call create_key_manager_from_config
+        let key_manager = create_key_manager_from_config(&key_manager_config, keystore, storage)
+            .expect("Failed to create key manager from config");
+        
+        // Step 3: Read back seeds via KeyStore methods
+        let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
+            .expect("Failed to load winternitz seed");
+        let loaded_key_derivation_seed = key_manager.keystore.load_key_derivation_seed()
+            .expect("Failed to load key derivation seed");
+        
+        // Expected Result: Loaded seeds equal inputs; no errors
+        assert_eq!(loaded_winternitz_seed, expected_winternitz_seed, 
+            "Winternitz seed mismatch");
+        assert_eq!(loaded_key_derivation_seed, expected_key_derivation_seed, 
+            "Key derivation seed mismatch");
+        
+        // Cleanup
+        drop(key_manager);
+        cleanup_storage("test_seed_decoding");
+    }
+
 }

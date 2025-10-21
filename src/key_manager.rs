@@ -1939,4 +1939,251 @@ mod tests {
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
+
+    #[test]
+    pub fn test_keystore_seed_bootstraping_provided_seeds(){
+        /*
+         * Objective: Ensure provided seeds are persisted and retrievable.
+         * Preconditions: Fresh storage; both seeds in config.
+         * Input / Test Data: Two 32-byte hex seeds.
+         * Steps / Procedure: Initialize KeyManager; call KeyStore::load_winternitz_seed and load_key_derivation_seed.
+         * Expected Result: Loaded seeds exactly match provided values.
+         */
+        
+        // Set up temporary storage
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        // Define specific 32-byte seeds to provide
+        let provided_winternitz_seed = [
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
+        ];
+        
+        let provided_key_derivation_seed = [
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
+        ];
+        
+        // Step: Initialize KeyManager with provided seeds
+        let key_manager = KeyManager::new(
+            REGTEST,
+            DERIVATION_PATH,
+            Some(provided_key_derivation_seed),
+            Some(provided_winternitz_seed),
+            keystore,
+            store,
+        ).expect("Failed to create KeyManager with provided seeds");
+        
+        // Step: Load seeds from keystore and verify they match provided values
+        let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
+            .expect("Failed to load winternitz seed from keystore");
+        
+        let loaded_key_derivation_seed = key_manager.keystore.load_key_derivation_seed()
+            .expect("Failed to load key derivation seed from keystore");
+        
+        // Expected Result: Loaded seeds exactly match provided values
+        assert_eq!(loaded_winternitz_seed, provided_winternitz_seed,
+            "Loaded winternitz seed should exactly match the provided seed");
+        
+        assert_eq!(loaded_key_derivation_seed, provided_key_derivation_seed,
+            "Loaded key derivation seed should exactly match the provided seed");
+        
+        // Additional verification: Test that the seeds are actually being used for key derivation
+        let public_key = key_manager.derive_keypair(0)
+            .expect("Failed to derive keypair using stored seeds");
+        
+        // Verify the public key is valid
+        assert_eq!(public_key.to_bytes().len(), 33, "Generated public key should be 33 bytes");
+        
+        // Test winternitz key generation as well
+        let winternitz_public_key = key_manager.derive_winternitz(32, WinternitzType::SHA256, 0)
+            .expect("Failed to derive winternitz key using stored seed");
+        
+        // Verify winternitz key was generated
+        assert!(winternitz_public_key.total_len() > 0, "Winternitz public key should have non-zero length");
+        
+        // Test that we can create another KeyManager instance with same storage and seeds persist
+        drop(key_manager);
+        
+        let keystore2 = database_keystore(&keystore_path).expect("Failed to create second keystore");
+        let config2 = StorageConfig::new(store_path.clone(), None);
+        let store2 = Rc::new(Storage::new(&config2).expect("Failed to create second storage"));
+        
+        // Create KeyManager without providing seeds - should load existing ones
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            DERIVATION_PATH,
+            None, // No seeds provided - should use existing ones
+            None,
+            keystore2,
+            store2,
+        ).expect("Failed to create second KeyManager");
+        
+        // Verify the seeds are still the same
+        let loaded_winternitz_seed2 = key_manager2.keystore.load_winternitz_seed()
+            .expect("Failed to load winternitz seed from second keystore");
+        
+        let loaded_key_derivation_seed2 = key_manager2.keystore.load_key_derivation_seed()
+            .expect("Failed to load key derivation seed from second keystore");
+        
+        assert_eq!(loaded_winternitz_seed2, provided_winternitz_seed,
+            "Seeds should persist across KeyManager instances");
+        
+        assert_eq!(loaded_key_derivation_seed2, provided_key_derivation_seed,
+            "Seeds should persist across KeyManager instances");
+        
+        // Cleanup
+        drop(key_manager2);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+    }
+
+    #[test]
+    pub fn test_keystore_seed_bootstraping_generated_seeds(){
+        /*
+         * Objective: Ensure seeds are generated and stored if not provided.
+         * Preconditions: Fresh storage; seeds omitted in config.
+         * Input / Test Data: None beyond config.
+         * Steps / Procedure: Initialize KeyManager; load seeds via KeyStore::load_*.
+         * Expected Result: Both seeds load successfully as 32-byte arrays (non-zero, values unspecified).
+         */
+        
+        // Set up temporary storage
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        // Step: Initialize KeyManager without providing any seeds (should auto-generate)
+        let key_manager = KeyManager::new(
+            REGTEST,
+            DERIVATION_PATH,
+            None, // No key derivation seed provided - should be generated
+            None, // No winternitz seed provided - should be generated
+            keystore,
+            store,
+        ).expect("Failed to create KeyManager with auto-generated seeds");
+        
+        // Step: Load seeds from keystore to verify they were generated and stored
+        let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
+            .expect("Failed to load auto-generated winternitz seed from keystore");
+        
+        let loaded_key_derivation_seed = key_manager.keystore.load_key_derivation_seed()
+            .expect("Failed to load auto-generated key derivation seed from keystore");
+        
+        // Expected Result: Both seeds load successfully as 32-byte arrays
+        assert_eq!(loaded_winternitz_seed.len(), 32, 
+            "Generated winternitz seed should be exactly 32 bytes");
+        
+        assert_eq!(loaded_key_derivation_seed.len(), 32, 
+            "Generated key derivation seed should be exactly 32 bytes");
+        
+        // Verify seeds are non-zero (extremely unlikely to be all zeros by chance)
+        let winternitz_all_zeros = loaded_winternitz_seed.iter().all(|&x| x == 0);
+        let key_derivation_all_zeros = loaded_key_derivation_seed.iter().all(|&x| x == 0);
+        
+        assert!(!winternitz_all_zeros, 
+            "Generated winternitz seed should not be all zeros");
+        assert!(!key_derivation_all_zeros, 
+            "Generated key derivation seed should not be all zeros");
+        
+        // Additional verification: Test that the generated seeds work for cryptographic operations
+        let public_key = key_manager.derive_keypair(0)
+            .expect("Failed to derive keypair using auto-generated seeds");
+        
+        // Verify the public key is valid
+        assert_eq!(public_key.to_bytes().len(), 33, "Generated public key should be 33 bytes");
+        
+        // Test winternitz key generation as well
+        let winternitz_public_key = key_manager.derive_winternitz(32, WinternitzType::SHA256, 0)
+            .expect("Failed to derive winternitz key using auto-generated seed");
+        
+        // Verify winternitz key was generated successfully
+        assert!(winternitz_public_key.total_len() > 0, "Winternitz public key should have non-zero length");
+        
+        // Test signing with auto-generated keys to prove they work
+        let signature_verifier = SignatureVerifier::new();
+        let message = random_message();
+        let signature = key_manager.sign_ecdsa_message(&message, &public_key)
+            .expect("Failed to sign with key derived from auto-generated seed");
+        
+        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, public_key),
+            "Signature verification should succeed for key derived from auto-generated seed");
+        
+        // Test persistence: Create second KeyManager instance and verify seeds persist
+        drop(key_manager);
+        
+        let keystore2 = database_keystore(&keystore_path).expect("Failed to create second keystore");
+        let config2 = StorageConfig::new(store_path.clone(), None);
+        let store2 = Rc::new(Storage::new(&config2).expect("Failed to create second storage"));
+        
+        // Create KeyManager without providing seeds - should load existing generated ones
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            DERIVATION_PATH,
+            None, // No seeds provided - should use existing generated ones
+            None,
+            keystore2,
+            store2,
+        ).expect("Failed to create second KeyManager");
+        
+        // Verify the seeds are the same as the first instance (persistence test)
+        let loaded_winternitz_seed2 = key_manager2.keystore.load_winternitz_seed()
+            .expect("Failed to load winternitz seed from second keystore");
+        
+        let loaded_key_derivation_seed2 = key_manager2.keystore.load_key_derivation_seed()
+            .expect("Failed to load key derivation seed from second keystore");
+        
+        assert_eq!(loaded_winternitz_seed2, loaded_winternitz_seed,
+            "Auto-generated seeds should persist across KeyManager instances");
+        
+        assert_eq!(loaded_key_derivation_seed2, loaded_key_derivation_seed,
+            "Auto-generated seeds should persist across KeyManager instances");
+        
+        // Test uniqueness: Create a third KeyManager with fresh storage to verify different seeds are generated
+        let keystore_path3 = temp_storage();
+        let keystore3 = database_keystore(&keystore_path3).expect("Failed to create third keystore");
+        let store_path3 = temp_storage();
+        let config3 = StorageConfig::new(store_path3.clone(), None);
+        let store3 = Rc::new(Storage::new(&config3).expect("Failed to create third storage"));
+        
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            DERIVATION_PATH,
+            None, // Should generate new different seeds
+            None,
+            keystore3,
+            store3,
+        ).expect("Failed to create third KeyManager");
+        
+        let loaded_winternitz_seed3 = key_manager3.keystore.load_winternitz_seed()
+            .expect("Failed to load winternitz seed from third keystore");
+        
+        let loaded_key_derivation_seed3 = key_manager3.keystore.load_key_derivation_seed()
+            .expect("Failed to load key derivation seed from third keystore");
+        
+        // Verify that different KeyManager instances generate different seeds
+        assert_ne!(loaded_winternitz_seed3, loaded_winternitz_seed,
+            "Different KeyManager instances should generate different winternitz seeds");
+        
+        assert_ne!(loaded_key_derivation_seed3, loaded_key_derivation_seed,
+            "Different KeyManager instances should generate different key derivation seeds");
+        
+        // Cleanup
+        drop(key_manager2);
+        drop(key_manager3);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        cleanup_storage(&keystore_path3);
+        cleanup_storage(&store_path3);
+    }
 }

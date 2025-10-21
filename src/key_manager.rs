@@ -1705,4 +1705,238 @@ mod tests {
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
     }
+
+    #[test]
+    pub fn test_default_derivation_path_fallback(){
+        /*
+         * Objective: Confirm default path m/101/1/0/0/ is used when not provided.
+         * Preconditions: key_derivation_path omitted in Config.
+         * Input / Test Data: Valid seeds (or none); valid network.
+         * Steps / Procedure: Create KeyManager from config; derive a key at index 0.
+         * Expected Result: No error; derivation succeeds, implying the default path applied.
+         */
+        
+        // Set up temporary storage
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        // Create config with key_derivation_path set to None (omitted)
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some("fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string()),
+            None, // key_derivation_path omitted - should fall back to default
+            Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string()),
+        );
+        
+        // Step: Create KeyManager from config - should use default path
+        let key_manager = create_key_manager_from_config(&key_manager_config, keystore, store)
+            .expect("Failed to create key manager from config with default derivation path");
+        
+        // Step: Derive a key at index 0 - should succeed if default path applied correctly
+        let public_key = key_manager.derive_keypair(0)
+            .expect("Failed to derive keypair - default derivation path may not have been applied");
+        
+        // Verify the derivation succeeded and we got a valid public key
+        assert_eq!(public_key.to_bytes().len(), 33, "Generated public key should be 33 bytes");
+        
+        // Additional verification: derive master xpub and compare derived keys
+        let master_xpub = key_manager.generate_master_xpub()
+            .expect("Failed to generate master xpub");
+        
+        let public_key_from_xpub = key_manager.derive_public_key(master_xpub, 0)
+            .expect("Failed to derive public key from xpub");
+        
+        // Both derivations should produce the same key if using the same default path
+        assert_eq!(public_key.to_string(), public_key_from_xpub.to_string(), 
+            "Keys derived with and without xpub should match when using default derivation path");
+        
+        // Verify that the KeyManager can sign with the derived key (further proof it works)
+        let signature_verifier = SignatureVerifier::new();
+        let message = random_message();
+        let signature = key_manager.sign_ecdsa_message(&message, &public_key)
+            .expect("Failed to sign with derived key");
+        
+        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, public_key),
+            "Signature verification should succeed for key derived using default path");
+        
+        // Cleanup
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+    }
+
+    #[test]
+    pub fn test_network_parsing(){
+        /*
+         * Objective: Validate network string parsing and error on invalid value.
+         * Preconditions: Minimal Config with storage set.
+         * Input / Test Data: network values: regtest, testnet, bitcoin, and invalid.
+         * Steps / Procedure: Call create_key_manager_from_config for each network value.
+         * Expected Result: Succeeds for valid networks; returns ConfigError::InvalidNetwork for invalid.
+         */
+
+        use crate::errors::ConfigError;
+        
+        // Valid seeds to use for all tests
+        let valid_winternitz_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
+        let valid_key_derivation_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string();
+        
+        // Test Case 1: Valid network "regtest"
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "regtest".to_string(), // Valid network
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(result.is_ok(), "KeyManager creation should succeed for valid network 'regtest'");
+        
+        // Explicitly drop the KeyManager to release storage handles
+        drop(result);
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 2: Valid network "testnet"
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "testnet".to_string(), // Valid network
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(result.is_ok(), "KeyManager creation should succeed for valid network 'testnet'");
+        
+        // Explicitly drop the KeyManager to release storage handles
+        drop(result);
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 3: Valid network "bitcoin" (mainnet)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "bitcoin".to_string(), // Valid network
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(result.is_ok(), "KeyManager creation should succeed for valid network 'bitcoin'");
+        
+        // Explicitly drop the KeyManager to release storage handles
+        drop(result);
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 4: Valid network "signet"
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "signet".to_string(), // Valid network
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(result.is_ok(), "KeyManager creation should succeed for valid network 'signet'");
+        
+        // Explicitly drop the KeyManager to release storage handles
+        drop(result);
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 5: Invalid network value
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "invalid_network".to_string(), // Invalid network
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidNetwork))),
+            "KeyManager creation should fail with InvalidNetwork error for invalid network string");
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 6: Empty network string
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "".to_string(), // Empty network string
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidNetwork))),
+            "KeyManager creation should fail with InvalidNetwork error for empty network string");
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+        
+        // Test Case 7: Case sensitivity test (uppercase)
+        let keystore_path = temp_storage();
+        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
+        let store_path = temp_storage();
+        let config = StorageConfig::new(store_path.clone(), None);
+        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        
+        let key_manager_config = KeyManagerConfig::new(
+            "REGTEST".to_string(), // Uppercase - should be invalid
+            Some(valid_key_derivation_seed.clone()),
+            Some("m/101/1/0/0/".to_string()),
+            Some(valid_winternitz_seed.clone()),
+        );
+        
+        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
+        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidNetwork))),
+            "KeyManager creation should fail with InvalidNetwork error for uppercase network string");
+        
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&store_path);
+    }
 }

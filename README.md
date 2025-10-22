@@ -20,7 +20,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 ### [Creating a KeyManager](examples/keymanager_usage.rs#L14-L34)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
-### [Key Importing](examples/keymanager_usage.rs#L36-L70)
+### [Key Importing](examples/keymanager_usage.rs#L35-L70)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 ### [Key Generation & Derivation](examples/keymanager_usage.rs#L73-L95)
@@ -40,12 +40,12 @@ It is not production-ready, has not been audited, and future updates may introdu
 *The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.*
 
 
-### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L181-L196)
+### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L181-L194)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 *The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.*
 
-### [Signing and verifying a message using Winternitz](examples/keymanager_usage.rs#L196-L222)
+### [Signing and verifying a message using Winternitz](examples/keymanager_usage.rs#L196-L221)
 <!-- TODO update line numbers, or add (copy-paste) rust snippet -->
 
 ## Development Setup

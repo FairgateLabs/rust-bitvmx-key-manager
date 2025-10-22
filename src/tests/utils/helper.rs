@@ -52,8 +52,8 @@ pub fn generate_random_string() -> String {
 pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
     let ket_manager_key = path;
-    // let password = "secret password".to_string();
-    let key_manager = create_key_manager(ket_manager_key.as_str(), None)?;
+    let password = "secret password".to_string();
+    let key_manager = create_key_manager(ket_manager_key.as_str(), Some(password))?;
     let pub_key = create_pub_key(&key_manager)?;
 
     Ok((key_manager, pub_key))

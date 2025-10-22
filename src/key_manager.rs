@@ -90,10 +90,6 @@ impl KeyManager {
         })
     }
 
-    pub fn keystore(&self) -> &KeyStore {
-        &self.keystore
-    }
-
     pub fn musig2(&self) -> &MuSig2Signer {
         &self.musig2
     }

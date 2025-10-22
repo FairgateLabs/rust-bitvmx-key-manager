@@ -2,10 +2,7 @@ use std::{env, fs, time::Duration};
 
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
-use key_manager::{
-    errors::KeyManagerError, key_manager::KeyManager,
-    winternitz::WinternitzType,
-};
+use key_manager::{errors::KeyManagerError, key_manager::KeyManager, winternitz::WinternitzType};
 use storage_backend::storage_config::StorageConfig;
 const DERIVATION_PATH: &str = "m/101/1/0/0/";
 const REGTEST: Network = Network::Regtest;
@@ -43,7 +40,8 @@ fn temp_storage() -> String {
 
 fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
-    let config_storage = StorageConfig::new(storage_path.clone(), Some("secret_password".to_string()));
+    let config_storage =
+        StorageConfig::new(storage_path.clone(), Some("secret_password".to_string()));
     let key_manager = test_key_manager(config_storage).unwrap();
 
     let mut criterion = Criterion::default().measurement_time(Duration::from_secs(40));

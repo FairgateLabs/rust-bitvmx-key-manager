@@ -16,7 +16,7 @@ impl KeyStore {
         Self { store }
     }
 
-    pub (crate) fn store_clone(&self) -> Rc<Storage> {
+    pub(crate) fn store_clone(&self) -> Rc<Storage> {
         Rc::clone(&self.store)
     }
 

@@ -2,10 +2,8 @@ use bitcoin::Network;
 use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
-use key_store::KeyStore;
-use std::rc::Rc;
 use std::str::FromStr;
-use storage_backend::storage::Storage;
+use storage_backend::storage_config::StorageConfig;
 
 pub mod cli;
 pub mod config;
@@ -20,8 +18,7 @@ pub mod winternitz;
 
 pub fn create_key_manager_from_config(
     key_manager_config: &KeyManagerConfig,
-    keystore: KeyStore,
-    store: Rc<Storage>,
+    storage_config: StorageConfig,
 ) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = match &key_manager_config.key_derivation_seed {
         Some(seed) => Some(decode_key_derivation_seed(seed)?),
@@ -46,8 +43,7 @@ pub fn create_key_manager_from_config(
         key_derivation_path,
         key_derivation_seed,
         winternitz_seed,
-        keystore,
-        store,
+        storage_config,
     )?;
 
     Ok(key_manager)

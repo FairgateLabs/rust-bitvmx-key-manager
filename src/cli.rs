@@ -1,11 +1,10 @@
 use anyhow::{Ok, Result};
 use bitvmx_settings::settings::ConfigurationFile;
-use std::{rc::Rc, str::FromStr};
-use storage_backend::storage::Storage;
+use std::str::FromStr;
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_store::KeyStore, verifier::SignatureVerifier, winternitz::WinternitzSignature,
+    verifier::SignatureVerifier, winternitz::WinternitzSignature,
 };
 use bitcoin::{
     bip32::Xpub,
@@ -566,13 +565,9 @@ impl Cli {
     }
 
     fn key_manager(&self) -> Result<KeyManager> {
-        let store = Rc::new(Storage::new(&self.config.storage)?);
-        let keystore = KeyStore::new(store.clone());
-
         Ok(create_key_manager_from_config(
             &self.config.key_manager,
-            keystore,
-            store,
+            self.config.storage.clone(),
         )?)
     }
 

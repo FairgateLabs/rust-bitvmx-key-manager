@@ -10,6 +10,7 @@ pub mod config;
 pub mod errors;
 pub mod key_manager;
 pub mod key_store;
+pub mod key_type;
 pub mod musig2;
 pub mod rsa;
 pub mod tests;
@@ -25,11 +26,6 @@ pub fn create_key_manager_from_config(
         None => None,
     };
 
-    let key_derivation_path = &key_manager_config
-        .key_derivation_path
-        .as_deref()
-        .unwrap_or("m/101/1/0/0/");
-
     let winternitz_seed = match &key_manager_config.winternitz_seed {
         Some(seed) => Some(decode_winternitz_seed(seed)?),
         None => None,
@@ -40,7 +36,6 @@ pub fn create_key_manager_from_config(
 
     let key_manager = KeyManager::new(
         network,
-        key_derivation_path,
         key_derivation_seed,
         winternitz_seed,
         storage_config,

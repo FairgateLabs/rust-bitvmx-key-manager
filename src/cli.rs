@@ -3,8 +3,7 @@ use bitvmx_settings::settings::ConfigurationFile;
 use std::str::FromStr;
 
 use crate::{
-    config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    verifier::SignatureVerifier, winternitz::WinternitzSignature,
+    config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager, key_type::KeyType, verifier::SignatureVerifier, winternitz::WinternitzSignature
 };
 use bitcoin::{
     bip32::Xpub,
@@ -200,15 +199,17 @@ impl Cli {
                 info!("Master Xpub: {}", xpub);
             }
 
+            // TODO add key_type parameter and chooser (up to now fixed for P2tr)
             Commands::DerivePublicKey {
                 key_index,
                 master_xpub,
             } => {
-                self.derive_public_key(master_xpub, key_index)?;
+                self.derive_public_key(master_xpub, KeyType::P2tr, key_index)?;
             }
 
+            // TODO add key_type parameter and chooser (up to now fixed for P2tr)
             Commands::DeriveKeypair { key_index } => {
-                self.derive_keypair(*key_index)?;
+                self.derive_keypair(KeyType::P2tr, *key_index)?;
             }
 
             Commands::NewWinternitzKey {
@@ -441,10 +442,10 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_keypair(&self, key_index: u32) -> Result<()> {
+    fn derive_keypair(&self, key_type: KeyType, key_index: u32) -> Result<()> {
         let key_manager = self.key_manager()?;
 
-        let pk = key_manager.derive_keypair(key_index)?;
+        let pk = key_manager.derive_keypair(key_type, key_index)?;
 
         info!("New Keypair created. Public key is: {}", pk.to_string());
 
@@ -556,10 +557,10 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_public_key(&self, master_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
+    fn derive_public_key(&self, master_xpub: &str, key_type: KeyType, key_index: &u32) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
         let master_xpub = Xpub::from_str(master_xpub)?;
-        let public_key = key_manager.derive_public_key(master_xpub, *key_index)?;
+        let public_key = key_manager.derive_public_key(master_xpub, key_type, *key_index)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }

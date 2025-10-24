@@ -20,12 +20,10 @@ pub fn create_key_manager(
     let key_derivation_seed = random_bytes();
     let winternitz_seed = random_bytes();
 
-    let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
-        derivation_path.as_str(),
         Some(key_derivation_seed),
         Some(winternitz_seed),
         config,

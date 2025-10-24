@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 
 use bitcoin::{
-    bip32::{DerivationPath, Xpriv, Xpub},
+    bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
     key::{
         rand::{Rng, RngCore},
@@ -16,17 +16,13 @@ use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError,
-    key_store::KeyStore,
-    musig2::{
+    errors::KeyManagerError, key_store::KeyStore, key_type::KeyType, musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    },
-    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
-    winternitz::{
+    }, rsa::{CryptoRng, OsRng, RSAKeyPair, Signature}, winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    },
+    }
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -40,15 +36,27 @@ const RSA_BITS: usize = 2048; // RSA key size in bits
 pub struct KeyManager {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    key_derivation_path: String,
     musig2: MuSig2Signer,
     keystore: KeyStore,
 }
 
 impl KeyManager {
+    /*
+        Up to now, This KeyManager:
+        - Is not a fully HD wallet.
+        - Only handles one account.
+        - Its purpose is fixed for bitcoin depending on the key type and network, it does not support other coins like ETH.
+        - It adds support for:
+            - Taproot keys.
+            - Winternitz keys.
+            - RSA keys.
+            - MuSig2 signing.
+    */
+    const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
+    const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
+
     pub fn new(
         network: Network,
-        key_derivation_path: &str,
         key_derivation_seed: Option<[u8; 32]>,
         winternitz_seed: Option<[u8; 32]>,
         storage_config: StorageConfig,
@@ -84,7 +92,6 @@ impl KeyManager {
         Ok(KeyManager {
             secp,
             network,
-            key_derivation_path: key_derivation_path.to_string(),
             musig2,
             keystore,
         })
@@ -160,9 +167,65 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
+
+    // TODO discuss with Diego, if we want to add self, or use this as class functions
+
+    /*********************************/
+    /****** Derivation path **********/
+    /*********************************/
+    // DERIVATION PATH (BIP-44):
+    //
+    // m / purpose' / coin_type' / account' / change / address_index
+    //
+    // Purpose:
+    // 44' = BIP44 - Legacy (P2PKH)
+    // 49' = BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+    // 84' = BIP84 - Native SegWit (P2WPKH)
+    // 86' = BIP86 - Taproot (P2TR)
+    //
+    // Coins:
+    // 0 = Bitcoin mainnet
+    // 1 = Bitcoin testnet/regtest
+    //
+    fn build_bip44_derivation_path(
+        purpose: u32,
+        coin_type: u32,
+        account: u32,
+        change: u32,
+        index: u32,
+    ) -> DerivationPath {
+        DerivationPath::from(vec![
+            ChildNumber::from_hardened_idx(purpose).unwrap(),
+            ChildNumber::from_hardened_idx(coin_type).unwrap(),
+            ChildNumber::from_hardened_idx(account).unwrap(),
+            ChildNumber::from_normal_idx(change).unwrap(),
+            ChildNumber::from_normal_idx(index).unwrap(),
+        ])
+    }
+
+    fn build_derivation_path(key_type: KeyType, network: Network, index: u32) -> DerivationPath {
+        Self::build_bip44_derivation_path(
+            key_type.purpose_index(),
+            Self::get_bitcoin_coin_type_by_network(network),
+            Self::ACCOUNT_DERIVATION_INDEX,
+            Self::CHANGE_DERIVATION_INDEX,
+            index,
+        )
+    }
+
+    fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
+        match network {
+            Network::Bitcoin => 0,  // Bitcoin mainnet
+            Network::Testnet => 1,  // Bitcoin testnet
+            Network::Testnet4 => 1, // Bitcoin testnet4
+            Network::Regtest => 1,  // Bitcoin regtest (same as testnet)
+            _ => panic!("Unsupported network"),
+        }
+    }
     /*********************************/
     /******* Key Generation **********/
     /*********************************/
+    // TODO, ask Diego, why receive an RNG? if we already have a seed and a path to follow
     pub fn generate_keypair<R: Rng + ?Sized>(
         &self,
         rng: &mut R,
@@ -183,17 +246,29 @@ impl KeyManager {
         Ok(master_xpub)
     }
 
-    pub fn derive_keypair(&self, index: u32) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_keypair(&self, key_type: KeyType, index: u32) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path = KeyManager::build_derivation_path(
+            key_type,
+            self.network,
+            index,
+        );
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // For taproot keys
-        let (public_key, private_key) = self.adjust_parity(internal_keypair);
+        // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
+        let (public_key, private_key) = if key_type == KeyType::P2tr{
+            self.adjust_parity(internal_keypair)
+        }
+        else {
+            (
+                PublicKey::new(internal_keypair.public_key()),
+                PrivateKey::new(internal_keypair.secret_key(), self.network),
+            )
+        };
 
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
@@ -230,14 +305,23 @@ impl KeyManager {
     pub fn derive_public_key(
         &self,
         master_xpub: Xpub,
+        key_type: KeyType,
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path = KeyManager::build_derivation_path(
+            key_type,
+            self.network,
+            index,
+        );
         let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
 
-        Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
+        if key_type == KeyType::P2tr {
+            Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        } else {
+            Ok(xpub.to_pub().into())
+        }
     }
 
     pub fn derive_winternitz(
@@ -249,6 +333,7 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
+        // TODO, deduce winternitz seed from key derivation path for winternitz purpose
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let winternitz = winternitz::Winternitz::new();
@@ -273,6 +358,7 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
+        // TODO, deduce winternitz seed from key derivation path for winternitz purpose
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let mut public_keys = Vec::new();
@@ -297,6 +383,7 @@ impl KeyManager {
         PrivateKey::new(secret_key, network)
     }
 
+    // TODO, ask Diego, why receive an RNG? if we already have a seed and a path to follow
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
@@ -502,6 +589,7 @@ impl KeyManager {
         Ok(signature)
     }
 
+    // TODO, revisit for key types
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
             Some(entry) => Ok(entry.0),
@@ -549,7 +637,7 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protoocl.
+    //TODO: Revisit this decision. The private key is used for the TOO protocol.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -796,15 +884,11 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError},
-        key_store::KeyStore,
-        verifier::SignatureVerifier,
-        winternitz::{to_checksummed_message, WinternitzType},
+        errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, key_type::KeyType, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}
     };
 
     use super::KeyManager;
 
-    const DERIVATION_PATH: &str = "m/101/1/0/0/";
     const REGTEST: Network = Network::Regtest;
 
     #[test]
@@ -993,8 +1077,9 @@ mod tests {
         let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let pk_1 = key_manager.derive_keypair(0)?;
-        let pk_2 = key_manager.derive_keypair(1)?;
+        // TODO test every key type?
+        let pk_1 = key_manager.derive_keypair(KeyType::P2tr, 0)?;
+        let pk_2 = key_manager.derive_keypair(KeyType::P2tr, 1)?;
 
         assert_ne!(pk_1.to_string(), pk_2.to_string());
 
@@ -1127,7 +1212,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let mut key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_key_manager(keystore_storage_config)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -1137,10 +1222,11 @@ mod tests {
         ));
 
         // Case 2: Invalid derivation path
-        let invalid_derivation_path = "m/44'/invalid'";
-        key_manager.key_derivation_path = invalid_derivation_path.to_string();
-        let result = key_manager.derive_keypair(0);
-        assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
+        //TODO: REVISIT this test Case 2, if it is worth with encapsulated derivation path
+        // let invalid_derivation_path = "m/44'/invalid'";
+        // key_manager.key_derivation_path = invalid_derivation_path.to_string();
+        // let result = key_manager.derive_keypair(0);
+        // assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
 
         // Case 3 b: Write error when creating database keystore (invalid path)
         //TODO: FIX THIS TEST is not working in windows envs
@@ -1179,8 +1265,9 @@ mod tests {
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
         for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            // TODO test every key type?
+            let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1189,8 +1276,8 @@ mod tests {
             assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
         }
 
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+        let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
+        let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1212,8 +1299,9 @@ mod tests {
         let master_xpub = key_manager.generate_master_xpub().unwrap();
 
         for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            // TODO test every key type?
+            let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1222,8 +1310,8 @@ mod tests {
             assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
         }
 
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+        let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
+        let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1248,12 +1336,13 @@ mod tests {
         let key_manager_2 = test_key_manager(keystore_storage_config).unwrap();
 
         for i in 0..5 {
+            // TODO test every key type?
             // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
             let master_xpub = key_manager_1.generate_master_xpub().unwrap();
-            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, i).unwrap();
+            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
 
             // Derive keypair in key_manager_1 with the same index
-            let public_from_xpriv = key_manager_1.derive_keypair(i).unwrap();
+            let public_from_xpriv = key_manager_1.derive_keypair(KeyType::P2tr, i).unwrap();
 
             // Both public keys must be equal
             assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
@@ -1302,7 +1391,6 @@ mod tests {
 
         let key_manager = KeyManager::new(
             REGTEST,
-            DERIVATION_PATH,
             Some(key_derivation_seed),
             Some(winternitz_seed),
             storage_config,

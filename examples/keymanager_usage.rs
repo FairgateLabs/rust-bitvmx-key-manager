@@ -5,7 +5,7 @@ use bitcoin::{
 };
 
 use key_manager::{
-    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType,
+    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType, key_type::KeyType
 };
 use storage_backend::storage_config::StorageConfig;
 
@@ -16,14 +16,12 @@ fn main() {
     let keystore_path = "./examples/storage/examples-keystore.db".to_string();
     let password = "secret password".to_string();
     let key_derivation_seed = random_bytes();
-    let key_derivation_path = "m/101/1/0/0/";
     let winternitz_seed = random_bytes();
 
     let storage_config = StorageConfig::new(keystore_path, Some(password));
 
     let key_manager = KeyManager::new(
         network,
-        key_derivation_path,
         Some(key_derivation_seed),
         Some(winternitz_seed),
         storage_config,
@@ -81,14 +79,14 @@ fn main() {
     println!("keypair_pubkey: {}", keypair_pubkey);
 
     // Derive a child keypair (e.g., for indexed wallets)
-    let derived_0_pubkey = key_manager.derive_keypair(0).unwrap();
+    let derived_0_pubkey = key_manager.derive_keypair(KeyType::P2tr, 0).unwrap();
     println!("derived_0_pubkey: {}", derived_0_pubkey);
 
     // Generate a master extended x public key
     let master_xpub = key_manager.generate_master_xpub().unwrap();
 
     // Derive public key only
-    let pubkey = key_manager.derive_public_key(master_xpub, 1).unwrap();
+    let pubkey = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 1).unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
 
     // --- ------------------------ --- //

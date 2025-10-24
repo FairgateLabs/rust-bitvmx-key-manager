@@ -852,81 +852,45 @@ mod tests {
 
     #[test]
     fn test_sign_ecdsa_message() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
-        let signature_verifier = SignatureVerifier::new();
-
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
-
-        let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, &pk)?;
-
-        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        Ok(())
+        run_test_with_key_manager(|key_manager| {
+            let signature_verifier = SignatureVerifier::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let pk = key_manager.generate_keypair(&mut rng)?;
+            let message = random_message();
+            let signature = key_manager.sign_ecdsa_message(&message, &pk)?;
+            
+            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
+            Ok(())
+        })
     }
 
     #[test]
     fn test_sign_ecdsa_recoverable_message() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
-        let signature_verifier = SignatureVerifier::new();
-
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
-
-        let message = random_message();
-        let recoverable_signature = key_manager.sign_ecdsa_recoverable_message(&message, &pk)?;
-        let signature = recoverable_signature.to_standard();
-
-        assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        Ok(())
+        run_test_with_key_manager(|key_manager| {
+            let signature_verifier = SignatureVerifier::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let pk = key_manager.generate_keypair(&mut rng)?;
+            let message = random_message();
+            let recoverable_signature = key_manager.sign_ecdsa_recoverable_message(&message, &pk)?;
+            let signature = recoverable_signature.to_standard();
+            
+            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk));
+            Ok(())
+        })
     }
 
     #[test]
     fn test_sign_schnorr_message() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
-        let signature_verifier = SignatureVerifier::new();
-
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
-
-        let message = random_message();
-        let signature = key_manager.sign_schnorr_message(&message, &pk)?;
-
-        assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        Ok(())
+        run_test_with_key_manager(|key_manager| {
+            let signature_verifier = SignatureVerifier::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let pk = key_manager.generate_keypair(&mut rng)?;
+            let message = random_message();
+            let signature = key_manager.sign_schnorr_message(&message, &pk)?;
+            
+            assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk));
+            Ok(())
+        })
     }
 
     #[test]
@@ -1286,42 +1250,24 @@ mod tests {
 
     #[test]
     fn test_key_derivation_from_xpub_in_different_key_manager() {
-        let keystore_path_1 = temp_storage();
-        let keystore = database_keystore(&keystore_path_1).unwrap();
+        run_test_with_multiple_key_managers(2, |key_managers, _keystore_paths, _store_paths| {
+            let key_manager_1 = &key_managers[0];
+            let key_manager_2 = &key_managers[1];
 
-        let store_path_1 = temp_storage();
-        let config = StorageConfig::new(store_path_1.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+            for i in 0..5 {
+                // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
+                let master_xpub = key_manager_1.generate_master_xpub().unwrap();
+                let public_from_xpub = key_manager_2.derive_public_key(master_xpub, i).unwrap();
 
-        let key_manager_1 = test_key_manager(keystore, store).unwrap();
+                // Derive keypair in key_manager_1 with the same index
+                let public_from_xpriv = key_manager_1.derive_keypair(i).unwrap();
 
-        let keystore_path_2 = temp_storage();
-        let keystore = database_keystore(&keystore_path_2).unwrap();
-
-        let store_path_2 = temp_storage();
-        let config = StorageConfig::new(store_path_2.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-
-        let key_manager_2 = test_key_manager(keystore, store).unwrap();
-
-        for i in 0..5 {
-            // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
-            let master_xpub = key_manager_1.generate_master_xpub().unwrap();
-            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, i).unwrap();
-
-            // Derive keypair in key_manager_1 with the same index
-            let public_from_xpriv = key_manager_1.derive_keypair(i).unwrap();
-
-            // Both public keys must be equal
-            assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
-        }
-
-        drop(key_manager_2);
-        drop(key_manager_1);
-        cleanup_storage(&keystore_path_1);
-        cleanup_storage(&keystore_path_2);
-        cleanup_storage(&store_path_1);
-        cleanup_storage(&store_path_2);
+                // Both public keys must be equal
+                assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
+            }
+            
+            Ok(())
+        }).unwrap();
     }
 
     #[test]
@@ -1415,62 +1361,135 @@ mod tests {
             .to_string()
     }
 
-    #[test]
-    pub fn test_rsa_signature() -> Result<(), KeyManagerError> {
+    fn setup_test_environment() -> Result<(KeyStore, Rc<Storage>, String, String), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path)?;
-
         let store_path = temp_storage();
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config)?);
+        
+        Ok((keystore, store, keystore_path, store_path))
+    }
 
+    fn cleanup_test_environment(keystore_path: &str, store_path: &str) {
+        cleanup_storage(keystore_path);
+        cleanup_storage(store_path);
+    }
+
+    fn create_test_config_and_run_with_cleanup<F>(
+        network: &str,
+        key_derivation_seed: Option<String>,
+        derivation_path: Option<String>,
+        winternitz_seed: Option<String>,
+        test_fn: F,
+    ) -> Result<(), KeyManagerError>
+    where
+        F: FnOnce(&KeyManagerConfig, KeyStore, Rc<Storage>) -> Result<(), KeyManagerError>,
+    {
+        let (keystore, store, keystore_path, store_path) = setup_test_environment()?;
+        
+        let key_manager_config = KeyManagerConfig::new(
+            network.to_string(),
+            key_derivation_seed,
+            derivation_path,
+            winternitz_seed,
+        );
+        
+        let result = test_fn(&key_manager_config, keystore, store);
+        
+        cleanup_test_environment(&keystore_path, &store_path);
+        
+        result
+    }
+
+    fn setup_test_key_manager() -> Result<(KeyManager, String, String), KeyManagerError> {
+        let (keystore, store, keystore_path, store_path) = setup_test_environment()?;
         let key_manager = test_key_manager(keystore, store)?;
-        let signature_verifier = SignatureVerifier::new();
+        Ok((key_manager, keystore_path, store_path))
+    }
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let idx = 0;
-        let pubkey = key_manager.generate_rsa_keypair(&mut rng, idx)?;
-        let message = random_message().to_string().as_bytes().to_vec();
-        let signature = key_manager.sign_rsa_message(&message, idx).unwrap();
+    fn run_test_with_key_manager<F, R>(test_fn: F) -> Result<R, KeyManagerError>
+    where
+        F: FnOnce(KeyManager) -> Result<R, KeyManagerError>,
+    {
+        let (key_manager, keystore_path, store_path) = setup_test_key_manager()?;
+        let result = test_fn(key_manager);
+        cleanup_test_environment(&keystore_path, &store_path);
+        result
+    }
 
-        assert!(signature_verifier
-            .verify_rsa_signature(&signature, &message, &pubkey)
-            .unwrap());
+    fn run_test_with_multiple_key_managers<F, R>(count: usize, test_fn: F) -> Result<R, KeyManagerError>
+    where
+        F: FnOnce(Vec<KeyManager>, Vec<String>, Vec<String>) -> Result<R, KeyManagerError>,
+    {
+        let mut key_managers = Vec::new();
+        let mut keystore_paths = Vec::new();
+        let mut store_paths = Vec::new();
 
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        Ok(())
+        for _ in 0..count {
+            let (key_manager, keystore_path, store_path) = setup_test_key_manager()?;
+            key_managers.push(key_manager);
+            keystore_paths.push(keystore_path);
+            store_paths.push(store_path);
+        }
+
+        let result = test_fn(key_managers, keystore_paths.clone(), store_paths.clone());
+
+        // Cleanup all storage
+        for (keystore_path, store_path) in keystore_paths.iter().zip(store_paths.iter()) {
+            cleanup_test_environment(keystore_path, store_path);
+        }
+
+        result
+    }
+
+    // Helper macro to reduce boilerplate for error test cases
+    macro_rules! assert_config_error {
+        ($network:expr, $key_derivation_seed:expr, $derivation_path:expr, $winternitz_seed:expr, $expected_error:pat) => {
+            create_test_config_and_run_with_cleanup(
+                $network,
+                $key_derivation_seed,
+                $derivation_path,
+                $winternitz_seed,
+                |config, keystore, store| {
+                    let result = create_key_manager_from_config(config, keystore, store);
+                    assert!(matches!(result, Err($expected_error)));
+                    Ok(())
+                },
+            ).expect("Test case failed");
+        };
+    }
+
+    #[test]
+    pub fn test_rsa_signature() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let signature_verifier = SignatureVerifier::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let idx = 0;
+            let pubkey = key_manager.generate_rsa_keypair(&mut rng, idx)?;
+            let message = random_message().to_string().as_bytes().to_vec();
+            let signature = key_manager.sign_rsa_message(&message, idx).unwrap();
+            
+            assert!(signature_verifier
+                .verify_rsa_signature(&signature, &message, &pubkey)
+                .unwrap());
+            Ok(())
+        })
     }
 
     #[test]
     pub fn test_rsa_encryption() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
-
-        let mut rng = secp256k1::rand::thread_rng();
-        let idx = 0;
-        let pubkey = key_manager.generate_rsa_keypair(&mut rng, idx)?;
-        let message = random_message().to_string().as_bytes().to_vec();
-
-        let encrypted_message = key_manager.encrypt_rsa_message(&message, pubkey).unwrap();
-
-        let decrypted_message = key_manager
-            .decrypt_rsa_message(&encrypted_message, idx)
-            .unwrap();
-
-        assert_eq!(message, decrypted_message);
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        Ok(())
+        run_test_with_key_manager(|key_manager| {
+            let mut rng = secp256k1::rand::thread_rng();
+            let idx = 0;
+            let pubkey = key_manager.generate_rsa_keypair(&mut rng, idx)?;
+            let message = random_message().to_string().as_bytes().to_vec();
+            let encrypted_message = key_manager.encrypt_rsa_message(&message, pubkey).unwrap();
+            let decrypted_message = key_manager.decrypt_rsa_message(&encrypted_message, idx).unwrap();
+            
+            assert_eq!(message, decrypted_message);
+            Ok(())
+        })
     }
 
         #[test]
@@ -1508,10 +1527,9 @@ mod tests {
             Some(winternitz_seed_hex),
         );
         
-        // Set up temporary storage
-        let storage_config = StorageConfig::new("test_seed_decoding".to_string(), None);
-        let storage = Rc::new(Storage::new(&storage_config).expect("Failed to create storage"));
-        let keystore = KeyStore::new(storage.clone());
+        // Set up temporary storage using helper function
+        let (keystore, storage, keystore_path, store_path) = setup_test_environment()
+            .expect("Failed to setup test environment");
         
         // Step 2: Call create_key_manager_from_config
         let key_manager = create_key_manager_from_config(&key_manager_config, keystore, storage)
@@ -1531,7 +1549,7 @@ mod tests {
         
         // Cleanup
         drop(key_manager);
-        cleanup_storage("test_seed_decoding");
+        cleanup_test_environment(&keystore_path, &store_path);
     }
 
     #[test]
@@ -1550,160 +1568,104 @@ mod tests {
         let valid_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
         
         // Test Case 1: Non-hex winternitz_seed
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        assert_config_error!(
+            "regtest",
             Some(valid_seed.clone()),
             Some("m/101/1/0/0/".to_string()),
             Some("invalid_non_hex_string_here".to_string()), // Non-hex
+            KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed)
         );
         
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        
         // Test Case 2: Non-hex key_derivation_seed
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        assert_config_error!(
+            "regtest",
             Some("not_a_hex_string".to_string()), // Non-hex
             Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
+            KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed)
         );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         
         // Test Case 3: Too long winternitz_seed (>32 bytes = >64 hex chars)
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
         let too_long_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef00".to_string(); // 66 chars
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some(valid_seed.clone()),
             Some("m/101/1/0/0/".to_string()),
             Some(too_long_seed),
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
         
         // Test Case 4: Too long key_derivation_seed (>32 bytes = >64 hex chars)
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
         let too_long_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321ff".to_string(); // 66 chars
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some(too_long_seed),
             Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
         
         // Test Case 5: Empty winternitz_seed
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some(valid_seed.clone()),
             Some("m/101/1/0/0/".to_string()),
             Some("".to_string()), // Empty string
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
         
         // Test Case 6: Empty key_derivation_seed
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some("".to_string()), // Empty string
             Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
         
         // Test Case 7: Too short winternitz_seed (<32 bytes = <64 hex chars)
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
         let too_short_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd".to_string(); // 62 chars
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some(valid_seed.clone()),
             Some("m/101/1/0/0/".to_string()),
             Some(too_short_seed),
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
         
         // Test Case 8: Too short key_derivation_seed (<32 bytes = <64 hex chars)
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
         let too_short_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba09876543".to_string(); // 62 chars
-        let key_manager_config = KeyManagerConfig::new(
-            "regtest".to_string(),
+        create_test_config_and_run_with_cleanup(
+            "regtest",
             Some(too_short_seed),
             Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+            |config, keystore, store| {
+                let result = create_key_manager_from_config(config, keystore, store);
+                assert!(matches!(result, Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))));
+                Ok(())
+            },
+        ).expect("Test case failed");
     }
 
     #[test]
@@ -1716,12 +1678,9 @@ mod tests {
          * Expected Result: No error; derivation succeeds, implying the default path applied.
          */
         
-        // Set up temporary storage
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        // Set up temporary storage using helper function
+        let (keystore, store, keystore_path, store_path) = setup_test_environment()
+            .expect("Failed to setup test environment");
         
         // Create config with key_derivation_path set to None (omitted)
         let key_manager_config = KeyManagerConfig::new(
@@ -1764,8 +1723,7 @@ mod tests {
         
         // Cleanup
         drop(key_manager);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+        cleanup_test_environment(&keystore_path, &store_path);
     }
 
     #[test]
@@ -1950,12 +1908,9 @@ mod tests {
          * Expected Result: Loaded seeds exactly match provided values.
          */
         
-        // Set up temporary storage
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
+        // Set up temporary storage using helper function
+        let (keystore, store, keystore_path, store_path) = setup_test_environment()
+            .expect("Failed to setup test environment");
         
         // Define specific 32-byte seeds to provide
         let provided_winternitz_seed = [
@@ -2042,8 +1997,7 @@ mod tests {
         
         // Cleanup
         drop(key_manager2);
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+        cleanup_test_environment(&keystore_path, &store_path);
     }
 
     #[test]

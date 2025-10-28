@@ -4,7 +4,6 @@ use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{errors::KeyManagerError, key_manager::KeyManager, winternitz::WinternitzType};
 use storage_backend::storage_config::StorageConfig;
-const DERIVATION_PATH: &str = "m/101/1/0/0/";
 const REGTEST: Network = Network::Regtest;
 
 fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
@@ -13,7 +12,6 @@ fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyMana
 
     let key_manager = KeyManager::new(
         REGTEST,
-        DERIVATION_PATH,
         Some(key_derivation_seed),
         Some(winternitz_seed),
         storage_config,

@@ -277,6 +277,7 @@ impl KeyManager {
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+        println!("account_derivation_path: {}", account_derivation_path); // TODO remove after debugging
 
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
         let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
@@ -292,6 +293,7 @@ impl KeyManager {
             self.network,
             index,
         );
+        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -378,14 +380,18 @@ impl KeyManager {
     pub fn derive_public_key_from_account_xpub(
         &self,
         account_xpub: Xpub,
-        key_type: KeyType,
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
+        let key_type = KeyType::P2tr;
+        // key type is irrelevant here, as we will start from account xpub that alrady has its key_type (purpose) specified,
+        // and we will add just the chain path
+
         // Build the full derivation path and extract only the chain part after account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
         let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
+        println!("chain_derivation_path: {}", chain_derivation_path); // TODO remove after debugging
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
 
@@ -1355,7 +1361,7 @@ mod tests {
 
             for i in 0..5 {
                 let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
-                let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, i).unwrap();
+                let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, i).unwrap();
 
                 let signature_verifier = SignatureVerifier::new();
                 let message = random_message();
@@ -1367,7 +1373,7 @@ mod tests {
 
             // Test that different indices produce different keys (negative test)
             let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
-            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, 11).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, 11).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1393,7 +1399,7 @@ mod tests {
 
         for i in 0..5 {
             let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
-            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1403,7 +1409,7 @@ mod tests {
         }
 
         let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
-        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 11).unwrap();
+        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1435,7 +1441,7 @@ mod tests {
 
                 // Derive public key in key_manager_2 using account xpub
                 let public_from_account_xpub = key_manager_2
-                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .derive_public_key_from_account_xpub(account_xpub, i)
                     .unwrap();
 
                 // Derive keypair in key_manager_1 with the same index

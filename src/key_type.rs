@@ -1,5 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use clap::ValueEnum;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
 // TODO add winternitz
 // TODO add musig2 ?
 // TODO add RSA ?

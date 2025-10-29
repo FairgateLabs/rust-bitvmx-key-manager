@@ -32,21 +32,27 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
-    NewKey,
+    NewKey, // TODO discuss with Diego M, dangling key?
 
-    NewAccountXpub,
+    NewAccountXpub {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: KeyType,
+    },
 
     DerivePublicKey {
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
 
-        #[arg(value_name = "master_xpub", short = 'm', long = "master_xpub")]
-        master_xpub: String,
+        #[arg(value_name = "account_xpub", short = 'a', long = "account_xpub")]
+        account_xpub: String,
     },
 
     DeriveKeypair {
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
+
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: KeyType,
     },
 
     NewWinternitzKey {
@@ -193,24 +199,21 @@ impl Cli {
                 self.generate_key()?;
             }
 
-            Commands::NewAccountXpub => {
+            Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
-                // TODO select keytype
-                let xpub = key_manager.generate_account_xpub(KeyType::P2tr)?;
+                let xpub = key_manager.generate_account_xpub(*key_type)?;
                 info!("Account Xpub: {}", xpub);
             }
 
-            // TODO add key_type parameter and chooser (up to now fixed for P2tr)
             Commands::DerivePublicKey {
                 key_index,
-                master_xpub,
+                account_xpub,
             } => {
-                self.derive_public_key(master_xpub, KeyType::P2tr, key_index)?;
+                self.derive_public_key(account_xpub, key_index)?;
             }
 
-            // TODO add key_type parameter and chooser (up to now fixed for P2tr)
-            Commands::DeriveKeypair { key_index } => {
-                self.derive_keypair(KeyType::P2tr, *key_index)?;
+            Commands::DeriveKeypair { key_index, key_type } => {
+                self.derive_keypair(*key_type, *key_index)?;
             }
 
             Commands::NewWinternitzKey {
@@ -558,10 +561,10 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_public_key(&self, master_xpub: &str, key_type: KeyType, key_index: &u32) -> Result<(), anyhow::Error> {
+    fn derive_public_key(&self, account_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
-        let master_xpub = Xpub::from_str(master_xpub)?;
-        let public_key = key_manager.derive_public_key_from_account_xpub(master_xpub, key_type, *key_index)?;
+        let account_xpub = Xpub::from_str(account_xpub)?;
+        let public_key = key_manager.derive_public_key_from_account_xpub(account_xpub, *key_index)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }

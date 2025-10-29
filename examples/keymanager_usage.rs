@@ -224,3 +224,10 @@ fn random_bytes() -> [u8; 32] {
     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
     seed
 }
+
+// TODO add keytypes examples
+
+// User's workflow:
+// let pubkey = key_manager.derive_keypair(KeyType::P2tr, 0)?;  // They know it's P2TR
+// let privkey = key_manager.export_secret(&pubkey)?;          // Just get the private key
+// let address = Address::p2tr(&pubkey, network);              // They use P2TR again

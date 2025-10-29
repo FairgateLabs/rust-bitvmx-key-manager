@@ -662,7 +662,12 @@ impl KeyManager {
         Ok(signature)
     }
 
-    // TODO, revisit for key types
+    /// Exports the private key for a given public key.
+    ///
+    /// Note: Each public key uniquely maps to exactly one private key in the keystore.
+    /// The caller must know the KeyType used during key derivation, as this will be
+    /// needed later when deriving addresses from the exported private key.
+    /// The KeyType is not required here since the keystore is a simple pubkey -> privkey mapping.
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
             Some(entry) => Ok(entry.0),
@@ -1150,20 +1155,27 @@ mod tests {
         let key_manager = test_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        // TODO test every key type?
-        let pk_1 = key_manager.derive_keypair(KeyType::P2tr, 0)?;
-        let pk_2 = key_manager.derive_keypair(KeyType::P2tr, 1)?;
+        // TODO revisit this when adding winternitz, musig2, and RSA key types
+        let key_types = vec![KeyType::P2pkh, KeyType::P2shP2wpkh, KeyType::P2wpkh, KeyType::P2tr];
 
-        assert_ne!(pk_1.to_string(), pk_2.to_string());
+        for key_type in key_types {
+            let pk_1 = key_manager.derive_keypair(key_type, 0)?;
+            let pk_2 = key_manager.derive_keypair(key_type, 1)?;
 
-        let message = random_message();
-        let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
-        let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
+            // Different indices should produce different public keys
+            assert_ne!(pk_1.to_string(), pk_2.to_string());
 
-        assert_ne!(signature_1.to_string(), signature_2.to_string());
+            let message = random_message();
+            let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
+            let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
 
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+            // Different keys should produce different signatures for the same message
+            assert_ne!(signature_1.to_string(), signature_2.to_string());
+
+            // Both signatures should be valid
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+        }
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1335,29 +1347,35 @@ mod tests {
 
         let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
-        // TODO test every key type?
-        let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
+        // TODO revisit this when adding winternitz, musig2, and RSA key types
+        let key_types = vec![KeyType::P2pkh, KeyType::P2shP2wpkh, KeyType::P2wpkh, KeyType::P2tr];
 
-        for i in 0..5 {
-            // TODO test every key type?
-            let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
-            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i).unwrap();
+        for key_type in key_types {
+            let account_xpub = key_manager.generate_account_xpub(key_type).unwrap();
+
+            for i in 0..5 {
+                let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
+                let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, i).unwrap();
+
+                let signature_verifier = SignatureVerifier::new();
+                let message = random_message();
+                let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
+
+                // Both keys should be equivalent for the same index
+                assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            }
+
+            // Test that different indices produce different keys (negative test)
+            let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, 11).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
             let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
 
-            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            // Different indices should not verify with each other
+            assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
         }
-
-        let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
-        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 11).unwrap();
-
-        let signature_verifier = SignatureVerifier::new();
-        let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
-
-        assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1365,16 +1383,15 @@ mod tests {
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
+        // Note: Schnorr signatures are primarily used with Taproot (P2TR)
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
         let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
-        // TODO test every key type?
         let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
 
         for i in 0..5 {
-            // TODO test every key type?
             let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
             let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i).unwrap();
 
@@ -1408,21 +1425,25 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path_2).unwrap();
         let key_manager_2 = test_key_manager(keystore_storage_config).unwrap();
 
-        // TODO test for every key type?
-        for i in 0..5 {
-            // Generate account-level xpub in key_manager_1 (hardened up to account level)
-            let account_xpub = key_manager_1.generate_account_xpub(KeyType::P2tr).unwrap();
+        // TODO revisit this when adding winternitz, musig2, and RSA key types
+        let key_types = vec![KeyType::P2pkh, KeyType::P2shP2wpkh, KeyType::P2wpkh, KeyType::P2tr];
 
-            // Derive public key in key_manager_2 using account xpub
-            let public_from_account_xpub = key_manager_2
-                .derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i)
-                .unwrap();
+        for key_type in key_types {
+            for i in 0..5 {
+                // Generate account-level xpub in key_manager_1 (hardened up to account level)
+                let account_xpub = key_manager_1.generate_account_xpub(key_type).unwrap();
 
-            // Derive keypair in key_manager_1 with the same index
-            let public_from_xpriv = key_manager_1.derive_keypair(KeyType::P2tr, i).unwrap();
+                // Derive public key in key_manager_2 using account xpub
+                let public_from_account_xpub = key_manager_2
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .unwrap();
 
-            // Both public keys must be equal
-            assert_eq!(public_from_account_xpub.to_string(), public_from_xpriv.to_string());
+                // Derive keypair in key_manager_1 with the same index
+                let public_from_xpriv = key_manager_1.derive_keypair(key_type, i).unwrap();
+
+                // Both public keys must be equal - this validates BIP-44 derivation consistency
+                assert_eq!(public_from_account_xpub.to_string(), public_from_xpriv.to_string());
+            }
         }
 
         drop(key_manager_2);

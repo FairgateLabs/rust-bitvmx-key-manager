@@ -83,10 +83,10 @@ fn main() {
     println!("derived_0_pubkey: {}", derived_0_pubkey);
 
     // Generate a master extended x public key
-    let master_xpub = key_manager.generate_master_xpub().unwrap();
+    let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
 
     // Derive public key only
-    let pubkey = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 1).unwrap();
+    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 1).unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
 
     // --- ------------------------ --- //

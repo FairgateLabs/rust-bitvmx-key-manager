@@ -213,6 +213,28 @@ impl KeyManager {
         )
     }
 
+    fn extract_account_level_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: m/purpose'/coin_type'/account' - first 3 components
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .take(3) // purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>()
+        )
+    }
+
+    fn extract_chain_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: change/address_index - the chain derivation part
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .skip(3) // skip purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>()
+        )
+    }
+
     fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
         match network {
             Network::Bitcoin => 0,  // Bitcoin mainnet
@@ -238,12 +260,28 @@ impl KeyManager {
         Ok(public_key)
     }
 
-    pub fn generate_master_xpub(&self) -> Result<Xpub, KeyManagerError> {
+    // TODO remove
+    // pub fn generate_master_xpub(&self) -> Result<Xpub, KeyManagerError> {
+    //     let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+    //     let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+    //     let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
+
+    //     Ok(master_xpub)
+    // }
+
+    // Generate account-level xpub (hardened up to account)
+    pub fn generate_account_xpub(&self, key_type: KeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
 
-        Ok(master_xpub)
+        // Build the full derivation path and extract only up to account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
+        let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+
+        let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+        let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
+
+        Ok(account_xpub)
     }
 
     pub fn derive_keypair(&self, key_type: KeyType, index: u32) -> Result<PublicKey, KeyManagerError> {
@@ -302,19 +340,54 @@ impl KeyManager {
         }
     }
 
-    pub fn derive_public_key(
+    // Security Issue
+    // The current implementation allows deriving child public keys from the master xpub without hardened derivation. This means:
+
+    // Privacy leak: Anyone with the master xpub can derive ALL your public keys
+    // Security vulnerability: If any child private key is compromised + the master xpub is known, an attacker can derive ALL other private keys in the wallet
+    // Correct BIP-44 Implementation
+    // The xpub should only be exposed at the account level (after hardened derivation):
+    // TODO remove this function after sync with Diego, see new method derive_public_key_from_account_xpub
+    // fn derive_public_key(
+    //     &self,
+    //     master_xpub: Xpub,
+    //     key_type: KeyType,
+    //     index: u32,
+    // ) -> Result<PublicKey, KeyManagerError> {
+    //     let secp = secp256k1::Secp256k1::new();
+    //     let derivation_path = KeyManager::build_derivation_path(
+    //         key_type,
+    //         self.network,
+    //         index,
+    //     );
+    //     let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
+
+    //     // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
+    //     if key_type == KeyType::P2tr {
+    //         Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+    //     } else {
+    //         Ok(xpub.to_pub().into())
+    //     }
+    // }
+
+    // Key Benefits of This Approach:
+    // Security: Only exposes account-level xpub, not master xpub
+    // BIP-44 Compliance: Follows the standard hardened derivation up to account level
+    // Privacy: Different accounts remain isolated
+    // Flexibility: Can still derive all keys within an account from the account xpub
+    pub fn derive_public_key_from_account_xpub(
         &self,
-        master_xpub: Xpub,
+        account_xpub: Xpub,
         key_type: KeyType,
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path = KeyManager::build_derivation_path(
-            key_type,
-            self.network,
-            index,
-        );
-        let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
+
+        // Build the full derivation path and extract only the chain part after account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
+        let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
+
+        let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
 
         // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
         if key_type == KeyType::P2tr {
@@ -1262,12 +1335,13 @@ mod tests {
 
         let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        // TODO test every key type?
+        let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
 
         for i in 0..5 {
             // TODO test every key type?
             let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1277,7 +1351,7 @@ mod tests {
         }
 
         let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 11).unwrap();
+        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1296,12 +1370,13 @@ mod tests {
 
         let key_manager = test_key_manager(keystore_storage_config).unwrap();
 
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        // TODO test every key type?
+        let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
 
         for i in 0..5 {
             // TODO test every key type?
             let pk1 = key_manager.derive_keypair(KeyType::P2tr, i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1311,7 +1386,7 @@ mod tests {
         }
 
         let pk1 = key_manager.derive_keypair(KeyType::P2tr, 10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, KeyType::P2tr, 11).unwrap();
+        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1324,28 +1399,30 @@ mod tests {
     }
 
     #[test]
-    fn test_key_derivation_from_xpub_in_different_key_manager() {
+    fn test_key_derivation_from_account_xpub_in_different_key_manager() {
         let keystore_path_1 = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path_1).unwrap();
-
         let key_manager_1 = test_key_manager(keystore_storage_config).unwrap();
 
         let keystore_path_2 = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path_2).unwrap();
-
         let key_manager_2 = test_key_manager(keystore_storage_config).unwrap();
 
+        // TODO test for every key type?
         for i in 0..5 {
-            // TODO test every key type?
-            // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
-            let master_xpub = key_manager_1.generate_master_xpub().unwrap();
-            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, KeyType::P2tr, i).unwrap();
+            // Generate account-level xpub in key_manager_1 (hardened up to account level)
+            let account_xpub = key_manager_1.generate_account_xpub(KeyType::P2tr).unwrap();
+
+            // Derive public key in key_manager_2 using account xpub
+            let public_from_account_xpub = key_manager_2
+                .derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, i)
+                .unwrap();
 
             // Derive keypair in key_manager_1 with the same index
             let public_from_xpriv = key_manager_1.derive_keypair(KeyType::P2tr, i).unwrap();
 
             // Both public keys must be equal
-            assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
+            assert_eq!(public_from_account_xpub.to_string(), public_from_xpriv.to_string());
         }
 
         drop(key_manager_2);

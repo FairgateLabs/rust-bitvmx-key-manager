@@ -34,7 +34,7 @@ pub struct Menu {
 enum Commands {
     NewKey,
 
-    NewMasterXpub,
+    NewAccountXpub,
 
     DerivePublicKey {
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
@@ -193,10 +193,11 @@ impl Cli {
                 self.generate_key()?;
             }
 
-            Commands::NewMasterXpub => {
+            Commands::NewAccountXpub => {
                 let key_manager = self.key_manager()?;
-                let xpub = key_manager.generate_master_xpub()?;
-                info!("Master Xpub: {}", xpub);
+                // TODO select keytype
+                let xpub = key_manager.generate_account_xpub(KeyType::P2tr)?;
+                info!("Account Xpub: {}", xpub);
             }
 
             // TODO add key_type parameter and chooser (up to now fixed for P2tr)
@@ -560,7 +561,7 @@ impl Cli {
     fn derive_public_key(&self, master_xpub: &str, key_type: KeyType, key_index: &u32) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
         let master_xpub = Xpub::from_str(master_xpub)?;
-        let public_key = key_manager.derive_public_key(master_xpub, key_type, *key_index)?;
+        let public_key = key_manager.derive_public_key_from_account_xpub(master_xpub, key_type, *key_index)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }

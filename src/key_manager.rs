@@ -1266,6 +1266,13 @@ impl KeyManager {
         Ok(self.musig2.my_public_key(aggregated_pubkey)?)
     }
 
+    pub fn get_key_agg_context(
+        &self,
+        aggregated_pubkey: &PublicKey,
+    ) -> Result<musig2::KeyAggContext, KeyManagerError> {
+        Ok(self.musig2.get_key_agg_context(aggregated_pubkey, None)?)
+    }
+
     pub fn aggregate_nonces(
         &self,
         aggregated_pubkey: &PublicKey,

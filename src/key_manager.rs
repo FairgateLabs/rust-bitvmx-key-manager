@@ -982,14 +982,12 @@ mod tests {
 
     const REGTEST: Network = Network::Regtest;
 
-    // TODO FIX (remove randdomness), prev test was always generating the same key?
-    #[ignore]
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_random_key_manager(keystore_storage_config)?;
+        let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
         let pub_key: PublicKey = key_manager.derive_keypair(KeyType::P2tr, 0)?;
 
         let pub_key2: PublicKey = key_manager.derive_keypair(KeyType::P2tr, 1)?;
@@ -999,32 +997,30 @@ mod tests {
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+            "66eb29794311a625932d972db200fec00a61e1fb9844831104a750a529b06ad6"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
-        assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
-        );
+        let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
+        assert_eq!(nonce_seed.to_lower_hex_string(), nonce_seed_repeat.to_lower_hex_string());
 
         // Test that the nonce is different for different index
-        let nonce_seed = key_manager.generate_nonce_seed(1, pub_key)?;
+        let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "30364fcd5b5dc41f5261219ed4db2c8b57e2a6b025852cda02e8718256661339"
+            nonce_seed_1.to_lower_hex_string(),
+            "1c3c1003cd80772a175c9751794e224126b08945263849726e9564668999795d"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(4, pub_key)?;
+        let nonce_seed_4 = key_manager.generate_nonce_seed(4, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "335884b6a1febb486b546cd7fd64f262dab8f0577892a7dd2fe96b501c1e5139"
+            nonce_seed_4.to_lower_hex_string(),
+            "7a3381fa5db90fd33836798c30ba3b53b6aeaa5a26ab5d1584c57dfc86f86b36"
         );
 
         // Test that the nonce is different for different public key
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key2)?;
-        assert_ne!(
-            nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+        let nonce_seed_2 = key_manager.generate_nonce_seed(0, pub_key2)?;
+        assert_eq!(
+            nonce_seed_2.to_lower_hex_string(),
+            "939f65ae79bb23944b78fe97bcc4ebc09b3ec4ccf7ece8925cd21de570002836"
         );
+        assert_ne!(nonce_seed.to_lower_hex_string(), nonce_seed_2.to_lower_hex_string());
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1501,6 +1497,28 @@ mod tests {
     fn test_random_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
         let winternitz_seed = random_bytes();
+
+        let key_manager = KeyManager::new(
+            REGTEST,
+            Some(key_derivation_seed),
+            Some(winternitz_seed),
+            storage_config,
+        )?;
+
+        Ok(key_manager)
+    }
+
+    fn test_deterministic_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
+        use rand::{rngs::mock::StepRng, RngCore};
+
+        // TODO replace with a fixed mnemonic
+        let mut rng = StepRng::new(1, 0);  // Deterministic RNG starting at 1, increment by 0
+
+        let mut key_derivation_seed = [0u8; 32];
+        let mut winternitz_seed = [0u8; 32];
+
+        rng.fill_bytes(&mut key_derivation_seed);
+        rng.fill_bytes(&mut winternitz_seed);
 
         let key_manager = KeyManager::new(
             REGTEST,

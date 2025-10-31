@@ -77,25 +77,24 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 The `KeyManager` supports MuSig2 multi-signature schemes, allowing multiple parties to jointly produce a single Schnorr signature. See more details on [MuSig2 for Rust](https://docs.rs/musig2/latest/musig2/).
 
 ```rust
-use std::collections::HashMap;
-
 // Step 1: Initialize MuSig2 session
 let participant_pubkeys = vec![pubkey1, pubkey2, pubkey3]; // Sorted public keys
 let aggregated_pubkey = key_manager.new_musig2_session(participant_pubkeys.clone(), my_pubkey)?;
 
 // Step 2: Generate nonces for each message
-let message = "Hello, MuSig2!".as_bytes().to_vec();
+let message = "Hello, MuSig2!";
 let message_id = "msg_1";
 let session_id = "session_1";
+let tweak = None;
 
-key_manager.generate_nonce(message_id, message.clone(), &aggregated_pubkey, session_id, None)?;
+key_manager.generate_nonce(message_id, message.as_bytes().to_vec(), &aggregated_pubkey, session_id, tweak)?;
 
 // Step 3: Exchange public nonces with other participants
 let my_pub_nonces = key_manager.get_my_pub_nonces(&aggregated_pubkey, session_id)?;
 
 // Step 4: Aggregate nonces from all participants
 let mut nonces_map = HashMap::new();
-nonces_map.insert(other_participant_pubkey, other_participant_nonces);
+nonces_map.insert(other_participant_pubkey, other_participant_nonce);
 key_manager.aggregate_nonces(&aggregated_pubkey, session_id, nonces_map)?;
 
 // Step 5: Create partial signatures
@@ -103,8 +102,8 @@ let my_partial_sigs = key_manager.get_my_partial_signatures(&aggregated_pubkey, 
 
 // Step 6: Exchange and save partial signatures
 let mut partial_sigs_map = HashMap::new();
-partial_sigs_map.insert(my_pubkey, my_partial_sigs);
-key_manager.save_partial_signatures_multi(&aggregated_pubkey, session_id, partial_sigs_map)?;
+partial_sigs_map.insert(other_public_key, other_partial_signatures);
+key_manager.save_partial_signatures(&aggregated_pubkey, session_id, partial_sigs_map)?;
 
 // Step 7: Get final aggregated signature
 let final_signature = key_manager.get_aggregated_signature(&aggregated_pubkey, session_id, message_id)?;

@@ -1,7 +1,8 @@
 use crate::key_manager::{self, KeyManager};
+use crate::key_type::KeyType;
 use bitcoin::key::rand;
 use bitcoin::{
-    key::rand::{thread_rng, RngCore},
+    key::rand::RngCore,
     secp256k1, PublicKey,
 };
 use rand::Rng;
@@ -32,12 +33,6 @@ pub fn create_key_manager(
     Ok(key_manager)
 }
 
-pub fn create_pub_key(key_manager: &KeyManager) -> Result<PublicKey, anyhow::Error> {
-    let mut rng = thread_rng();
-    let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
-    Ok(pub_key)
-}
-
 pub fn clear_output() {
     let _ = std::fs::remove_dir_all("test_output");
 }
@@ -52,7 +47,7 @@ pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let ket_manager_key = path;
     let password = "secret password".to_string();
     let key_manager = create_key_manager(ket_manager_key.as_str(), Some(password))?;
-    let pub_key = create_pub_key(&key_manager)?;
+    let pub_key = key_manager.derive_keypair(KeyType::P2wpkh, 0)?;
 
     Ok((key_manager, pub_key))
 }

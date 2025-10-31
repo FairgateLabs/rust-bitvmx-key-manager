@@ -73,11 +73,6 @@ fn main() {
     // stores the private key and the corresponding public key in the encrypted keystore.
     // The public key is later used to select the corresponding private key for signing.
 
-    let mut rng = secp256k1::rand::thread_rng();
-    // Generate a keypair
-    let keypair_pubkey = key_manager.generate_keypair(&mut rng).unwrap();
-    println!("keypair_pubkey: {}", keypair_pubkey);
-
     // Derive a child keypair (e.g., for indexed wallets)
     let derived_0_pubkey = key_manager.derive_keypair(KeyType::P2tr, 0).unwrap();
     println!("derived_0_pubkey: {}", derived_0_pubkey);
@@ -86,8 +81,13 @@ fn main() {
     let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
 
     // Derive public key only
-    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, 1).unwrap();
+    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 1).unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
+
+    // OR ...
+    let same_pubkey = key_manager.derive_keypair(KeyType::P2tr, 1).unwrap();
+    println!("Derived pubkey using derive_keypair: {}", same_pubkey);
+    assert_eq!(pubkey, same_pubkey);
 
     // --- ------------------------ --- //
 
@@ -101,7 +101,7 @@ fn main() {
     let message = Message::from_digest(digest);
 
     // Create a key pair
-    let public_key = key_manager.generate_keypair(&mut rng).unwrap();
+    let public_key = key_manager.derive_keypair(KeyType::P2wpkh, 0).unwrap();
 
     // Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter
     let signature = key_manager
@@ -130,7 +130,7 @@ fn main() {
     let message = Message::from_digest(digest);
 
     // Create a key pair
-    let public_key = key_manager.generate_keypair(&mut rng).unwrap();
+    let public_key = key_manager.derive_keypair(KeyType::P2tr, 0).unwrap();
 
     // Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter
     let signature = key_manager

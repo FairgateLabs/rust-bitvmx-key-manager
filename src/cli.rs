@@ -32,7 +32,7 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
-    NewKey, // TODO discuss with Diego M, dangling key?
+    // NewKey, // TODO, discuss with Diego M, dangling key, Remove?
 
     NewAccountXpub {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
@@ -40,6 +40,9 @@ enum Commands {
     },
 
     DerivePublicKey {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: KeyType,
+
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
 
@@ -48,11 +51,11 @@ enum Commands {
     },
 
     DeriveKeypair {
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
-
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: KeyType,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
     },
 
     NewWinternitzKey {
@@ -195,9 +198,11 @@ impl Cli {
         let menu = Menu::parse();
 
         match &menu.command {
-            Commands::NewKey => {
-                self.generate_key()?;
-            }
+
+            // TODO remove
+            // Commands::NewKey => {
+            //     self.generate_key()?;
+            // }
 
             Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
@@ -206,13 +211,14 @@ impl Cli {
             }
 
             Commands::DerivePublicKey {
+                key_type,
                 key_index,
                 account_xpub,
             } => {
-                self.derive_public_key(account_xpub, key_index)?;
+                self.derive_public_key(account_xpub, *key_type, key_index)?;
             }
 
-            Commands::DeriveKeypair { key_index, key_type } => {
+            Commands::DeriveKeypair { key_type, key_index} => {
                 self.derive_keypair(*key_type, *key_index)?;
             }
 
@@ -325,19 +331,21 @@ impl Cli {
     //
     // Commands
     //
-    fn generate_key(&self) -> Result<()> {
-        let key_manager = self.key_manager()?;
-        let mut rng = secp256k1::rand::thread_rng();
 
-        let pk = key_manager.generate_keypair(&mut rng)?;
+    // TODO remove
+    // fn generate_key(&self) -> Result<()> {
+    //     let key_manager = self.key_manager()?;
+    //     let mut rng = secp256k1::rand::thread_rng();
 
-        info!(
-            "New key pair created and stored. Public key is: {}",
-            pk.to_string()
-        );
+    //     let pk = key_manager.generate_keypair(&mut rng)?;
 
-        Ok(())
-    }
+    //     info!(
+    //         "New key pair created and stored. Public key is: {}",
+    //         pk.to_string()
+    //     );
+
+    //     Ok(())
+    // }
 
     fn generate_winternitz_key(
         &self,
@@ -561,10 +569,10 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_public_key(&self, account_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
+    fn derive_public_key(&self, account_xpub: &str, key_type: KeyType, key_index: &u32) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
         let account_xpub = Xpub::from_str(account_xpub)?;
-        let public_key = key_manager.derive_public_key_from_account_xpub(account_xpub, *key_index)?;
+        let public_key = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, *key_index)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }

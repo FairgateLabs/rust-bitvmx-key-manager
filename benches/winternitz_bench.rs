@@ -8,12 +8,10 @@ const REGTEST: Network = Network::Regtest;
 
 fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
     let key_derivation_seed = random_bytes();
-    let winternitz_seed = random_bytes();
 
     let key_manager = KeyManager::new(
         REGTEST,
         Some(key_derivation_seed),
-        Some(winternitz_seed),
         storage_config,
     )?;
 

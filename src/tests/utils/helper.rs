@@ -19,14 +19,12 @@ pub fn create_key_manager(
     encrypt: Option<String>,
 ) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
-    let winternitz_seed = random_bytes();
 
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
         Some(key_derivation_seed),
-        Some(winternitz_seed),
         config,
     )?;
 

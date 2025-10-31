@@ -54,26 +54,16 @@ impl KeyManager {
     */
     const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
     const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
+    const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
 
     pub fn new(
         network: Network,
         key_derivation_seed: Option<[u8; 32]>,
-        winternitz_seed: Option<[u8; 32]>,
+        // winternitz_seed: Option<[u8; 32]>,// TODO REMOVE
         storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
-
-        if keystore.load_winternitz_seed().is_err() {
-            match winternitz_seed {
-                Some(seed) => keystore.store_winternitz_seed(seed)?,
-                None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_winternitz_seed(seed)?;
-                }
-            }
-        }
 
         if keystore.load_key_derivation_seed().is_err() {
             match key_derivation_seed {
@@ -86,8 +76,19 @@ impl KeyManager {
             }
         }
 
-        let musig2 = MuSig2Signer::new(keystore.store_clone());
         let secp = secp256k1::Secp256k1::new();
+
+        if keystore.load_winternitz_seed().is_err() {
+            let winternitz_seed = Self::derive_winternitz_master_seed(
+                secp.clone(),
+                &keystore.load_key_derivation_seed()?,
+                network,
+                Self::ACCOUNT_DERIVATION_INDEX,
+            )?;
+            keystore.store_winternitz_seed(winternitz_seed)?;
+        }
+
+        let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {
             secp,
@@ -244,6 +245,31 @@ impl KeyManager {
             _ => panic!("Unsupported network"),
         }
     }
+
+    // Winternitz uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for winternitz:
+    fn derive_winternitz_master_seed(secp: secp256k1::Secp256k1<All>, key_derivation_seed: &[u8], network: Network, account: u32) -> Result<[u8; 32], KeyManagerError> {
+
+        let wots_full_derivation_path = Self::build_bip44_derivation_path(
+            Self::WINTERNITZ_PURPOSE_INDEX,
+            Self::get_bitcoin_coin_type_by_network(network), // TODO, do we want to differentiate by network here?
+            account,
+            Self::CHANGE_DERIVATION_INDEX,
+            0, // index does not matter here
+        );
+
+        let hardened_wots_account_derivation_path = Self::extract_account_level_path(&wots_full_derivation_path);
+        println!("hardened_wots_account_derivation_path: {}", hardened_wots_account_derivation_path); // TODO remove after debugging
+
+        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let account_xpriv = master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
+
+        let secret_32_bytes = account_xpriv.private_key.secret_bytes();
+
+        // Return the private key bytes as master seed for Winternitz
+        Ok(secret_32_bytes)
+    }
+
+
     /*********************************/
     /******* Key Generation **********/
     /*********************************/
@@ -416,7 +442,7 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
-        // TODO, deduce winternitz seed from key derivation path for winternitz purpose
+        // TODO, deduce winternitz seed from mnemonic and key derivation path for winternitz purpose
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let winternitz = winternitz::Winternitz::new();
@@ -441,7 +467,7 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_size_in_bytes);
         let checksum_size = checksum_length(message_digits_length);
 
-        // TODO, deduce winternitz seed from key derivation path for winternitz purpose
+        // TODO, deduce winternitz seed from mnemonic and key derivation path for winternitz purpose
         let master_secret = self.keystore.load_winternitz_seed()?;
 
         let mut public_keys = Vec::new();
@@ -1496,12 +1522,10 @@ mod tests {
 
     fn test_random_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
-        let winternitz_seed = random_bytes();
 
         let key_manager = KeyManager::new(
             REGTEST,
             Some(key_derivation_seed),
-            Some(winternitz_seed),
             storage_config,
         )?;
 
@@ -1515,15 +1539,12 @@ mod tests {
         let mut rng = StepRng::new(1, 0);  // Deterministic RNG starting at 1, increment by 0
 
         let mut key_derivation_seed = [0u8; 32];
-        let mut winternitz_seed = [0u8; 32];
 
         rng.fill_bytes(&mut key_derivation_seed);
-        rng.fill_bytes(&mut winternitz_seed);
 
         let key_manager = KeyManager::new(
             REGTEST,
             Some(key_derivation_seed),
-            Some(winternitz_seed),
             storage_config,
         )?;
 

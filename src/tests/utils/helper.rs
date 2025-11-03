@@ -1,5 +1,5 @@
 use crate::key_manager::{self, KeyManager};
-use crate::key_type::KeyType;
+use crate::key_type::BitcoinKeyType;
 use bitcoin::key::rand;
 use bitcoin::{
     key::rand::RngCore,
@@ -45,7 +45,7 @@ pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let ket_manager_key = path;
     let password = "secret password".to_string();
     let key_manager = create_key_manager(ket_manager_key.as_str(), Some(password))?;
-    let pub_key = key_manager.derive_keypair(KeyType::P2wpkh, 0)?;
+    let pub_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
     Ok((key_manager, pub_key))
 }

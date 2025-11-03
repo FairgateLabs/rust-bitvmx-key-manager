@@ -1,23 +1,21 @@
 use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-// TODO add winternitz
-// TODO add musig2 ?
-// TODO add RSA ?
-pub enum KeyType {
+
+pub enum BitcoinKeyType {
     P2pkh,
     P2shP2wpkh,
     P2wpkh,
     P2tr,
 }
 
-impl KeyType {
+impl BitcoinKeyType {
     pub fn purpose_index(&self) -> u32 {
         match self {
-            KeyType::P2pkh => 44,
-            KeyType::P2shP2wpkh => 49,
-            KeyType::P2wpkh => 84,
-            KeyType::P2tr => 86,
+            BitcoinKeyType::P2pkh => 44,
+            BitcoinKeyType::P2shP2wpkh => 49,
+            BitcoinKeyType::P2wpkh => 84,
+            BitcoinKeyType::P2tr => 86,
         }
     }
 }

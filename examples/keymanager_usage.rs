@@ -5,7 +5,7 @@ use bitcoin::{
 };
 
 use key_manager::{
-    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType, key_type::KeyType
+    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType, key_type::BitcoinKeyType
 };
 use storage_backend::storage_config::StorageConfig;
 
@@ -72,18 +72,18 @@ fn main() {
     // The public key is later used to select the corresponding private key for signing.
 
     // Derive a child keypair (e.g., for indexed wallets)
-    let derived_0_pubkey = key_manager.derive_keypair(KeyType::P2tr, 0).unwrap();
+    let derived_0_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
     println!("derived_0_pubkey: {}", derived_0_pubkey);
 
     // Generate a master extended x public key
-    let account_xpub = key_manager.generate_account_xpub(KeyType::P2tr).unwrap();
+    let account_xpub = key_manager.generate_account_xpub(BitcoinKeyType::P2tr).unwrap();
 
     // Derive public key only
-    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, KeyType::P2tr, 1).unwrap();
+    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 1).unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
 
     // OR ...
-    let same_pubkey = key_manager.derive_keypair(KeyType::P2tr, 1).unwrap();
+    let same_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1).unwrap();
     println!("Derived pubkey using derive_keypair: {}", same_pubkey);
     assert_eq!(pubkey, same_pubkey);
 
@@ -99,7 +99,7 @@ fn main() {
     let message = Message::from_digest(digest);
 
     // Create a key pair
-    let public_key = key_manager.derive_keypair(KeyType::P2wpkh, 0).unwrap();
+    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0).unwrap();
 
     // Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter
     let signature = key_manager
@@ -128,7 +128,7 @@ fn main() {
     let message = Message::from_digest(digest);
 
     // Create a key pair
-    let public_key = key_manager.derive_keypair(KeyType::P2tr, 0).unwrap();
+    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
 
     // Create a Schnorr signature of the random Message by selecting the private associated to the public key passed as parameter
     let signature = key_manager
@@ -222,10 +222,3 @@ fn random_bytes() -> [u8; 32] {
     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
     seed
 }
-
-// TODO add keytypes examples
-
-// User's workflow:
-// let pubkey = key_manager.derive_keypair(KeyType::P2tr, 0)?;  // They know it's P2TR
-// let privkey = key_manager.export_secret(&pubkey)?;          // Just get the private key
-// let address = Address::p2tr(&pubkey, network);              // They use P2TR again

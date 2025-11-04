@@ -2140,4 +2140,376 @@ mod tests {
         cleanup_storage(&keystore_path3);
         cleanup_storage(&store_path3);
     }
+
+    #[test]
+    pub fn test_store_load_ecdsa_keypairs(){
+        /*
+         * Objective: Validate keypair persistence and retrieval symmetry.
+         * Preconditions: Initialized KeyStore; Secp256k1 context.
+         * Input / Test Data: Two generated keypairs.
+         * Steps / Procedure: Store both keypairs; load by public key; compare stored vs loaded.
+         * Expected Result: Loads succeed; private/public key strings match; keys are distinct.
+         */
+        
+        // Set up test environment using helper function
+        let (keystore, _store, keystore_path, store_path) = setup_test_environment()
+            .expect("Failed to setup test environment");
+        
+        // Initialize Secp256k1 context for key generation
+        let secp = secp256k1::Secp256k1::new();
+        let mut rng = secp256k1::rand::thread_rng();
+        
+        // Generate first keypair
+        let secret_key_1 = SecretKey::new(&mut rng);
+        let private_key_1 = PrivateKey::new(secret_key_1, REGTEST);
+        let public_key_1 = PublicKey::from_private_key(&secp, &private_key_1);
+        
+        // Generate second keypair
+        let secret_key_2 = SecretKey::new(&mut rng);
+        let private_key_2 = PrivateKey::new(secret_key_2, REGTEST);
+        let public_key_2 = PublicKey::from_private_key(&secp, &private_key_2);
+        
+        // Verify the keypairs are distinct
+        assert_ne!(private_key_1.to_string(), private_key_2.to_string(), 
+            "Generated private keys should be distinct");
+        assert_ne!(public_key_1.to_string(), public_key_2.to_string(), 
+            "Generated public keys should be distinct");
+        
+        // Store both keypairs in the keystore
+        keystore.store_keypair(private_key_1, public_key_1)
+            .expect("Failed to store first keypair");
+        keystore.store_keypair(private_key_2, public_key_2)
+            .expect("Failed to store second keypair");
+        
+        // Load first keypair by public key and verify
+        let (loaded_private_key_1, loaded_public_key_1) = match keystore.load_keypair(&public_key_1)
+            .expect("Failed to load first keypair") {
+            Some(entry) => entry,
+            None => panic!("First keypair not found in keystore"),
+        };
+        
+        // Load second keypair by public key and verify
+        let (loaded_private_key_2, loaded_public_key_2) = match keystore.load_keypair(&public_key_2)
+            .expect("Failed to load second keypair") {
+            Some(entry) => entry,
+            None => panic!("Second keypair not found in keystore"),
+        };
+        
+        // Verify loaded keypairs match stored keypairs exactly
+        assert_eq!(loaded_private_key_1.to_string(), private_key_1.to_string(),
+            "Loaded private key 1 should match stored private key 1");
+        assert_eq!(loaded_public_key_1.to_string(), public_key_1.to_string(),
+            "Loaded public key 1 should match stored public key 1");
+        
+        assert_eq!(loaded_private_key_2.to_string(), private_key_2.to_string(),
+            "Loaded private key 2 should match stored private key 2");
+        assert_eq!(loaded_public_key_2.to_string(), public_key_2.to_string(),
+            "Loaded public key 2 should match stored public key 2");
+        
+        // Verify that loaded keypairs are still distinct from each other
+        assert_ne!(loaded_private_key_1.to_string(), loaded_private_key_2.to_string(),
+            "Loaded private keys should remain distinct");
+        assert_ne!(loaded_public_key_1.to_string(), loaded_public_key_2.to_string(),
+            "Loaded public keys should remain distinct");
+        
+        // Additional verification: Test that we cannot load non-existent keypair
+        let fake_secret_key = SecretKey::new(&mut rng);
+        let fake_private_key = PrivateKey::new(fake_secret_key, REGTEST);
+        let fake_public_key = PublicKey::from_private_key(&secp, &fake_private_key);
+        
+        let non_existent_result = keystore.load_keypair(&fake_public_key)
+            .expect("Load operation should succeed even for non-existent key");
+        
+        assert!(non_existent_result.is_none(), 
+            "Loading non-existent keypair should return None");
+        
+        // Cleanup: drop both keystore and storage handles before removing files on Windows
+        drop(keystore);
+        drop(_store);
+        cleanup_test_environment(&keystore_path, &store_path);
+    }
+
+    #[test]
+    pub fn test_non_existent_keypair_lookout(){
+        /*
+         * Objective: Ensure missing keys return Ok(None).
+         * Preconditions: Fresh keystore without that public key.
+         * Input / Test Data: Random valid PublicKey not in store.
+         * Steps / Procedure: Call load_keypair(&pubkey).
+         * Expected Result: Returns Ok(None) without error.
+         */
+        
+        // Set up fresh test environment using helper function
+        let (keystore, _store, keystore_path, store_path) = setup_test_environment()
+            .expect("Failed to setup test environment");
+        
+        // Initialize Secp256k1 context for key generation
+        let secp = secp256k1::Secp256k1::new();
+        let mut rng = secp256k1::rand::thread_rng();
+        
+        // Generate a random valid PublicKey that is NOT in the store
+        let secret_key = SecretKey::new(&mut rng);
+        let private_key = PrivateKey::new(secret_key, REGTEST);
+        let non_existent_public_key = PublicKey::from_private_key(&secp, &private_key);
+        
+        // Verify the keystore is empty (fresh) by checking it doesn't contain our test key
+        // This should return Ok(None) since the key was never stored
+        let result = keystore.load_keypair(&non_existent_public_key)
+            .expect("load_keypair operation should succeed even for non-existent keys");
+        
+        // Expected Result: Returns Ok(None) without error
+        assert!(result.is_none(), 
+            "Loading non-existent keypair should return None, but got Some(_)");
+        
+        // Additional verification: Test with multiple non-existent keys to ensure consistency
+        for _ in 0..5 {
+            let another_secret_key = SecretKey::new(&mut rng);
+            let another_private_key = PrivateKey::new(another_secret_key, REGTEST);
+            let another_non_existent_public_key = PublicKey::from_private_key(&secp, &another_private_key);
+            
+            let another_result = keystore.load_keypair(&another_non_existent_public_key)
+                .expect("load_keypair operation should consistently succeed for non-existent keys");
+            
+            assert!(another_result.is_none(), 
+                "Loading multiple non-existent keypairs should consistently return None");
+        }
+        
+        // Verify that the keystore operations don't fail even when repeatedly called
+        // This tests that the "lookup" behavior is stable and doesn't cause side effects
+        let repeated_result = keystore.load_keypair(&non_existent_public_key)
+            .expect("Repeated load_keypair calls should not fail");
+        
+        assert!(repeated_result.is_none(), 
+            "Repeated lookups of non-existent keypair should consistently return None");
+        
+        // Store one keypair to verify the keystore is functional, then test non-existent lookup again
+        let stored_secret_key = SecretKey::new(&mut rng);
+        let stored_private_key = PrivateKey::new(stored_secret_key, REGTEST);
+        let stored_public_key = PublicKey::from_private_key(&secp, &stored_private_key);
+        
+        keystore.store_keypair(stored_private_key, stored_public_key)
+            .expect("Should be able to store a keypair");
+        
+        // Verify the stored key can be retrieved (keystore is working)
+        let stored_result = keystore.load_keypair(&stored_public_key)
+            .expect("Should be able to load stored keypair");
+        assert!(stored_result.is_some(), "Stored keypair should be retrievable");
+        
+        // Now test that non-existent keys still return None even with other keys present
+        let final_result = keystore.load_keypair(&non_existent_public_key)
+            .expect("load_keypair should work even with other keys present");
+        
+        assert!(final_result.is_none(), 
+            "Non-existent keypair should still return None even when other keys are present");
+        
+        // Cleanup: drop both keystore and storage handles before removing files on Windows
+        drop(keystore);
+        drop(_store);
+        cleanup_test_environment(&keystore_path, &store_path);
+    }
+
+    #[test]
+    pub fn test_rsa_key_index_mapping() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Validate per-index storage and retrieval.
+         * Preconditions: Initialized KeyStore.
+         * Input / Test Data: RSA keypair PEM stored at index N.
+         * Steps / Procedure: Store at N; load at N and N+1.
+         * Expected Result: N returns Some(RSAKeyPair); N+1 returns None; public PEM round-trips.
+         * This test will verify that the RSA key index mapping is working correctly.
+         */
+        
+        run_test_with_key_manager(|key_manager| {
+            // Initialize random number generator for RSA key generation
+            let mut rng = secp256k1::rand::thread_rng();
+            
+            // Define test indices
+            let target_index: usize = 5;
+            let non_existent_index: usize = target_index + 1;
+            
+            // Generate and store RSA keypair at target_index N
+            let original_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng, target_index)
+                .expect("Failed to generate RSA keypair at target index");
+            
+            // Test Step 1: Load at target index N - should return Some(RSAKeyPair)
+            let loaded_rsa_key = key_manager.keystore.load_rsa_key(target_index)
+                .expect("Failed to load RSA key at target index");
+            
+            assert!(loaded_rsa_key.is_some(), 
+                "RSA key should be found at stored index {}", target_index);
+            
+            let loaded_key = loaded_rsa_key.unwrap();
+            
+            // Test Step 2: Verify the loaded RSA key public PEM round-trips correctly
+            let loaded_pubkey_pem = loaded_key.export_public_pem()
+                .expect("Failed to export public PEM from loaded RSA keypair");
+            
+            assert_eq!(loaded_pubkey_pem, original_pubkey_pem,
+                "Loaded RSA public key PEM should match the original");
+            
+            // Test Step 3: Load at non-existent index N+1 - should return None
+            let non_existent_result = key_manager.keystore.load_rsa_key(non_existent_index)
+                .expect("Failed to attempt loading RSA key at non-existent index");
+            
+            assert!(non_existent_result.is_none(), 
+                "RSA key should not be found at non-existent index {}", non_existent_index);
+            
+            // Additional verification: Test multiple indices to ensure proper index isolation
+            let additional_indices = [0, 1, 10, 100];
+            for &idx in &additional_indices {
+                if idx != target_index {
+                    let result = key_manager.keystore.load_rsa_key(idx)
+                        .expect("Failed to check RSA key at additional index");
+                    assert!(result.is_none(), 
+                        "RSA key should not be found at unrelated index {}", idx);
+                }
+            }
+            
+            // Test Step 4: Store another RSA key at a different index and verify independence
+            let different_index: usize = 20;
+            let second_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng, different_index)
+                .expect("Failed to generate second RSA keypair at different index");
+            
+            // Verify both keys can be loaded independently
+            let first_key_still_there = key_manager.keystore.load_rsa_key(target_index)
+                .expect("Failed to re-load first RSA key");
+            assert!(first_key_still_there.is_some(), 
+                "First RSA key should still be available at index {}", target_index);
+            
+            let second_key_loaded = key_manager.keystore.load_rsa_key(different_index)
+                .expect("Failed to load second RSA key");
+            assert!(second_key_loaded.is_some(), 
+                "Second RSA key should be available at index {}", different_index);
+            
+            // Verify the keys are different (different indices should have different keys)
+            let first_key_pem = first_key_still_there.unwrap().export_public_pem()
+                .expect("Failed to export first key's public PEM");
+            let second_key_pem = second_key_loaded.unwrap().export_public_pem()
+                .expect("Failed to export second key's public PEM");
+            
+            assert_ne!(first_key_pem, second_key_pem,
+                "RSA keys at different indices should be different");
+            
+            // Verify the PEMs match what we got from generate_rsa_keypair
+            assert_eq!(first_key_pem, original_pubkey_pem,
+                "First loaded key PEM should match original");
+            assert_eq!(second_key_pem, second_pubkey_pem,
+                "Second loaded key PEM should match original");
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_overwrite_semantics() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Verify safe re-store behavior and RSA index overwrite semantics.
+         * Preconditions: Existing entries for (a) an ECDSA keypair and (b) an RSA key at an index.
+         * Input / Test Data: (a) Same ECDSA keypair re-stored; (b) Two different RSA keypairs stored at the same index N sequentially.
+         * Steps / Procedure: (a) Call store_keypair twice with the same (sk, pk); load and compare; (b) store_rsa_key with key1 at N, then key2 at N; load_rsa_key(N).
+         * Expected Result: (a) Idempotent: loaded entry equals the stored pair. (b) Last-write-wins: loaded RSA key equals the second one.
+         */
+        
+        run_test_with_key_manager(|key_manager| {
+            // Initialize contexts and random number generator
+            let secp = secp256k1::Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            
+            // Test Part (a): ECDSA keypair idempotent re-store behavior
+            
+            // Generate ECDSA keypair
+            let secret_key = SecretKey::new(&mut rng);
+            let private_key = PrivateKey::new(secret_key, REGTEST);
+            let public_key = PublicKey::from_private_key(&secp, &private_key);
+            
+            // Store the ECDSA keypair first time
+            key_manager.keystore.store_keypair(private_key, public_key)
+                .expect("Failed to store ECDSA keypair first time");
+            
+            // Load and verify first storage
+            let (loaded_private_1, loaded_public_1) = key_manager.keystore.load_keypair(&public_key)
+                .expect("Failed to load ECDSA keypair after first store")
+                .expect("ECDSA keypair should exist after first store");
+            
+            assert_eq!(loaded_private_1.to_string(), private_key.to_string(),
+                "First load: private key should match stored key");
+            assert_eq!(loaded_public_1.to_string(), public_key.to_string(),
+                "First load: public key should match stored key");
+            
+            // Store the same ECDSA keypair second time (idempotent operation)
+            key_manager.keystore.store_keypair(private_key, public_key)
+                .expect("Failed to store ECDSA keypair second time");
+            
+            // Load and verify second storage - should be identical (idempotent)
+            let (loaded_private_2, loaded_public_2) = key_manager.keystore.load_keypair(&public_key)
+                .expect("Failed to load ECDSA keypair after second store")
+                .expect("ECDSA keypair should exist after second store");
+            
+            assert_eq!(loaded_private_2.to_string(), private_key.to_string(),
+                "Second load: private key should still match stored key");
+            assert_eq!(loaded_public_2.to_string(), public_key.to_string(),
+                "Second load: public key should still match stored key");
+            
+            // Verify idempotency: both loads should return identical results
+            assert_eq!(loaded_private_1.to_string(), loaded_private_2.to_string(),
+                "Idempotent re-store: private keys from both loads should be identical");
+            assert_eq!(loaded_public_1.to_string(), loaded_public_2.to_string(),
+                "Idempotent re-store: public keys from both loads should be identical");
+            
+            // Test Part (b): RSA key overwrite behavior (last-write-wins)
+            
+            let rsa_index: usize = 10;
+            
+            // Generate and store first RSA keypair at index N
+            let first_rsa_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng, rsa_index)
+                .expect("Failed to generate first RSA keypair");
+            
+            // Load and verify first RSA key
+            let loaded_first_rsa = key_manager.keystore.load_rsa_key(rsa_index)
+                .expect("Failed to load first RSA key")
+                .expect("First RSA key should exist");
+            
+            let first_loaded_pubkey_pem = loaded_first_rsa.export_public_pem()
+                .expect("Failed to export public PEM from first RSA key");
+            
+            assert_eq!(first_loaded_pubkey_pem, first_rsa_pubkey_pem,
+                "First RSA key should match original");
+            
+            // Generate and store second RSA keypair at the SAME index N (overwrite)
+            let second_rsa_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng, rsa_index)
+                .expect("Failed to generate second RSA keypair");
+            
+            // Verify the two RSA public keys are different (we generated different keys)
+            assert_ne!(first_rsa_pubkey_pem, second_rsa_pubkey_pem,
+                "The two generated RSA keys should be different");
+            
+            // Load RSA key after overwrite - should return the second key (last-write-wins)
+            let loaded_overwritten_rsa = key_manager.keystore.load_rsa_key(rsa_index)
+                .expect("Failed to load RSA key after overwrite")
+                .expect("RSA key should still exist after overwrite");
+            
+            let overwritten_loaded_pubkey_pem = loaded_overwritten_rsa.export_public_pem()
+                .expect("Failed to export public PEM from overwritten RSA key");
+            
+            // Verify last-write-wins: loaded key should match the second (most recent) key
+            assert_eq!(overwritten_loaded_pubkey_pem, second_rsa_pubkey_pem,
+                "Last-write-wins: loaded RSA key should match the second (latest) stored key");
+            
+            // Verify the loaded key is NOT the first key (overwrite was successful)
+            assert_ne!(overwritten_loaded_pubkey_pem, first_rsa_pubkey_pem,
+                "Overwrite verification: loaded RSA key should NOT match the first (overwritten) key");
+            
+            // Additional verification: Test that RSA overwrite doesn't affect ECDSA storage
+            let (final_ecdsa_private, final_ecdsa_public) = key_manager.keystore.load_keypair(&public_key)
+                .expect("Failed to load ECDSA keypair after RSA operations")
+                .expect("ECDSA keypair should still exist after RSA operations");
+            
+            assert_eq!(final_ecdsa_private.to_string(), private_key.to_string(),
+                "ECDSA private key should be unaffected by RSA operations");
+            assert_eq!(final_ecdsa_public.to_string(), public_key.to_string(),
+                "ECDSA public key should be unaffected by RSA operations");
+            
+            Ok(())
+        })
+    }
 }

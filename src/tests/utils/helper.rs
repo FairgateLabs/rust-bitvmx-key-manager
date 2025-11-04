@@ -1,7 +1,8 @@
 use crate::key_manager::{self, KeyManager};
+use crate::key_type::BitcoinKeyType;
 use bitcoin::key::rand;
 use bitcoin::{
-    key::rand::{thread_rng, RngCore},
+    key::rand::RngCore,
     secp256k1, PublicKey,
 };
 use rand::Rng;
@@ -18,26 +19,16 @@ pub fn create_key_manager(
     encrypt: Option<String>,
 ) -> Result<KeyManager, anyhow::Error> {
     let key_derivation_seed = random_bytes();
-    let winternitz_seed = random_bytes();
 
-    let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
-        derivation_path.as_str(),
         Some(key_derivation_seed),
-        Some(winternitz_seed),
         config,
     )?;
 
     Ok(key_manager)
-}
-
-pub fn create_pub_key(key_manager: &KeyManager) -> Result<PublicKey, anyhow::Error> {
-    let mut rng = thread_rng();
-    let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
-    Ok(pub_key)
 }
 
 pub fn clear_output() {
@@ -54,7 +45,7 @@ pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let ket_manager_key = path;
     let password = "secret password".to_string();
     let key_manager = create_key_manager(ket_manager_key.as_str(), Some(password))?;
-    let pub_key = create_pub_key(&key_manager)?;
+    let pub_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
     Ok((key_manager, pub_key))
 }

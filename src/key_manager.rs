@@ -1,10 +1,10 @@
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 
 use bitcoin::{
-    bip32::{DerivationPath, Xpriv, Xpub},
+    bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
     key::{
-        rand::{Rng, RngCore},
+        rand::RngCore,
         Keypair, Parity, TapTweak,
     },
     secp256k1::{self, All, Message, Scalar, SecretKey},
@@ -16,17 +16,13 @@ use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError,
-    key_store::KeyStore,
-    musig2::{
+    errors::KeyManagerError, key_store::KeyStore, key_type::BitcoinKeyType, musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    },
-    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
-    winternitz::{
+    }, rsa::{CryptoRng, OsRng, RSAKeyPair, Signature}, winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    },
+    }
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -40,32 +36,33 @@ const RSA_BITS: usize = 2048; // RSA key size in bits
 pub struct KeyManager {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    key_derivation_path: String,
     musig2: MuSig2Signer,
     keystore: KeyStore,
 }
 
 impl KeyManager {
+    /*
+        Up to now, This KeyManager:
+        - Is not a fully HD wallet.
+        - Only handles one account.
+        - Its purpose is fixed for bitcoin depending on the key type and network, it does not support other coins like ETH.
+        - It adds support for:
+            - Taproot keys.
+            - Winternitz keys.
+            - RSA keys.
+            - MuSig2 signing.
+    */
+    const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
+    const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
+    const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
+
     pub fn new(
         network: Network,
-        key_derivation_path: &str,
         key_derivation_seed: Option<[u8; 32]>,
-        winternitz_seed: Option<[u8; 32]>,
         storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
-
-        if keystore.load_winternitz_seed().is_err() {
-            match winternitz_seed {
-                Some(seed) => keystore.store_winternitz_seed(seed)?,
-                None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_winternitz_seed(seed)?;
-                }
-            }
-        }
 
         if keystore.load_key_derivation_seed().is_err() {
             match key_derivation_seed {
@@ -78,13 +75,23 @@ impl KeyManager {
             }
         }
 
-        let musig2 = MuSig2Signer::new(keystore.store_clone());
         let secp = secp256k1::Secp256k1::new();
+
+        if keystore.load_winternitz_seed().is_err() {
+            let winternitz_seed = Self::derive_winternitz_master_seed(
+                secp.clone(),
+                &keystore.load_key_derivation_seed()?,
+                network,
+                Self::ACCOUNT_DERIVATION_INDEX,
+            )?;
+            keystore.store_winternitz_seed(winternitz_seed)?;
+        }
+
+        let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {
             secp,
             network,
-            key_derivation_path: key_derivation_path.to_string(),
             musig2,
             keystore,
         })
@@ -160,40 +167,153 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
+
+    /*********************************/
+    /****** Derivation path **********/
+    /*********************************/
+    // DERIVATION PATH (BIP-44):
+    //
+    // m / purpose' / coin_type' / account' / change / address_index
+    //
+    // Purpose:
+    // 44' = BIP44 - Legacy (P2PKH)
+    // 49' = BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+    // 84' = BIP84 - Native SegWit (P2WPKH)
+    // 86' = BIP86 - Taproot (P2TR)
+    //
+    // Coins:
+    // 0 = Bitcoin mainnet
+    // 1 = Bitcoin testnet/regtest
+    //
+    fn build_bip44_derivation_path(
+        purpose: u32,
+        coin_type: u32,
+        account: u32,
+        change: u32,
+        index: u32,
+    ) -> DerivationPath {
+        DerivationPath::from(vec![
+            ChildNumber::from_hardened_idx(purpose).unwrap(),
+            ChildNumber::from_hardened_idx(coin_type).unwrap(),
+            ChildNumber::from_hardened_idx(account).unwrap(),
+            ChildNumber::from_normal_idx(change).unwrap(),
+            ChildNumber::from_normal_idx(index).unwrap(),
+        ])
+    }
+
+    fn build_derivation_path(key_type: BitcoinKeyType, network: Network, index: u32) -> DerivationPath {
+        Self::build_bip44_derivation_path(
+            key_type.purpose_index(),
+            Self::get_bitcoin_coin_type_by_network(network),
+            Self::ACCOUNT_DERIVATION_INDEX,
+            Self::CHANGE_DERIVATION_INDEX,
+            index,
+        )
+    }
+
+    fn extract_account_level_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: m/purpose'/coin_type'/account' - first 3 components
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .take(3) // purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>()
+        )
+    }
+
+    fn extract_chain_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: change/address_index - the chain derivation part
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .skip(3) // skip purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>()
+        )
+    }
+
+    fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
+        match network {
+            Network::Bitcoin => 0,  // Bitcoin mainnet
+            Network::Testnet => 1,  // Bitcoin testnet
+            Network::Testnet4 => 1, // Bitcoin testnet4
+            Network::Regtest => 1,  // Bitcoin regtest (same as testnet)
+            _ => panic!("Unsupported network"),
+        }
+    }
+
+    // Winternitz uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for winternitz:
+    fn derive_winternitz_master_seed(secp: secp256k1::Secp256k1<All>, key_derivation_seed: &[u8], network: Network, account: u32) -> Result<[u8; 32], KeyManagerError> {
+
+        let wots_full_derivation_path = Self::build_bip44_derivation_path(
+            Self::WINTERNITZ_PURPOSE_INDEX,
+            Self::get_bitcoin_coin_type_by_network(network), //TODO: inform team. Dev note: nice to differentiate by network as they are OT
+            account,
+            Self::CHANGE_DERIVATION_INDEX,
+            0, // index does not matter here
+        );
+
+        let hardened_wots_account_derivation_path = Self::extract_account_level_path(&wots_full_derivation_path);
+        println!("hardened_wots_account_derivation_path: {}", hardened_wots_account_derivation_path); // TODO remove after debugging
+
+        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let account_xpriv = master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
+
+        let secret_32_bytes = account_xpriv.private_key.secret_bytes();
+
+        // Return the private key bytes as master seed for Winternitz
+        Ok(secret_32_bytes)
+    }
+
+
     /*********************************/
     /******* Key Generation **********/
     /*********************************/
-    pub fn generate_keypair<R: Rng + ?Sized>(
-        &self,
-        rng: &mut R,
-    ) -> Result<PublicKey, KeyManagerError> {
-        let private_key = self.generate_private_key(self.network, rng);
-        let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
-        self.keystore.store_keypair(private_key, public_key)?;
-
-        Ok(public_key)
-    }
-
-    pub fn generate_master_xpub(&self) -> Result<Xpub, KeyManagerError> {
+    // Generate account-level xpub (hardened up to account)
+    pub fn generate_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
 
-        Ok(master_xpub)
+        // Build the full derivation path and extract only up to account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
+        let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+        println!("account_derivation_path: {}", account_derivation_path); // TODO remove after debugging
+
+        let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+        let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
+
+        // Dev note: do not touch parity here
+        // Parity normalization (even-Y) is a Taproot/Schnorr (BIP-340/341/86) concern and should be applied
+        // only when you form the Taproot internal key for each address when usign the full derivation path
+        Ok(account_xpub)
     }
 
-    pub fn derive_keypair(&self, index: u32) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_keypair(&self, key_type: BitcoinKeyType, index: u32) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
+        let derivation_path = KeyManager::build_derivation_path(
+            key_type,
+            self.network,
+            index,
+        );
+        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
-        // For taproot keys
-        let (public_key, private_key) = self.adjust_parity(internal_keypair);
+        // For taproot keys (Schnorr keys be “x-only with even-Y”.)
+        // TODO inform team: Dev note: adjust parity only for Taproot keys, not for every key type
+        let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr{
+            self.adjust_parity(internal_keypair)
+        }
+        else {
+            (
+                PublicKey::new(internal_keypair.public_key()),
+                PrivateKey::new(internal_keypair.secret_key(), self.network),
+            )
+        };
 
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
@@ -227,17 +347,65 @@ impl KeyManager {
         }
     }
 
-    pub fn derive_public_key(
+    // Security Issue
+    // The current implementation allows deriving child public keys from the master xpub without hardened derivation. This means:
+
+    // Privacy leak: Anyone with the master xpub can derive ALL your public keys
+    // Security vulnerability: If any child private key is compromised + the master xpub is known, an attacker can derive ALL other private keys in the wallet
+    // Correct BIP-44 Implementation
+    // The xpub should only be exposed at the account level (after hardened derivation):
+    // TODO remove this function after sync with Diego, see new method derive_public_key_from_account_xpub
+    // fn derive_public_key(
+    //     &self,
+    //     master_xpub: Xpub,
+    //     key_type: KeyType,
+    //     index: u32,
+    // ) -> Result<PublicKey, KeyManagerError> {
+    //     let secp = secp256k1::Secp256k1::new();
+    //     let derivation_path = KeyManager::build_derivation_path(
+    //         key_type,
+    //         self.network,
+    //         index,
+    //     );
+    //     let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
+
+    //     // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
+    //     if key_type == KeyType::P2tr {
+    //         Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+    //     } else {
+    //         Ok(xpub.to_pub().into())
+    //     }
+    // }
+
+    // Key Benefits of This Approach:
+    // Security: Only exposes account-level xpub, not master xpub
+    // BIP-44 Compliance: Follows the standard hardened derivation up to account level
+    // Privacy: Different accounts remain isolated
+    // Flexibility: Can still derive all keys within an account from the account xpub
+    pub fn derive_public_key_from_account_xpub(
         &self,
-        master_xpub: Xpub,
+        account_xpub: Xpub,
+        key_type: BitcoinKeyType,
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
-        let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
 
-        Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        // key type seems irrelevant here, as we will start from account xpub that alrady has its key_type (purpose) specified,
+        // and we will add just the chain path, but we need it in order to know if we need to adjust parity or not for the final key
+
+        // Build the full derivation path and extract only the chain part after account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
+        let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
+        println!("chain_derivation_path: {}", chain_derivation_path); // TODO remove after debugging
+
+        let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
+
+        // TODO inform team: Dev note: adjust parity only for Taproot keys
+        if key_type == BitcoinKeyType::P2tr {
+            Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        } else {
+            Ok(xpub.to_pub().into())
+        }
     }
 
     pub fn derive_winternitz(
@@ -292,11 +460,9 @@ impl KeyManager {
         Ok(public_keys)
     }
 
-    fn generate_private_key<R: Rng + ?Sized>(&self, network: Network, rng: &mut R) -> PrivateKey {
-        let secret_key = SecretKey::new(rng);
-        PrivateKey::new(secret_key, network)
-    }
-
+    // Dev note: this key is not related to the key derivation seed used for HD wallets
+    // In the future we can find a way to securely derive it from a mnemonic too
+    // TODO discuss with Diego M. same index generates differents keys and it overwrites previous
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
@@ -316,6 +482,8 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
+        // TODO, check for error if key is p2tr, as ecdsa is not supported for taproot keys, must use schnorr
+        // TODO, chat with Diego, in the past we use any key for ecds and schnorr???
         let (sk, _) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
@@ -502,6 +670,12 @@ impl KeyManager {
         Ok(signature)
     }
 
+    /// Exports the private key for a given public key.
+    ///
+    /// Note: Each public key uniquely maps to exactly one private key in the keystore.
+    /// The caller must know the KeyType used during key derivation, as this will be
+    /// needed later when deriving addresses from the exported private key.
+    /// The KeyType is not required here since the keystore is a simple pubkey -> privkey mapping.
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
             Some(entry) => Ok(entry.0),
@@ -549,7 +723,7 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protoocl.
+    //TODO: Revisit this decision. The private key is used for the TOO protocol.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -788,7 +962,7 @@ impl KeyManager {
 mod tests {
     use bitcoin::{
         hex::DisplayHex,
-        key::rand::{self, rngs::mock::StepRng, RngCore},
+        key::rand::{self, RngCore},
         secp256k1::{self, Message, SecretKey},
         Network, PrivateKey, PublicKey,
     };
@@ -796,15 +970,11 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError},
-        key_store::KeyStore,
-        verifier::SignatureVerifier,
-        winternitz::{to_checksummed_message, WinternitzType},
+        errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}
     };
 
     use super::KeyManager;
 
-    const DERIVATION_PATH: &str = "m/101/1/0/0/";
     const REGTEST: Network = Network::Regtest;
 
     #[test]
@@ -812,43 +982,40 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
-        let mut rng = StepRng::new(1, 0);
-        let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
+        let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
+        let pub_key: PublicKey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
 
-        let mut rng = StepRng::new(2, 0);
-        let pub_key2: PublicKey = key_manager.generate_keypair(&mut rng)?;
+        let pub_key2: PublicKey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
 
+        // TODO Discuss with Diego M. what is the generate_nonce_seed used for in bitvmx, is it leaking the priv key bytes?
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+            "66eb29794311a625932d972db200fec00a61e1fb9844831104a750a529b06ad6"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
-        assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
-        );
+        let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
+        assert_eq!(nonce_seed.to_lower_hex_string(), nonce_seed_repeat.to_lower_hex_string());
 
         // Test that the nonce is different for different index
-        let nonce_seed = key_manager.generate_nonce_seed(1, pub_key)?;
+        let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "30364fcd5b5dc41f5261219ed4db2c8b57e2a6b025852cda02e8718256661339"
+            nonce_seed_1.to_lower_hex_string(),
+            "1c3c1003cd80772a175c9751794e224126b08945263849726e9564668999795d"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(4, pub_key)?;
+        let nonce_seed_4 = key_manager.generate_nonce_seed(4, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "335884b6a1febb486b546cd7fd64f262dab8f0577892a7dd2fe96b501c1e5139"
+            nonce_seed_4.to_lower_hex_string(),
+            "7a3381fa5db90fd33836798c30ba3b53b6aeaa5a26ab5d1584c57dfc86f86b36"
         );
 
         // Test that the nonce is different for different public key
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key2)?;
-        assert_ne!(
-            nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+        let nonce_seed_2 = key_manager.generate_nonce_seed(0, pub_key2)?;
+        assert_eq!(
+            nonce_seed_2.to_lower_hex_string(),
+            "939f65ae79bb23944b78fe97bcc4ebc09b3ec4ccf7ece8925cd21de570002836"
         );
+        assert_ne!(nonce_seed.to_lower_hex_string(), nonce_seed_2.to_lower_hex_string());
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -860,11 +1027,10 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
+        let pk = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, &pk)?;
@@ -881,11 +1047,10 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
+        let pk = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
         let message = random_message();
         let recoverable_signature = key_manager.sign_ecdsa_recoverable_message(&message, &pk)?;
@@ -903,11 +1068,10 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
+        let pk = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
 
         let message = random_message();
         let signature = key_manager.sign_schnorr_message(&message, &pk)?;
@@ -924,11 +1088,10 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
+        let pk = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
 
         let message = random_message();
         let (signature, tweaked_key) =
@@ -946,7 +1109,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -968,7 +1131,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -990,22 +1153,28 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
+        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh];
 
-        let pk_1 = key_manager.derive_keypair(0)?;
-        let pk_2 = key_manager.derive_keypair(1)?;
+        for key_type in key_types {
+            let pk_1 = key_manager.derive_keypair(key_type, 0)?;
+            let pk_2 = key_manager.derive_keypair(key_type, 1)?;
 
-        assert_ne!(pk_1.to_string(), pk_2.to_string());
+            // Different indices should produce different public keys
+            assert_ne!(pk_1.to_string(), pk_2.to_string());
 
-        let message = random_message();
-        let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
-        let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
+            let message = random_message();
+            let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
+            let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
 
-        assert_ne!(signature_1.to_string(), signature_2.to_string());
+            // Different keys should produce different signatures for the same message
+            assert_ne!(signature_1.to_string(), signature_2.to_string());
 
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+            // Both signatures should be valid
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+        }
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1017,8 +1186,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
-        let mut rng = secp256k1::rand::thread_rng();
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         let message = random_message();
         let checksummed = to_checksummed_message(&message[..]);
@@ -1027,8 +1195,8 @@ mod tests {
         let pk2 = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 8)?;
         let pk3 = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 8)?;
         let pk4 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 8)?;
-        let pk5 = key_manager.generate_keypair(&mut rng)?;
-        let pk6 = key_manager.generate_keypair(&mut rng)?;
+        let pk5 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let pk6 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 1)?;
 
         assert!(pk1.total_len() == checksummed.len());
         assert!(pk2.total_len() == checksummed.len());
@@ -1127,7 +1295,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let mut key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -1136,11 +1304,7 @@ mod tests {
             Err(KeyManagerError::FailedToParsePrivateKey(_))
         ));
 
-        // Case 2: Invalid derivation path
-        let invalid_derivation_path = "m/44'/invalid'";
-        key_manager.key_derivation_path = invalid_derivation_path.to_string();
-        let result = key_manager.derive_keypair(0);
-        assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
+        // Case 2: Invalid derivation path (not possible)
 
         // Case 3 b: Write error when creating database keystore (invalid path)
         //TODO: FIX THIS TEST is not working in windows envs
@@ -1174,29 +1338,38 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let key_manager = test_key_manager(keystore_storage_config).unwrap();
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        // TODO add KeyType::P2tr and expect error at sign_ecdsa_message?
 
-        for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh];
+
+        for key_type in key_types {
+            let account_xpub = key_manager.generate_account_xpub(key_type).unwrap();
+
+            for i in 0..5 {
+                let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
+                let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, i).unwrap();
+
+                let signature_verifier = SignatureVerifier::new();
+                let message = random_message();
+                let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
+
+                // Both keys should be equivalent for the same index
+                assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            }
+
+            // Test that different indices produce different keys (negative test)
+            let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type,11).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
             let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
 
-            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            // Different indices should not verify with each other
+            assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
         }
-
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
-
-        let signature_verifier = SignatureVerifier::new();
-        let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
-
-        assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1204,16 +1377,17 @@ mod tests {
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
+        // Note: Schnorr signatures are primarily used with Taproot (P2TR)
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let key_manager = test_key_manager(keystore_storage_config).unwrap();
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        let account_xpub = key_manager.generate_account_xpub(BitcoinKeyType::P2tr).unwrap();
 
         for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, i).unwrap();
+            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i).unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1222,12 +1396,14 @@ mod tests {
             assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
         }
 
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+        let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 10).unwrap();
+        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr,11).unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
         let signature = key_manager.sign_schnorr_message(&message, &pk1).unwrap();
+
+        // TODO add KeyType and expect error at sign_schnorr_message if the key is not P2tr?
 
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
 
@@ -1236,27 +1412,35 @@ mod tests {
     }
 
     #[test]
-    fn test_key_derivation_from_xpub_in_different_key_manager() {
+    fn test_key_derivation_from_account_xpub_in_different_key_manager() {
         let keystore_path_1 = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path_1).unwrap();
-
-        let key_manager_1 = test_key_manager(keystore_storage_config).unwrap();
+        let key_manager_1 = test_random_key_manager(keystore_storage_config).unwrap();
 
         let keystore_path_2 = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path_2).unwrap();
+        let key_manager_2 = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let key_manager_2 = test_key_manager(keystore_storage_config).unwrap();
+        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh, BitcoinKeyType::P2tr];
 
-        for i in 0..5 {
-            // Create master_xpub in key_manager_1 and derive public key in key_manager_2 for a given index
-            let master_xpub = key_manager_1.generate_master_xpub().unwrap();
-            let public_from_xpub = key_manager_2.derive_public_key(master_xpub, i).unwrap();
+        for key_type in key_types {
+            for i in 0..5 {
+                // Generate account-level xpub in key_manager_1 (hardened up to account level)
+                let account_xpub = key_manager_1.generate_account_xpub(key_type).unwrap();
 
-            // Derive keypair in key_manager_1 with the same index
-            let public_from_xpriv = key_manager_1.derive_keypair(i).unwrap();
+                // Derive public key in key_manager_1 using account xpub
+                let public_from_account_xpub_km1 = key_manager_1
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .unwrap();
 
-            // Both public keys must be equal
-            assert_eq!(public_from_xpub.to_string(), public_from_xpriv.to_string());
+                // Derive public key in key_manager_2 using account xpub
+                let public_from_account_xpub_km2 = key_manager_2
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .unwrap();
+
+                // Both public keys must be equal
+                assert_eq!(public_from_account_xpub_km1.to_string(), public_from_account_xpub_km2.to_string());
+            }
         }
 
         drop(key_manager_2);
@@ -1269,7 +1453,7 @@ mod tests {
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
-        let key_manager = test_key_manager(keystore_storage_config).unwrap();
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
         let message_size_in_bytes = 32;
         let key_type = WinternitzType::SHA256;
@@ -1296,15 +1480,31 @@ mod tests {
         cleanup_storage(&keystore_path);
     }
 
-    fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
+    fn test_random_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
         let key_derivation_seed = random_bytes();
-        let winternitz_seed = random_bytes();
 
         let key_manager = KeyManager::new(
             REGTEST,
-            DERIVATION_PATH,
             Some(key_derivation_seed),
-            Some(winternitz_seed),
+            storage_config,
+        )?;
+
+        Ok(key_manager)
+    }
+
+    fn test_deterministic_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
+        use rand::{rngs::mock::StepRng, RngCore};
+
+        // TODO replace with a fixed mnemonic
+        let mut rng = StepRng::new(1, 0);  // Deterministic RNG starting at 1, increment by 0
+
+        let mut key_derivation_seed = [0u8; 32];
+
+        rng.fill_bytes(&mut key_derivation_seed);
+
+        let key_manager = KeyManager::new(
+            REGTEST,
+            Some(key_derivation_seed),
             storage_config,
         )?;
 
@@ -1352,7 +1552,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let mut rng = secp256k1::rand::thread_rng();
@@ -1375,7 +1575,7 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore_storage_config)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         let mut rng = secp256k1::rand::thread_rng();
         let idx = 0;

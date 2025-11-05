@@ -1,5 +1,7 @@
 use crate::{errors::KeyManagerError, rsa::RSAKeyPair};
 use bitcoin::{PrivateKey, PublicKey};
+use bip39::Mnemonic;
+use base64::{engine::general_purpose, Engine as _};
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 
@@ -8,6 +10,7 @@ pub struct KeyStore {
 }
 
 impl KeyStore {
+    const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
     const RSA_KEY: &str = "rsa"; // Key to use in the database for the RSA
@@ -45,6 +48,22 @@ impl KeyStore {
 
         Ok(None)
     }
+
+    pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
+        let phrase = mnemonic.to_string(); // normalized space-separated phrase
+        self.store.set(Self::MNEMONIC_KEY, phrase, None)?;
+        Ok(())
+    }
+
+    pub fn load_mnemonic(&self) -> Result<Mnemonic, KeyManagerError> {
+        let phrase: String = self
+            .store
+            .get(Self::MNEMONIC_KEY)?
+            .ok_or(KeyManagerError::MnemonicNotFound)?;
+        let m = Mnemonic::parse(&phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
+        Ok(m)
+    }
+
     pub fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyManagerError> {
         self.store.set(Self::WINTERNITZ_KEY, seed, None)?;
         Ok(())
@@ -58,18 +77,31 @@ impl KeyStore {
         Ok(entry)
     }
 
-    pub fn store_key_derivation_seed(&self, seed: [u8; 32]) -> Result<(), KeyManagerError> {
-        self.store.set(Self::KEY_DERIVATION_SEED_KEY, seed, None)?;
+    pub fn store_key_derivation_seed(&self, seed: [u8; 64]) -> Result<(), KeyManagerError> {
+        // using base64 encoding to avoid 32 byte limitation in serde
+        let encoded = general_purpose::STANDARD.encode(&seed);
+        self.store.set(Self::KEY_DERIVATION_SEED_KEY, encoded, None)?;
         Ok(())
     }
 
-    pub fn load_key_derivation_seed(&self) -> Result<[u8; 32], KeyManagerError> {
-        let entry = self
+    pub fn load_key_derivation_seed(&self) -> Result<[u8; 64], KeyManagerError> {
+        // using base64 encoding to avoid 32 byte limitation in serde
+        let encoded: String = self
             .store
             .get(Self::KEY_DERIVATION_SEED_KEY)?
             .ok_or(KeyManagerError::KeyDerivationSeedNotFound)?;
 
-        Ok(entry)
+        let decoded = general_purpose::STANDARD
+            .decode(&encoded)
+            .map_err(|_| KeyManagerError::InvalidKeyDerivationSeed)?;
+
+        if decoded.len() != 64 {
+            return Err(KeyManagerError::InvalidKeyDerivationSeed);
+        }
+
+        let mut seed = [0u8; 64];
+        seed.copy_from_slice(&decoded);
+        Ok(seed)
     }
 
     fn build_rsa_key(idx: usize) -> String {

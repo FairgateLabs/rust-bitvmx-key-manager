@@ -1,5 +1,6 @@
 use std::{env, fs, time::Duration};
 
+use bip39::Mnemonic;
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{errors::KeyManagerError, key_manager::KeyManager, winternitz::WinternitzType};
@@ -7,11 +8,11 @@ use storage_backend::storage_config::StorageConfig;
 const REGTEST: Network = Network::Regtest;
 
 fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
-    let key_derivation_seed = random_bytes();
+    let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
 
     let key_manager = KeyManager::new(
         REGTEST,
-        Some(key_derivation_seed),
+        Some(random_mnemonic),
         storage_config,
     )?;
 

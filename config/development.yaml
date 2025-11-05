@@ -1,6 +1,6 @@
 key_manager:
   network: "regtest"
-  key_derivation_seed: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  mnemonic_sentence: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
 storage:
   password: "secret_password"

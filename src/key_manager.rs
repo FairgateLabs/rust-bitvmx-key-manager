@@ -1,5 +1,6 @@
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 
+use bip39::Mnemonic;
 use bitcoin::{
     bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
@@ -58,22 +59,40 @@ impl KeyManager {
 
     pub fn new(
         network: Network,
-        key_derivation_seed: Option<[u8; 32]>,
+        mnemonic: Option<Mnemonic>,
         storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
+        let passphrase_for_mnemonic = ""; // using empty passphrase for now
+        // TODO add passphrase support for mnemonic
 
-        if keystore.load_key_derivation_seed().is_err() {
-            match key_derivation_seed {
-                Some(seed) => keystore.store_key_derivation_seed(seed)?,
+        if keystore.load_mnemonic().is_err() {
+            match mnemonic {
+                Some(mnemonic_sentence) => {
+                    keystore.store_mnemonic(&mnemonic_sentence)?
+                },
                 None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_key_derivation_seed(seed)?;
+                    let mut entropy = [0u8; 32]; // 256 bits for 24 words
+                    secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
+                    let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+                    keystore.store_mnemonic(&random_mnemonic)?;
+
+                    println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
                 }
             }
         }
+
+        // TODO discuss with Diego M.: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them so we don't have to recalculate them each time, similar to storing non-imported (derived) keys
+
+        if keystore.load_key_derivation_seed().is_err() {
+            let key_derivation_seed = keystore.load_mnemonic()?
+                .to_seed(passphrase_for_mnemonic);
+            println!("stored Key derivation seed (64 bytes): {:?}", key_derivation_seed); // TODO remove after debugging
+            keystore.store_key_derivation_seed(key_derivation_seed)?;
+        }
+
+        println!("loaded Key derivation seed (64 bytes): {:?}", keystore.load_key_derivation_seed().unwrap()); // TODO remove after debugging
 
         let secp = secp256k1::Secp256k1::new();
 
@@ -960,6 +979,7 @@ impl KeyManager {
 
 #[cfg(test)]
 mod tests {
+    use bip39::Mnemonic;
     use bitcoin::{
         hex::DisplayHex,
         key::rand::{self, RngCore},
@@ -992,7 +1012,7 @@ mod tests {
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "66eb29794311a625932d972db200fec00a61e1fb9844831104a750a529b06ad6"
+            "ab491b51448b89f1bfab75ae95f48a2b462cbbd0555b72e84bd3771a830757a1"
         );
         let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(nonce_seed.to_lower_hex_string(), nonce_seed_repeat.to_lower_hex_string());
@@ -1001,19 +1021,19 @@ mod tests {
         let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
         assert_eq!(
             nonce_seed_1.to_lower_hex_string(),
-            "1c3c1003cd80772a175c9751794e224126b08945263849726e9564668999795d"
+            "99b88224e42ba9bcdeaa5ccaeb4fb2fe1355ff42d2c71e932b7021910836e52d"
         );
         let nonce_seed_4 = key_manager.generate_nonce_seed(4, pub_key)?;
         assert_eq!(
             nonce_seed_4.to_lower_hex_string(),
-            "7a3381fa5db90fd33836798c30ba3b53b6aeaa5a26ab5d1584c57dfc86f86b36"
+            "7a7b2ba29139b59f00af9faafcbd1946453b7665ea762cfe18e07c46b46f012f"
         );
 
         // Test that the nonce is different for different public key
         let nonce_seed_2 = key_manager.generate_nonce_seed(0, pub_key2)?;
         assert_eq!(
             nonce_seed_2.to_lower_hex_string(),
-            "939f65ae79bb23944b78fe97bcc4ebc09b3ec4ccf7ece8925cd21de570002836"
+            "1b60e65d0dfe2c7e311ea4cf702866c935387e1bdf7dacc054597f146fe22e3f"
         );
         assert_ne!(nonce_seed.to_lower_hex_string(), nonce_seed_2.to_lower_hex_string());
 
@@ -1219,14 +1239,16 @@ mod tests {
         let path = temp_storage();
         let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
-        let winternitz_seed = random_bytes();
-        let key_derivation_seed = random_bytes();
+        let winternitz_seed = random_32bytes();
+        let key_derivation_seed = random_64bytes();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
 
         let config = StorageConfig::new(path.clone(), Some(password));
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_mnemonic(&random_mnemonic)?;
 
         for _ in 0..10 {
             let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
@@ -1252,6 +1274,9 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
+        let loaded_mnemonic = keystore.load_mnemonic()?;
+        assert!(loaded_mnemonic == random_mnemonic);
+
         drop(keystore);
         cleanup_storage(&path);
         Ok(())
@@ -1262,8 +1287,8 @@ mod tests {
         let path = temp_storage();
         let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
-        let winternitz_seed = random_bytes();
-        let key_derivation_seed = random_bytes();
+        let winternitz_seed = random_32bytes();
+        let key_derivation_seed = random_64bytes();
 
         let config = StorageConfig::new(path.clone(), Some(password.clone()));
         let store = Rc::new(Storage::new(&config)?);
@@ -1481,11 +1506,11 @@ mod tests {
     }
 
     fn test_random_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
-        let key_derivation_seed = random_bytes();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
 
         let key_manager = KeyManager::new(
             REGTEST,
-            Some(key_derivation_seed),
+            Some(random_mnemonic),
             storage_config,
         )?;
 
@@ -1493,18 +1518,13 @@ mod tests {
     }
 
     fn test_deterministic_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
-        use rand::{rngs::mock::StepRng, RngCore};
 
-        // TODO replace with a fixed mnemonic
-        let mut rng = StepRng::new(1, 0);  // Deterministic RNG starting at 1, increment by 0
-
-        let mut key_derivation_seed = [0u8; 32];
-
-        rng.fill_bytes(&mut key_derivation_seed);
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
         let key_manager = KeyManager::new(
             REGTEST,
-            Some(key_derivation_seed),
+            Some(fixed_mnemonic),
             storage_config,
         )?;
 
@@ -1523,8 +1543,14 @@ mod tests {
         Message::from_digest(digest)
     }
 
-    fn random_bytes() -> [u8; 32] {
+    fn random_32bytes() -> [u8; 32] {
         let mut seed = [0u8; 32];
+        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+        seed
+    }
+
+    fn random_64bytes() -> [u8; 64] {
+        let mut seed = [0u8; 64];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
     }

@@ -26,6 +26,7 @@ name = "key_manager"
 [dependencies]
 anyhow = "1.0.97"
 bitcoin = { version = "0.32.6", features = ["std", "rand-std", "serde"] }
+bip39 = "2.1.0"
 clap = { version = "4.5.32", features = ["derive"] }
 config = "0.15.11"
 itertools = "0.14.0"

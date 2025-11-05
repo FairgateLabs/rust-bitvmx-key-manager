@@ -37,6 +37,9 @@ pub enum KeyManagerError {
     #[error("Invalid private key")]
     InvalidPrivateKey,
 
+    #[error("Invalid Mnemonic")]
+    InvalidMnemonic,
+
     #[error("Failed to open secure storage")]
     OpenError,
 
@@ -49,11 +52,17 @@ pub enum KeyManagerError {
     #[error("Failed to decode public key")]
     FailedToDecodePublicKey(#[from] bitcoin::key::FromSliceError),
 
+    #[error("Failed to load Mnemonic from key store")]
+    MnemonicNotFound,
+
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
 
-    #[error("Failed to load the BIP32 key derivation seed from key store")]
+    #[error("Failed to load the BIP39 key derivation seed from key store")]
     KeyDerivationSeedNotFound,
+
+    #[error("Invalid BIP39 key derivation seed")]
+    InvalidKeyDerivationSeed,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,
@@ -102,6 +111,9 @@ pub enum ConfigError {
 
     #[error("Key derivation seed is invalid")]
     InvalidKeyDerivationSeed,
+
+    #[error("Mnemonic sentence is invalid")]
+    InvalidMnemonicSentence,
 
     #[error("Network is invalid")]
     InvalidNetwork,

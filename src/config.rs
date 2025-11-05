@@ -4,17 +4,17 @@ use storage_backend::storage_config::StorageConfig;
 #[derive(Debug, Deserialize, Clone)]
 pub struct KeyManagerConfig {
     pub network: String,
-    pub key_derivation_seed: Option<String>,
+    pub mnemonic_sentence: Option<String>,
 }
 
 impl KeyManagerConfig {
     pub fn new(
         network: String,
-        key_derivation_seed: Option<String>,
+        mnemonic_sentence: Option<String>,
     ) -> Self {
         Self {
             network,
-            key_derivation_seed,
+            mnemonic_sentence,
         }
     }
 }

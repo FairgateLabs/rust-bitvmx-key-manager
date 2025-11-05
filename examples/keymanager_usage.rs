@@ -15,13 +15,12 @@ fn main() {
     let network = Network::Regtest;
     let keystore_path = "./examples/storage/examples-keystore.db".to_string();
     let password = "secret password".to_string();
-    let key_derivation_seed = random_bytes();
 
     let storage_config = StorageConfig::new(keystore_path, Some(password));
 
     let key_manager = KeyManager::new(
         network,
-        Some(key_derivation_seed),
+        None, // will generate a new random mnemonic internally
         storage_config,
     )
     .unwrap();

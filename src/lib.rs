@@ -1,5 +1,5 @@
-use bitcoin::Network;
 use bip39::Mnemonic;
+use bitcoin::Network;
 use config::KeyManagerConfig;
 use errors::{ConfigError, KeyManagerError};
 use key_manager::KeyManager;
@@ -30,11 +30,7 @@ pub fn create_key_manager_from_config(
     let network =
         Network::from_str(&key_manager_config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
-    let key_manager = KeyManager::new(
-        network,
-        mnemonic,
-        storage_config,
-    )?;
+    let key_manager = KeyManager::new(network, mnemonic, storage_config)?;
 
     Ok(key_manager)
 }

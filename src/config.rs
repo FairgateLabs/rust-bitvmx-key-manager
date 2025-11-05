@@ -8,10 +8,7 @@ pub struct KeyManagerConfig {
 }
 
 impl KeyManagerConfig {
-    pub fn new(
-        network: String,
-        mnemonic_sentence: Option<String>,
-    ) -> Self {
+    pub fn new(network: String, mnemonic_sentence: Option<String>) -> Self {
         Self {
             network,
             mnemonic_sentence,

@@ -5,7 +5,8 @@ use bitcoin::{
 };
 
 use key_manager::{
-    key_manager::KeyManager, verifier::SignatureVerifier, winternitz::WinternitzType, key_type::BitcoinKeyType
+    key_manager::KeyManager, key_type::BitcoinKeyType, verifier::SignatureVerifier,
+    winternitz::WinternitzType,
 };
 use storage_backend::storage_config::StorageConfig;
 
@@ -75,10 +76,14 @@ fn main() {
     println!("derived_0_pubkey: {}", derived_0_pubkey);
 
     // Generate a master extended x public key
-    let account_xpub = key_manager.generate_account_xpub(BitcoinKeyType::P2tr).unwrap();
+    let account_xpub = key_manager
+        .generate_account_xpub(BitcoinKeyType::P2tr)
+        .unwrap();
 
     // Derive public key only
-    let pubkey = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 1).unwrap();
+    let pubkey = key_manager
+        .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 1)
+        .unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
 
     // OR ...
@@ -98,7 +103,9 @@ fn main() {
     let message = Message::from_digest(digest);
 
     // Create a key pair
-    let public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0).unwrap();
+    let public_key = key_manager
+        .derive_keypair(BitcoinKeyType::P2wpkh, 0)
+        .unwrap();
 
     // Create an ECDSA signature of the random Message by selecting the private associated to the public key passed as parameter
     let signature = key_manager

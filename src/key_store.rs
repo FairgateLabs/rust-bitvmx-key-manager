@@ -1,7 +1,7 @@
 use crate::{errors::KeyManagerError, rsa::RSAKeyPair};
-use bitcoin::{PrivateKey, PublicKey};
-use bip39::Mnemonic;
 use base64::{engine::general_purpose, Engine as _};
+use bip39::Mnemonic;
+use bitcoin::{PrivateKey, PublicKey};
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 
@@ -80,7 +80,8 @@ impl KeyStore {
     pub fn store_key_derivation_seed(&self, seed: [u8; 64]) -> Result<(), KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
         let encoded = general_purpose::STANDARD.encode(&seed);
-        self.store.set(Self::KEY_DERIVATION_SEED_KEY, encoded, None)?;
+        self.store
+            .set(Self::KEY_DERIVATION_SEED_KEY, encoded, None)?;
         Ok(())
     }
 

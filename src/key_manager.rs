@@ -4,10 +4,7 @@ use bip39::Mnemonic;
 use bitcoin::{
     bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{
-        rand::RngCore,
-        Keypair, Parity, TapTweak,
-    },
+    key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
@@ -17,13 +14,18 @@ use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
 use crate::{
-    errors::KeyManagerError, key_store::KeyStore, key_type::BitcoinKeyType, musig2::{
+    errors::KeyManagerError,
+    key_store::KeyStore,
+    key_type::BitcoinKeyType,
+    musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    }, rsa::{CryptoRng, OsRng, RSAKeyPair, Signature}, winternitz::{
+    },
+    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
+    winternitz::{
         self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
-    }
+    },
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -65,13 +67,11 @@ impl KeyManager {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
         let passphrase_for_mnemonic = ""; // using empty passphrase for now
-        // TODO add passphrase support for mnemonic
+                                          // TODO add passphrase support for mnemonic
 
         if keystore.load_mnemonic().is_err() {
             match mnemonic {
-                Some(mnemonic_sentence) => {
-                    keystore.store_mnemonic(&mnemonic_sentence)?
-                },
+                Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
                 None => {
                     let mut entropy = [0u8; 32]; // 256 bits for 24 words
                     secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
@@ -86,13 +86,18 @@ impl KeyManager {
         // TODO discuss with Diego M.: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them so we don't have to recalculate them each time, similar to storing non-imported (derived) keys
 
         if keystore.load_key_derivation_seed().is_err() {
-            let key_derivation_seed = keystore.load_mnemonic()?
-                .to_seed(passphrase_for_mnemonic);
-            println!("stored Key derivation seed (64 bytes): {:?}", key_derivation_seed); // TODO remove after debugging
+            let key_derivation_seed = keystore.load_mnemonic()?.to_seed(passphrase_for_mnemonic);
+            println!(
+                "stored Key derivation seed (64 bytes): {:?}",
+                key_derivation_seed
+            ); // TODO remove after debugging
             keystore.store_key_derivation_seed(key_derivation_seed)?;
         }
 
-        println!("loaded Key derivation seed (64 bytes): {:?}", keystore.load_key_derivation_seed().unwrap()); // TODO remove after debugging
+        println!(
+            "loaded Key derivation seed (64 bytes): {:?}",
+            keystore.load_key_derivation_seed().unwrap()
+        ); // TODO remove after debugging
 
         let secp = secp256k1::Secp256k1::new();
 
@@ -186,7 +191,6 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
-
     /*********************************/
     /****** Derivation path **********/
     /*********************************/
@@ -220,7 +224,11 @@ impl KeyManager {
         ])
     }
 
-    fn build_derivation_path(key_type: BitcoinKeyType, network: Network, index: u32) -> DerivationPath {
+    fn build_derivation_path(
+        key_type: BitcoinKeyType,
+        network: Network,
+        index: u32,
+    ) -> DerivationPath {
         Self::build_bip44_derivation_path(
             key_type.purpose_index(),
             Self::get_bitcoin_coin_type_by_network(network),
@@ -237,7 +245,7 @@ impl KeyManager {
                 .into_iter()
                 .take(3) // purpose, coin_type, account
                 .cloned()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -248,7 +256,7 @@ impl KeyManager {
                 .into_iter()
                 .skip(3) // skip purpose, coin_type, account
                 .cloned()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -263,8 +271,12 @@ impl KeyManager {
     }
 
     // Winternitz uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for winternitz:
-    fn derive_winternitz_master_seed(secp: secp256k1::Secp256k1<All>, key_derivation_seed: &[u8], network: Network, account: u32) -> Result<[u8; 32], KeyManagerError> {
-
+    fn derive_winternitz_master_seed(
+        secp: secp256k1::Secp256k1<All>,
+        key_derivation_seed: &[u8],
+        network: Network,
+        account: u32,
+    ) -> Result<[u8; 32], KeyManagerError> {
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
             Self::WINTERNITZ_PURPOSE_INDEX,
             Self::get_bitcoin_coin_type_by_network(network), //TODO: inform team. Dev note: nice to differentiate by network as they are OT
@@ -273,18 +285,22 @@ impl KeyManager {
             0, // index does not matter here
         );
 
-        let hardened_wots_account_derivation_path = Self::extract_account_level_path(&wots_full_derivation_path);
-        println!("hardened_wots_account_derivation_path: {}", hardened_wots_account_derivation_path); // TODO remove after debugging
+        let hardened_wots_account_derivation_path =
+            Self::extract_account_level_path(&wots_full_derivation_path);
+        println!(
+            "hardened_wots_account_derivation_path: {}",
+            hardened_wots_account_derivation_path
+        ); // TODO remove after debugging
 
         let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
-        let account_xpriv = master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
+        let account_xpriv =
+            master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
 
         let secret_32_bytes = account_xpriv.private_key.secret_bytes();
 
         // Return the private key bytes as master seed for Winternitz
         Ok(secret_32_bytes)
     }
-
 
     /*********************************/
     /******* Key Generation **********/
@@ -309,14 +325,14 @@ impl KeyManager {
         Ok(account_xpub)
     }
 
-    pub fn derive_keypair(&self, key_type: BitcoinKeyType, index: u32) -> Result<PublicKey, KeyManagerError> {
+    pub fn derive_keypair(
+        &self,
+        key_type: BitcoinKeyType,
+        index: u32,
+    ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(
-            key_type,
-            self.network,
-            index,
-        );
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
         println!("derivation_path: {}", derivation_path); // TODO remove after debugging
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
@@ -324,10 +340,9 @@ impl KeyManager {
 
         // For taproot keys (Schnorr keys be “x-only with even-Y”.)
         // TODO inform team: Dev note: adjust parity only for Taproot keys, not for every key type
-        let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr{
+        let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr {
             self.adjust_parity(internal_keypair)
-        }
-        else {
+        } else {
             (
                 PublicKey::new(internal_keypair.public_key()),
                 PrivateKey::new(internal_keypair.secret_key(), self.network),
@@ -990,7 +1005,11 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}
+        errors::{KeyManagerError, WinternitzError},
+        key_store::KeyStore,
+        key_type::BitcoinKeyType,
+        verifier::SignatureVerifier,
+        winternitz::{to_checksummed_message, WinternitzType},
     };
 
     use super::KeyManager;
@@ -1015,7 +1034,10 @@ mod tests {
             "ab491b51448b89f1bfab75ae95f48a2b462cbbd0555b72e84bd3771a830757a1"
         );
         let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
-        assert_eq!(nonce_seed.to_lower_hex_string(), nonce_seed_repeat.to_lower_hex_string());
+        assert_eq!(
+            nonce_seed.to_lower_hex_string(),
+            nonce_seed_repeat.to_lower_hex_string()
+        );
 
         // Test that the nonce is different for different index
         let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
@@ -1035,7 +1057,10 @@ mod tests {
             nonce_seed_2.to_lower_hex_string(),
             "1b60e65d0dfe2c7e311ea4cf702866c935387e1bdf7dacc054597f146fe22e3f"
         );
-        assert_ne!(nonce_seed.to_lower_hex_string(), nonce_seed_2.to_lower_hex_string());
+        assert_ne!(
+            nonce_seed.to_lower_hex_string(),
+            nonce_seed_2.to_lower_hex_string()
+        );
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1175,7 +1200,11 @@ mod tests {
 
         let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
-        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh];
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+        ];
 
         for key_type in key_types {
             let pk_1 = key_manager.derive_keypair(key_type, 0)?;
@@ -1367,14 +1396,20 @@ mod tests {
 
         // TODO add KeyType::P2tr and expect error at sign_ecdsa_message?
 
-        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh];
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+        ];
 
         for key_type in key_types {
             let account_xpub = key_manager.generate_account_xpub(key_type).unwrap();
 
             for i in 0..5 {
                 let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
-                let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, i).unwrap();
+                let pk2 = key_manager
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .unwrap();
 
                 let signature_verifier = SignatureVerifier::new();
                 let message = random_message();
@@ -1386,7 +1421,9 @@ mod tests {
 
             // Test that different indices produce different keys (negative test)
             let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
-            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, key_type,11).unwrap();
+            let pk2 = key_manager
+                .derive_public_key_from_account_xpub(account_xpub, key_type, 11)
+                .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1408,11 +1445,15 @@ mod tests {
 
         let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let account_xpub = key_manager.generate_account_xpub(BitcoinKeyType::P2tr).unwrap();
+        let account_xpub = key_manager
+            .generate_account_xpub(BitcoinKeyType::P2tr)
+            .unwrap();
 
         for i in 0..5 {
             let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, i).unwrap();
-            let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i).unwrap();
+            let pk2 = key_manager
+                .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i)
+                .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1421,8 +1462,12 @@ mod tests {
             assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
         }
 
-        let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 10).unwrap();
-        let pk2 = key_manager.derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr,11).unwrap();
+        let pk1 = key_manager
+            .derive_keypair(BitcoinKeyType::P2tr, 10)
+            .unwrap();
+        let pk2 = key_manager
+            .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 11)
+            .unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1446,7 +1491,12 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path_2).unwrap();
         let key_manager_2 = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let key_types = vec![BitcoinKeyType::P2pkh, BitcoinKeyType::P2shP2wpkh, BitcoinKeyType::P2wpkh, BitcoinKeyType::P2tr];
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+            BitcoinKeyType::P2tr,
+        ];
 
         for key_type in key_types {
             for i in 0..5 {
@@ -1464,7 +1514,10 @@ mod tests {
                     .unwrap();
 
                 // Both public keys must be equal
-                assert_eq!(public_from_account_xpub_km1.to_string(), public_from_account_xpub_km2.to_string());
+                assert_eq!(
+                    public_from_account_xpub_km1.to_string(),
+                    public_from_account_xpub_km2.to_string()
+                );
             }
         }
 
@@ -1505,28 +1558,23 @@ mod tests {
         cleanup_storage(&keystore_path);
     }
 
-    fn test_random_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
+    fn test_random_key_manager(
+        storage_config: StorageConfig,
+    ) -> Result<KeyManager, KeyManagerError> {
         let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
 
-        let key_manager = KeyManager::new(
-            REGTEST,
-            Some(random_mnemonic),
-            storage_config,
-        )?;
+        let key_manager = KeyManager::new(REGTEST, Some(random_mnemonic), storage_config)?;
 
         Ok(key_manager)
     }
 
-    fn test_deterministic_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
-
+    fn test_deterministic_key_manager(
+        storage_config: StorageConfig,
+    ) -> Result<KeyManager, KeyManagerError> {
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
-        let key_manager = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
-            storage_config,
-        )?;
+        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), storage_config)?;
 
         Ok(key_manager)
     }

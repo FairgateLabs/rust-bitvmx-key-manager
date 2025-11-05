@@ -2,10 +2,7 @@ use crate::key_manager::{self, KeyManager};
 use crate::key_type::BitcoinKeyType;
 use bip39::Mnemonic;
 use bitcoin::key::rand;
-use bitcoin::{
-    key::rand::RngCore,
-    secp256k1, PublicKey,
-};
+use bitcoin::{key::rand::RngCore, secp256k1, PublicKey};
 use rand::Rng;
 use storage_backend::storage_config::StorageConfig;
 
@@ -23,11 +20,8 @@ pub fn create_key_manager(
 
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
-    let key_manager = key_manager::KeyManager::new(
-        bitcoin::Network::Regtest,
-        Some(random_mnemonic),
-        config,
-    )?;
+    let key_manager =
+        key_manager::KeyManager::new(bitcoin::Network::Regtest, Some(random_mnemonic), config)?;
 
     Ok(key_manager)
 }

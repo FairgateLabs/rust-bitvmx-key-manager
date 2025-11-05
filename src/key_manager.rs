@@ -13,6 +13,9 @@ use itertools::izip;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
+// TODO discuss with Diego M.: if we want a better management of indexes with a counter
+// TODO discuss with Diego M.: if we want RSA derivation from mnemonic too
+
 use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
@@ -30,6 +33,7 @@ use crate::{
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
+// TODO add configurable RSA key size?
 const RSA_BITS: usize = 2048; // RSA key size in bits
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
@@ -185,6 +189,7 @@ impl KeyManager {
         private_key: &str, // PEM format
         index: usize,
     ) -> Result<String, KeyManagerError> {
+        // TODO discuss with Diego M.: index management, should we check if index is already used?
         let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
         self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
@@ -1663,6 +1668,51 @@ mod tests {
             .unwrap();
 
         assert_eq!(message, decrypted_message);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_rsa_deterministic_key_gen_by_index() -> Result<(), KeyManagerError> {
+        // TODO discuss with Diego M. about the implications of this test
+        // This is POC to expose a possible bug in RSA key generation where the same index
+        // produces different keypairs across the same instance of a KeyManager, as the generate_rsa_keypair
+        // receives a mutable RNG reference, let to the user, indenpendent of the KeyManager internal state.
+        // generating the keypair twice with the same index and same RNG will produce the same key.
+        // but generating the keypair twice with the same index and different RNG will produce different keys
+        // overwriting the previous key stored in the keystore for the same index, causing loss of of a secret.
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+        let idx_a = 0;
+
+        let mut rng_1 = secp256k1::rand::thread_rng();
+        let pubkey_1_for_idx_a = key_manager.generate_rsa_keypair(&mut rng_1, idx_a)?;
+        let keypair_1_for_idx_a = key_manager
+            .keystore
+            .load_rsa_key(idx_a)
+            .expect("Failed to load RSA private key")
+            .expect("No RSA private key found for index");
+
+        let pubkey_from_keypair_1_idx_a = keypair_1_for_idx_a.export_public_pem()?;
+        assert_eq!(pubkey_1_for_idx_a, pubkey_from_keypair_1_idx_a);
+
+        let mut rng_2 = secp256k1::rand::thread_rng();
+        let pubkey_2_for_idx_a = key_manager.generate_rsa_keypair(&mut rng_2, idx_a)?;
+        let keypair_2_for_idx_a = key_manager
+            .keystore
+            .load_rsa_key(idx_a)
+            .expect("Failed to load RSA private key")
+            .expect("No RSA private key found for index");
+
+        let pubkey_from_keypair_2_idx_a = keypair_2_for_idx_a.export_public_pem()?;
+        assert_eq!(pubkey_2_for_idx_a, pubkey_from_keypair_2_idx_a);
+
+        // This will fail as the second generation overwrote the first one
+        assert_eq!(pubkey_from_keypair_1_idx_a, pubkey_from_keypair_2_idx_a);
 
         drop(key_manager);
         cleanup_storage(&keystore_path);

@@ -73,8 +73,8 @@ pub enum KeyManagerError {
     #[error("Rsa Error: {0}")]
     RsaError(#[from] RSAError),
 
-    #[error("Rsa index not found: {0}")]
-    RsaKeyIndexNotFound(usize),
+    #[error("Rsa key not found")]
+    RsaKeyNotFound,
 }
 
 #[derive(Error, Debug)]

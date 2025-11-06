@@ -120,6 +120,13 @@ impl RSAKeyPair {
     pub fn private_key(&self) -> &RsaPrivateKey {
         &self.private_key
     }
+
+    /// RsaPublicKey form PEM public key
+    pub fn pubkey_from_public_key_pem(
+        public_key: &str,
+    ) -> Result<RsaPublicKey, RSAError> {
+        Ok(RsaPublicKey::from_public_key_pem(public_key)?)
+    }
 }
 
 #[cfg(test)]

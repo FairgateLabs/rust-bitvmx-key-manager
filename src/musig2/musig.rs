@@ -455,7 +455,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             let aggregated_nonce = aggregated_nonces
                 .iter()
                 .find(|(msg_id, _)| msg_id == message_id)
-                .unwrap()
+                .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?
                 .1
                 .clone();
 
@@ -494,7 +494,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         let aggregated_nonce = aggregated_nonces
             .iter()
             .find(|(msg_id, _)| msg_id == message_id)
-            .unwrap()
+            .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?
             .1
             .clone();
 

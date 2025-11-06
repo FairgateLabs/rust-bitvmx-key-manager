@@ -15,7 +15,6 @@ use tracing::debug;
 
 // TODO discuss with Diego M.: if we want a better management of indexes with a counter (manage for winternitz, both options for the rest)
 // TODO discuss with Diego M.: if we want RSA derivation from mnemonic too (yes but audit)
-// TODO, Add warnings when Mnemonic is auto generated and docs
 
 use crate::{
     errors::KeyManagerError,
@@ -82,6 +81,7 @@ impl KeyManager {
                     secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
                     let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
                     keystore.store_mnemonic(&random_mnemonic)?;
+                    tracing::warn!("Random mnemonic generated, make sure to back it up securely!");
 
                     println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
                 }

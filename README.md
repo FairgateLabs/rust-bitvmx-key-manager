@@ -7,6 +7,8 @@ BitVMX Key Manager is a comprehensive Rust library designed for managing cryptog
 This library is currently under development and may not be fully stable.
 It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
 
+A random mnemonic will be auto generated and stored, is no one is provided by configuration, and if it's not already found at the keystore. Make sure to back it up securely!
+
 ## Features
 
 - 🔑 **Key Generation and Storage**: Generate new keys and store them securely.

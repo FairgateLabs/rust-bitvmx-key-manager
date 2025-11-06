@@ -33,8 +33,7 @@ use crate::{
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
-// TODO add configurable RSA key size? - ok - add methods so we don't break API
-const RSA_BITS: usize = 2048; // RSA key size in bits
+const DEFAULT_RSA_BITS: usize = 2048; // RSA key size in bits
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -504,7 +503,20 @@ impl KeyManager {
         &self,
         rng: &mut R,
     ) -> Result<String, KeyManagerError> {
-        let rsa_keypair = RSAKeyPair::new(rng, RSA_BITS)?;
+        let rsa_keypair = RSAKeyPair::new(rng, DEFAULT_RSA_BITS)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
+        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
+        Ok(rsa_pubkey_pem)
+    }
+
+    // Dev note: this key is not related to the key derivation seed used for HD wallets
+    // In the future we can find a way to securely derive it from a mnemonic too
+    pub fn generate_rsa_keypair_custom<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+        bits: usize,
+    ) -> Result<String, KeyManagerError> {
+        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)

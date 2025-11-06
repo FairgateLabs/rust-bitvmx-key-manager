@@ -17,36 +17,23 @@ It is not production-ready, has not been audited, and future updates may introdu
 
 ## Usage
 
-### [Creating a KeyManager](examples/keymanager_usage.rs#L14-L29)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
+### [Creating a KeyManager](examples/create.rs)
 
-### [Key Importing](examples/keymanager_usage.rs#L31-L66)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
+### [Key Importing](examples/key_import.rs)
 
-### [Key Generation & Derivation](examples/keymanager_usage.rs#L68-L94)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
+### [Key Generation & Derivation](examples/key_gen.rs)
 *Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.*
 
+### [Signing and verifying a message using ECDSA](examples/sign_verify_ecdsa.rs)
 
-### [Signing and verifying a message using ECDSA](examples/keymanager_usage.rs#L96-L125)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
-
-### [Signing and verifying a message using Schnorr](examples/keymanager_usage.rs#L127-L149)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
-
-### [Schnorr & Taproot Signatures](examples/keymanager_usage.rs#L151-L178)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
-
+### [Signing and verifying a message using Schnorr & Taproot Signatures](examples/sign_verify_schnorr_taproot.rs)
 *The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.*
 
-
-### [Deriving Winternitz OTS keys](examples/keymanager_usage.rs#L182-L195)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
-
+### [Deriving Winternitz OTS keys](examples/deriving_winternitz.rs)
 *The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.*
 
-### [Signing and verifying a message using Winternitz](examples/keymanager_usage.rs#L197-L224)
-<!-- TODO update line numbers, or add (copy-paste) rust snippet -->
+### [Signing and verifying a message using Winternitz](examples/sign_verify_winternitz.rs)
+
 
 ## Development Setup
 

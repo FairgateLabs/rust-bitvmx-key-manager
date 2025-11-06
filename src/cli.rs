@@ -33,7 +33,6 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
-    // NewKey, // TODO, discuss with Diego M, dangling key, Remove?
     NewAccountXpub {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: BitcoinKeyType,
@@ -195,10 +194,7 @@ impl Cli {
         let menu = Menu::parse();
 
         match &menu.command {
-            // TODO remove
-            // Commands::NewKey => {
-            //     self.generate_key()?;
-            // }
+
             Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
                 let xpub = key_manager.generate_account_xpub(*key_type)?;
@@ -329,21 +325,6 @@ impl Cli {
     //
     // Commands
     //
-
-    // TODO remove
-    // fn generate_key(&self) -> Result<()> {
-    //     let key_manager = self.key_manager()?;
-    //     let mut rng = secp256k1::rand::thread_rng();
-
-    //     let pk = key_manager.generate_keypair(&mut rng)?;
-
-    //     info!(
-    //         "New key pair created and stored. Public key is: {}",
-    //         pk.to_string()
-    //     );
-
-    //     Ok(())
-    // }
 
     fn generate_winternitz_key(
         &self,

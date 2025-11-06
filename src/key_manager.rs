@@ -34,7 +34,7 @@ use crate::{
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
-// TODO add configurable RSA key size? - ok - add methods so we dont brak API
+// TODO add configurable RSA key size? - ok - add methods so we don't break API
 const RSA_BITS: usize = 2048; // RSA key size in bits
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
@@ -184,20 +184,6 @@ impl KeyManager {
         self.keystore.store_keypair(private_key, public_key)?;
         Ok(public_key)
     }
-
-    // TODO REMOVE
-    // pub fn import_rsa_private_key(
-    //     &self,
-    //     private_key: &str, // PEM format
-    //     index: usize,
-    // ) -> Result<String, KeyManagerError> {
-    //     // TODO discuss with Diego M.: index management, should we check if index is already used?
-    //     // TODO check how much it breaks actual code discuss
-    //     let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
-    //     self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
-    //     let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
-    //     Ok(rsa_pubkey_pem)
-    // }
 
     pub fn import_rsa_private_key(
         &self,
@@ -512,21 +498,6 @@ impl KeyManager {
         Ok(public_keys)
     }
 
-    // TODO REMOVE
-    // Dev note: this key is not related to the key derivation seed used for HD wallets
-    // In the future we can find a way to securely derive it from a mnemonic too
-    // TODO discuss with Diego M. same index generates differents keys and it overwrites previous
-    // pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
-    //     &self,
-    //     rng: &mut R,
-    //     index: usize,
-    // ) -> Result<String, KeyManagerError> {
-    //     let rsa_keypair = RSAKeyPair::new(rng, RSA_BITS)?;
-    //     self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
-    //     let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
-    //     Ok(rsa_pubkey_pem)
-    // }
-
     // Dev note: this key is not related to the key derivation seed used for HD wallets
     // In the future we can find a way to securely derive it from a mnemonic too
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
@@ -752,19 +723,6 @@ impl KeyManager {
         }
     }
 
-    // TODO REMOVE
-    // pub fn sign_rsa_message_old(
-    //     &self,
-    //     message: &[u8],
-    //     index: usize,
-    // ) -> Result<Signature, KeyManagerError> {
-    //     let rsa_key = self.keystore.load_rsa_key(index)?;
-    //     match rsa_key {
-    //         Some(rsa_key) => Ok(rsa_key.sign(message)),
-    //         None => return Err(KeyManagerError::RsaKeyNotFound(index)),
-    //     }
-    // }
-
     pub fn sign_rsa_message(
         &self,
         message: &[u8],
@@ -786,18 +744,7 @@ impl KeyManager {
         Ok(RSAKeyPair::encrypt(message, &pub_key, &mut OsRng)?)
     }
 
-    // TODO REMOVE
-    // pub fn decrypt_rsa_message(
-    //     &self,
-    //     encrypted_message: &[u8],
-    //     index: usize,
-    // ) -> Result<Vec<u8>, KeyManagerError> {
-    //     let rsa_key = self.keystore.load_rsa_key(index)?;
-    //     match rsa_key {
-    //         Some(rsa_key) => Ok(rsa_key.decrypt(encrypted_message)?),
-    //         None => return Err(KeyManagerError::RsaKeyNotFound(index)),
-    //     }
-    // }
+
 
     pub fn decrypt_rsa_message(
         &self,

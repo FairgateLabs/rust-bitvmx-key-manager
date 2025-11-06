@@ -62,6 +62,7 @@ impl KeyManager {
     const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
     const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
 
+    // TODO discus with Diego M. the idea behind the store/load of this constructor
     pub fn new(
         network: Network,
         mnemonic: Option<Mnemonic>,
@@ -72,8 +73,9 @@ impl KeyManager {
         let keystore = KeyStore::new(key_store);
         let passphrase_for_mnemonic = mnemonic_passphrase.unwrap_or("".to_string());
 
-        // Store or load mnemonic
+        // TODO discus with Diego M. do we want to store the passphrase too or just use it temporarily?
 
+        // Store or load mnemonic
         if keystore.load_mnemonic().is_err() {
             match mnemonic {
                 Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
@@ -89,7 +91,7 @@ impl KeyManager {
             }
         }
 
-        // TODO discuss with Diego M.: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them so we don't have to recalculate them each time, similar to storing non-imported (derived) keys
+        // TODO inform team Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them so we don't have to recalculate them each time, similar to storing non-imported (derived) keys
 
         if keystore.load_key_derivation_seed().is_err() {
             let key_derivation_seed = keystore.load_mnemonic()?.to_seed(passphrase_for_mnemonic);

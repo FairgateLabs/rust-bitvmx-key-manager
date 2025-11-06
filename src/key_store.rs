@@ -138,11 +138,12 @@ impl KeyStore {
     // }
 
     /// Load an RSA key pair from the store with the given public key in PEM format.
-    pub fn load_rsa_key(&self, rsa_pub_key: RsaPublicKey) -> Result<Option<RSAKeyPair>, KeyManagerError> {
+    pub fn load_rsa_key(
+        &self,
+        rsa_pub_key: RsaPublicKey,
+    ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let privk = self
-            .store
-            .get::<String, String>(pubk)?;
+        let privk = self.store.get::<String, String>(pubk)?;
         if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
             return Ok(Some(rsa_keypair));

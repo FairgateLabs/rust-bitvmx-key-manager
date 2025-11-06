@@ -1,7 +1,7 @@
 mod create;
 
+use bitcoin::Network;
 use create::{create_key_manager_example, random_bytes};
-use bitcoin::{Network};
 
 fn main() {
     // see function code, main is just a wrapper to run the example

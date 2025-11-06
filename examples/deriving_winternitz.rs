@@ -4,8 +4,7 @@ use create::create_key_manager_example;
 
 use key_manager::winternitz::WinternitzType;
 
-
-fn main () {
+fn main() {
     // see function code, main is just a wrapper to run the example
     key_gen_winternitz_example();
 }

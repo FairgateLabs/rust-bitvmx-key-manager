@@ -7,11 +7,9 @@ use bitcoin::{
     secp256k1::{self, Message},
 };
 
-use key_manager::{
-    key_type::BitcoinKeyType, verifier::SignatureVerifier,
-};
+use key_manager::{key_type::BitcoinKeyType, verifier::SignatureVerifier};
 
-fn main () {
+fn main() {
     // see function code, main is just a wrapper to run the example
     sign_verify_ecdsa_example();
 }
@@ -47,5 +45,4 @@ fn sign_verify_ecdsa_example() {
     let _recoverable_sig = key_manager
         .sign_ecdsa_recoverable_message(&message, &public_key)
         .unwrap();
-
 }

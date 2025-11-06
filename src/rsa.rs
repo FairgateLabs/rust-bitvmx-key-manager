@@ -122,9 +122,7 @@ impl RSAKeyPair {
     }
 
     /// RsaPublicKey form PEM public key
-    pub fn pubkey_from_public_key_pem(
-        public_key: &str,
-    ) -> Result<RsaPublicKey, RSAError> {
+    pub fn pubkey_from_public_key_pem(public_key: &str) -> Result<RsaPublicKey, RSAError> {
         Ok(RsaPublicKey::from_public_key_pem(public_key)?)
     }
 }

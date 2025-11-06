@@ -7,12 +7,9 @@ use bitcoin::{
     secp256k1::{self, Message},
 };
 
-use key_manager::{
-    verifier::SignatureVerifier,
-    winternitz::WinternitzType,
-};
+use key_manager::{verifier::SignatureVerifier, winternitz::WinternitzType};
 
-fn main () {
+fn main() {
     // see function code, main is just a wrapper to run the example
     sign_verify_winternitz_example();
 }

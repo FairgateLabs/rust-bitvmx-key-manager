@@ -194,7 +194,6 @@ impl Cli {
         let menu = Menu::parse();
 
         match &menu.command {
-
             Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
                 let xpub = key_manager.generate_account_xpub(*key_type)?;
@@ -302,8 +301,7 @@ impl Cli {
             Commands::EncryptRsa { message, pub_key } => {
                 let key_manager = self.key_manager()?;
                 let bytes = hex::decode(message)?;
-                let ciphertext =
-                    key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key)?;
+                let ciphertext = key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key)?;
                 info!("Encrypted message: {}", hex::encode(ciphertext));
             }
 

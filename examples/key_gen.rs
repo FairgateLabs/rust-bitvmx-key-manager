@@ -3,8 +3,7 @@ mod create;
 use create::create_key_manager_example;
 use key_manager::key_type::BitcoinKeyType;
 
-
-fn main () {
+fn main() {
     // see function code, main is just a wrapper to run the example
     key_generation_example();
 }
@@ -37,6 +36,4 @@ fn key_generation_example() {
     let same_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1).unwrap();
     println!("Derived pubkey using derive_keypair: {}", same_pubkey);
     assert_eq!(pubkey, same_pubkey);
-
-
 }

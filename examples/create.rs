@@ -1,10 +1,6 @@
-use bitcoin::{
-    Network, key::rand::RngCore, secp256k1
-};
+use bitcoin::{key::rand::RngCore, secp256k1, Network};
 
-use key_manager::{
-    key_manager::KeyManager,
-};
+use key_manager::key_manager::KeyManager;
 use storage_backend::storage_config::StorageConfig;
 
 #[allow(dead_code)]

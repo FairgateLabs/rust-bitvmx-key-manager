@@ -7,11 +7,9 @@ use bitcoin::{
     secp256k1::{self, Message, Scalar},
 };
 
-use key_manager::{
-    key_type::BitcoinKeyType, verifier::SignatureVerifier,
-};
+use key_manager::{key_type::BitcoinKeyType, verifier::SignatureVerifier};
 
-fn main () {
+fn main() {
     // see function code, main is just a wrapper to run the example
     sign_verify_schnorr_example();
 }

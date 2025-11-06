@@ -744,8 +744,6 @@ impl KeyManager {
         Ok(RSAKeyPair::encrypt(message, &pub_key, &mut OsRng)?)
     }
 
-
-
     pub fn decrypt_rsa_message(
         &self,
         encrypted_message: &[u8],
@@ -1011,7 +1009,12 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, key_type::BitcoinKeyType, rsa::RSAKeyPair, verifier::SignatureVerifier, winternitz::{WinternitzType, to_checksummed_message}
+        errors::{KeyManagerError, WinternitzError},
+        key_store::KeyStore,
+        key_type::BitcoinKeyType,
+        rsa::RSAKeyPair,
+        verifier::SignatureVerifier,
+        winternitz::{to_checksummed_message, WinternitzType},
     };
 
     use super::KeyManager;
@@ -1681,7 +1684,6 @@ mod tests {
         let mut rng_2 = secp256k1::rand::thread_rng();
         let pubkey_2 = key_manager.generate_rsa_keypair(&mut rng_2)?;
 
-
         let pubk_1 = RSAKeyPair::pubkey_from_public_key_pem(&pubkey_1)?;
         let keypair_1 = key_manager
             .keystore
@@ -1690,7 +1692,6 @@ mod tests {
 
         let pubkey_from_keypair_1 = keypair_1.export_public_pem()?;
         assert_eq!(pubkey_1, pubkey_from_keypair_1);
-
 
         let pubk_2 = RSAKeyPair::pubkey_from_public_key_pem(&pubkey_2)?;
         let keypair_2 = key_manager

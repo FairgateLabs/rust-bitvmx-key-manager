@@ -1313,36 +1313,25 @@ impl KeyManager {
         //this is a workaround bacause the as leader I got all the partial before sending mine
         //and therefore have it computed.
         //this should change in program
+
         let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey, id)?;
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self.musig2.save_partial_signatures(
-            aggregated_pubkey,
-            id,
-            partial_signatures_mapping,
-        )?)
+        Ok(self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)?)
     }
 
     pub fn save_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,
         id: &str,
-        other_public_key: PublicKey,
-        other_partial_signatures: Vec<(MessageId, PartialSignature)>,
-    ) -> Result<Vec<(MessageId, PartialSignature)>, KeyManagerError> {
-        let mut partial_signatures = HashMap::new();
-        partial_signatures.insert(other_public_key, other_partial_signatures);
-
-        let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey, id)?;
-        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
-
-        partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
-
-        self.musig2
-            .save_partial_signatures(aggregated_pubkey, id, partial_signatures)?;
-
-        Ok(my_partial_signatures)
+        partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    ) -> Result<(), KeyManagerError> {
+        Ok(self.musig2.save_partial_signatures(
+            aggregated_pubkey,
+            id,
+            partial_signatures_mapping,
+        )?)
     }
 
     pub fn get_my_partial_signatures(

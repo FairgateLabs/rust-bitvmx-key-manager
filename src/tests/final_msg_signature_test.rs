@@ -6,8 +6,8 @@ mod tests {
     };
     use bitcoin::{hex::prelude::*, Network, PrivateKey, PublicKey};
     use musig2::{
-        secp::{MaybePoint, MaybeScalar, Point},
-        AggNonce, PubNonce,
+        secp::{MaybePoint, MaybeScalar},
+        AggNonce,
     };
     use sha2::{Digest as _, Sha256};
     use std::collections::HashMap;
@@ -84,17 +84,19 @@ mod tests {
         assert!(verification_1);
         assert!(verification_2);
 
-        key_manager_1.save_partial_signatures(
+        let mut partial_signatures_mapping_1 = HashMap::new();
+        partial_signatures_mapping_1.insert(pub_key_part_2, my_partial_sigs_2.clone());
+        key_manager_1.save_partial_signatures_multi(
             &aggregated_pub_key_1,
             id,
-            pub_key_part_2,
-            my_partial_sigs_2.clone(),
+            partial_signatures_mapping_1,
         )?;
-        key_manager_2.save_partial_signatures(
+        let mut partial_signatures_mapping_2 = HashMap::new();
+        partial_signatures_mapping_2.insert(pub_key_part_1, my_partial_sigs_1.clone());
+        key_manager_2.save_partial_signatures_multi(
             &aggregated_pub_key_2,
             id2,
-            pub_key_part_1,
-            my_partial_sigs_1.clone(),
+            partial_signatures_mapping_2,
         )?;
 
         let signature_1 = musig_1.get_aggregated_signature(&aggregated_pub_key_1, id, message)?;
@@ -121,10 +123,11 @@ mod tests {
     fn test_verify_signatures() -> Result<(), anyhow::Error> {
         // Private keys obtained from the Mnemonic: "test test test test test test test test test test test junk"
         // this mnemonic is used by anvil and other EVM tools for testing
+        // only using 3 as it takes too long to create the key managers
         let private_keys_hexes = [
             "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-            // "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+            "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
             // "7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
             // "47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
             // "8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
@@ -140,6 +143,8 @@ mod tests {
             key_managers.push(key_manager);
         }
 
+        println!("key managers set up: {:?}", key_managers.len());
+
         let mut pub_key_parts = Vec::new();
         for i in 0..key_managers.len() {
             let private_key = PrivateKey::from_slice(
@@ -152,7 +157,7 @@ mod tests {
             "pub_key_parts: {:?}",
             pub_key_parts
                 .iter()
-                .map(|pk| pk.inner.serialize().as_hex().to_string())
+                .map(|pk| pk.inner.serialize_uncompressed().as_hex().to_string())
                 .collect::<Vec<_>>()
         );
 
@@ -177,7 +182,7 @@ mod tests {
         let aggregated_pub_key = aggregated_pub_key.unwrap();
         println!(
             "aggregated_pub_key: {:?}",
-            aggregated_pub_key.inner.serialize().as_hex()
+            aggregated_pub_key.inner.serialize_uncompressed().as_hex()
         );
 
         // Generate nonces for each participant
@@ -212,31 +217,21 @@ mod tests {
         }
 
         // Get partial signatures for each participant
-        let mut partial_sigs_map = Vec::new();
+        let mut partial_sigs_map = HashMap::new();
         for i in 0..key_managers.len() {
             let my_partial_sigs =
                 key_managers[i].get_my_partial_signatures(&aggregated_pub_key, id)?;
-            partial_sigs_map.push(my_partial_sigs.clone());
             println!("my_partial_sigs {i}: {:?}", my_partial_sigs.clone());
+            partial_sigs_map.insert(pub_key_parts[i].clone(), my_partial_sigs.clone());
         }
 
         // Save partial signatures for each participant
         for i in 0..key_managers.len() {
-            for j in 0..pub_key_parts.len() {
-                if i == j {
-                    continue;
-                }
-                let saved_partial_sigs = key_managers[i].save_partial_signatures(
-                    &aggregated_pub_key,
-                    id,
-                    pub_key_parts[j].clone(),
-                    partial_sigs_map[j].clone(),
-                )?;
-                println!(
-                    "save_partial_signatures {i}: {:?}",
-                    saved_partial_sigs.clone()
-                );
-            }
+            key_managers[i].save_partial_signatures(
+                &aggregated_pub_key,
+                id,
+                partial_sigs_map.clone(),
+            )?;
         }
 
         // Get aggregated signature for each participant
@@ -319,13 +314,7 @@ mod tests {
             "manual effective_pubkeys: {:?}",
             effective_pubkeys.iter().map(|pk| pk).collect::<Vec<_>>()
         );
-        println!(
-            "manual key_coefficients: {:?}",
-            key_coefficients
-                .iter()
-                .map(|coeff| coeff)
-                .collect::<Vec<_>>()
-        );
+
         // Compute the aggregated pubkey
         let aggregated_pubkey_manual = MaybePoint::sum(&effective_pubkeys).not_inf()?;
         assert_eq!(
@@ -421,7 +410,12 @@ mod tests {
         );
 
         // ------------------- Verification Step -------------------
-        let partial_signature = partial_sigs_map[0].get(0).unwrap().1;
+        let partial_signature = partial_sigs_map
+            .get(&individual_pubkey)
+            .unwrap()
+            .get(0)
+            .unwrap()
+            .1;
         println!(
             "partial_signature: {:?}",
             partial_signature.serialize().as_hex().to_string()

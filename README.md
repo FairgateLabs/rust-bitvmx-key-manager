@@ -103,6 +103,7 @@ let my_partial_sigs = key_manager.get_my_partial_signatures(&aggregated_pubkey, 
 // Step 6: Exchange and save partial signatures
 let mut partial_sigs_map = HashMap::new();
 partial_sigs_map.insert(other_public_key, other_partial_signatures);
+partial_sigs_map.insert(my_pubkey, my_partial_sigs);
 key_manager.save_partial_signatures(&aggregated_pubkey, session_id, partial_sigs_map)?;
 
 // Step 7: Get final aggregated signature

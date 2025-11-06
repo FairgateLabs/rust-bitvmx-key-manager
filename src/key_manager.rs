@@ -1285,6 +1285,17 @@ impl KeyManager {
         Ok(self.musig2.get_my_pub_nonces(aggregated_pubkey, id)?)
     }
 
+    pub fn get_my_pub_nonce(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PubNonce, KeyManagerError> {
+        Ok(self
+            .musig2
+            .get_my_pub_nonce(aggregated_pubkey, id, message_id)?)
+    }
+
     pub fn save_partial_signatures_multi(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -1355,6 +1366,30 @@ impl KeyManager {
         }
 
         Ok(my_partial_signatures)
+    }
+
+    pub fn get_my_partial_signature(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PartialSignature, KeyManagerError> {
+        let (message, sec_nonce, tweak, aggregated_nonce) = self
+            .musig2
+            .get_data_for_partial_signature(aggregated_pubkey, id, message_id)?;
+
+        let sig = self
+            .sign_partial_message(
+                aggregated_pubkey,
+                self.musig2.my_public_key(aggregated_pubkey)?,
+                sec_nonce.clone(),
+                aggregated_nonce.clone(),
+                tweak,
+                message.clone(),
+            )
+            .map_err(|_| Musig2SignerError::InvalidSignature)?;
+
+        Ok(sig)
     }
 
     pub fn get_aggregated_signature(

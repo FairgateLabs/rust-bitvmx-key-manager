@@ -30,7 +30,7 @@ pub fn create_key_manager_from_config(
     let network =
         Network::from_str(&key_manager_config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
-    let key_manager = KeyManager::new(network, mnemonic, storage_config)?;
+    let key_manager = KeyManager::new(network, mnemonic, None, storage_config)?;
 
     Ok(key_manager)
 }

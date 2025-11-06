@@ -20,6 +20,7 @@ pub fn create_key_manager_example() -> KeyManager {
     let key_manager = KeyManager::new(
         network,
         None, // will generate a new random mnemonic internally
+        None, // sill use empty passphrase for mnemonic
         storage_config,
     )
     .unwrap();

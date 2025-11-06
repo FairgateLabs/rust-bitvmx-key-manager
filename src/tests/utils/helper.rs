@@ -20,8 +20,12 @@ pub fn create_key_manager(
 
     let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
-    let key_manager =
-        key_manager::KeyManager::new(bitcoin::Network::Regtest, Some(random_mnemonic), config)?;
+    let key_manager = key_manager::KeyManager::new(
+        bitcoin::Network::Regtest,
+        Some(random_mnemonic),
+        None,
+        config,
+    )?;
 
     Ok(key_manager)
 }

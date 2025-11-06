@@ -10,7 +10,7 @@ const REGTEST: Network = Network::Regtest;
 fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
     let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
 
-    let key_manager = KeyManager::new(REGTEST, Some(random_mnemonic), storage_config)?;
+    let key_manager = KeyManager::new(REGTEST, Some(random_mnemonic), None, storage_config)?;
 
     Ok(key_manager)
 }

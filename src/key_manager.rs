@@ -65,12 +65,14 @@ impl KeyManager {
     pub fn new(
         network: Network,
         mnemonic: Option<Mnemonic>,
+        mnemonic_passphrase: Option<String>,
         storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
-        let passphrase_for_mnemonic = ""; // using empty passphrase for now
-                                          // TODO add passphrase support for mnemonic
+        let passphrase_for_mnemonic = mnemonic_passphrase.unwrap_or("".to_string());
+
+        // Store or load mnemonic
 
         if keystore.load_mnemonic().is_err() {
             match mnemonic {
@@ -1033,6 +1035,8 @@ mod tests {
 
     const REGTEST: Network = Network::Regtest;
 
+    // TODO add tests, keymanager with and without mnemonic passphrase
+
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
@@ -1579,8 +1583,14 @@ mod tests {
         storage_config: StorageConfig,
     ) -> Result<KeyManager, KeyManagerError> {
         let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic_passphrase = generate_random_passphrase();
 
-        let key_manager = KeyManager::new(REGTEST, Some(random_mnemonic), storage_config)?;
+        let key_manager = KeyManager::new(
+            REGTEST,
+            Some(random_mnemonic),
+            Some(random_mnemonic_passphrase),
+            storage_config,
+        )?;
 
         Ok(key_manager)
     }
@@ -1591,7 +1601,7 @@ mod tests {
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
-        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), storage_config)?;
+        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, storage_config)?;
 
         Ok(key_manager)
     }
@@ -1636,6 +1646,25 @@ mod tests {
             .to_str()
             .expect("Failed to get path to temp file")
             .to_string()
+    }
+
+    /// Generates a random passphrase of exactly 20 characters using alphanumeric characters
+    /// This can be used as a BIP-39 mnemonic passphrase for additional security
+    fn generate_random_passphrase() -> String {
+        use bitcoin::key::rand::Rng;
+
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        const PASSPHRASE_LENGTH: usize = 20;
+
+        let mut rng = bitcoin::key::rand::thread_rng();
+        let passphrase: String = (0..PASSPHRASE_LENGTH)
+            .map(|_| {
+                let idx = rng.gen_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect();
+
+        passphrase
     }
 
     #[test]

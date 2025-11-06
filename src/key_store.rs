@@ -2,6 +2,7 @@ use crate::{errors::KeyManagerError, rsa::RSAKeyPair};
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
+use rsa::RsaPublicKey;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 
@@ -13,7 +14,6 @@ impl KeyStore {
     const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
-    const RSA_KEY: &str = "rsa"; // Key to use in the database for the RSA
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -105,21 +105,44 @@ impl KeyStore {
         Ok(seed)
     }
 
-    fn build_rsa_key(idx: usize) -> String {
-        format!("{}_{}", Self::RSA_KEY, idx)
-    }
+    // TODO remove
+    // fn build_rsa_key(idx: usize) -> String {
+    //     format!("{}_{}", Self::RSA_KEY, idx)
+    // }
 
-    pub fn store_rsa_key(&self, rsa_key: RSAKeyPair, index: usize) -> Result<(), KeyManagerError> {
+    // TODO remove
+    // pub fn store_rsa_key(&self, rsa_key: RSAKeyPair, index: usize) -> Result<(), KeyManagerError> {
+    //     let privk = rsa_key.export_private_pem()?;
+    //     self.store.set(Self::build_rsa_key(index), privk, None)?;
+    //     Ok(())
+    // }
+
+    pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {
+        let pubk = rsa_key.export_public_pem()?;
         let privk = rsa_key.export_private_pem()?;
-        self.store.set(Self::build_rsa_key(index), privk, None)?;
+        self.store.set(pubk, privk, None)?;
         Ok(())
     }
 
+    // TODO REMOVE
+    // /// Load an RSA key pair from the store with the given public key in PEM format.
+    // pub fn load_rsa_key(&self, index: usize) -> Result<Option<RSAKeyPair>, KeyManagerError> {
+    //     let privk = self
+    //         .store
+    //         .get::<String, String>(Self::build_rsa_key(index))?;
+    //     if let Some(privk) = privk {
+    //         let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
+    //         return Ok(Some(rsa_keypair));
+    //     }
+    //     Ok(None)
+    // }
+
     /// Load an RSA key pair from the store with the given public key in PEM format.
-    pub fn load_rsa_key(&self, index: usize) -> Result<Option<RSAKeyPair>, KeyManagerError> {
+    pub fn load_rsa_key(&self, rsa_pub_key: RsaPublicKey) -> Result<Option<RSAKeyPair>, KeyManagerError> {
+        let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
         let privk = self
             .store
-            .get::<String, String>(Self::build_rsa_key(index))?;
+            .get::<String, String>(pubk)?;
         if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
             return Ok(Some(rsa_keypair));

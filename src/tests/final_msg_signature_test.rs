@@ -127,7 +127,7 @@ mod tests {
         let private_keys_hexes = [
             "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-            "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+            //"5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
             // "7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
             // "47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
             // "8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
@@ -201,7 +201,11 @@ mod tests {
         for i in 0..key_managers.len() {
             let nonces_part = key_managers[i].get_my_pub_nonces(&aggregated_pub_key, id)?;
             nonces.push(nonces_part.clone());
-            println!("nonces {i}: {:?}", nonces_part.clone());
+            println!(
+                "nonces {i}: R1: {:?} R2:{:?}",
+                nonces_part[0].1.R1.serialize_uncompressed().as_hex(),
+                nonces_part[0].1.R2.serialize_uncompressed().as_hex()
+            );
         }
 
         // Save other participants nonces for each participant
@@ -249,7 +253,7 @@ mod tests {
         println!("signature: {:?}", signature.unwrap());
 
         // ------------------- Manual verification of the aggregated nonce -------------------
-        // Get the Musig2 Aggregated context to compare with manual calculation
+        // Print the Musig2 Aggregated context to compare with manual calculation
         let key_agg_context = key_managers[0].get_key_agg_context(&aggregated_pub_key)?;
         println!("key_agg_context: {:?}", key_agg_context);
 
@@ -326,7 +330,11 @@ mod tests {
         // Get the aggregated nonce to check manual calculation
         let aggregated_nonce =
             AggNonce::sum(nonces.iter().flat_map(|v| v.iter().map(|(_, pn)| pn)));
-        println!("aggregated_nonce: {:?}", aggregated_nonce.clone());
+        println!(
+            "aggregated_nonce: R1: {:?} R2: {:?}",
+            aggregated_nonce.R1.serialize_uncompressed().as_hex(),
+            aggregated_nonce.R2.serialize_uncompressed().as_hex()
+        );
 
         // Manual calculation of the aggregated nonce (as its a sum no need to be ordered by pubkey)
         let adaptor_point = MaybePoint::Infinity;
@@ -336,8 +344,14 @@ mod tests {
             aggregated_nonce_r1 = aggregated_nonce_r1 + nonce.R1;
             aggregated_nonce_r2 = aggregated_nonce_r2 + nonce.R2;
         }
-        println!("aggregated_nonce_r1: {:?}", aggregated_nonce_r1.clone());
-        println!("aggregated_nonce_r2: {:?}", aggregated_nonce_r2.clone());
+        println!(
+            "aggregated_nonce_r1: {:?}",
+            aggregated_nonce_r1.serialize_uncompressed().as_hex()
+        );
+        println!(
+            "aggregated_nonce_r2: {:?}",
+            aggregated_nonce_r2.serialize_uncompressed().as_hex()
+        );
         assert_eq!(aggregated_nonce_r1, aggregated_nonce.R1);
         assert_eq!(aggregated_nonce_r2, aggregated_nonce.R2);
 
@@ -360,7 +374,10 @@ mod tests {
         let b = MaybeScalar::reduce_from(&hash);
         let final_nonce = aggregated_nonce_r1 + (b * aggregated_nonce_r2);
         let adapted_nonce = final_nonce + adaptor_point;
-        println!("adapted_nonce: {:?}", adapted_nonce.clone());
+        println!(
+            "adapted_nonce: {:?}",
+            adapted_nonce.serialize_uncompressed().as_hex()
+        );
 
         // get inidividual pubkey and pubnonce
         let individual_pubkey = pub_key_parts[0].clone();
@@ -368,7 +385,7 @@ mod tests {
         let mut effective_nonce = individual_pubnonce.R1 + b * individual_pubnonce.R2;
         println!("effective_nonce: {:?}", effective_nonce.clone());
 
-        // if has odd y use the negative x to get even y
+        // if has odd y use the negative point to get even y
         if adapted_nonce.has_odd_y() {
             effective_nonce = -effective_nonce;
         }

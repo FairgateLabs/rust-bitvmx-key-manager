@@ -16,6 +16,8 @@ impl KeyStore {
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
 
+    // TODO store key type info?
+
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
     }

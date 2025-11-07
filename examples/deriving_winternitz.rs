@@ -10,7 +10,7 @@ fn main() {
 }
 
 fn key_gen_winternitz_example() {
-    let key_manager = create_key_manager_example();
+    let key_manager = create_key_manager_example("deriving_winternitz");
     // --- Deriving Winternitz OTS keys
 
     // Key size in bytes. A Winternitz key needs to be of the same size as the message that will be signed with it.

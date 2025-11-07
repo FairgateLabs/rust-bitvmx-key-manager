@@ -9,7 +9,7 @@ fn main() {
 }
 
 fn key_generation_example() {
-    let key_manager = create_key_manager_example();
+    let key_manager = create_key_manager_example("key_gen");
 
     // --- Key generation & Derivation
 

@@ -72,9 +72,6 @@ impl KeyManager {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
 
-        // TODO discus with Diego M. do we want to store the passphrase too or just use it temporarily?
-        // TODO add load_mnemonic_passphrase
-
         // Store or load mnemonic
         match keystore.load_mnemonic() {
             Ok(stored_mnemonic) => {

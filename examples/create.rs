@@ -6,13 +6,13 @@ use storage_backend::storage_config::StorageConfig;
 #[allow(dead_code)]
 fn main() {
     // see function code, main is just a wrapper to run the example
-    create_key_manager_example();
+    create_key_manager_example("create");
 }
 
-pub fn create_key_manager_example() -> KeyManager {
+pub fn create_key_manager_example(name: &str) -> KeyManager {
     // --- Creating a KeyManager
     let network = Network::Regtest;
-    let keystore_path = "./examples/storage/examples-keystore.db".to_string();
+    let keystore_path = format!("./examples/storage/examples-keystore_{}.db", name);
     let password = "secret password".to_string();
 
     let storage_config = StorageConfig::new(keystore_path, Some(password));

@@ -15,7 +15,7 @@ fn main() {
 }
 
 fn sign_verify_ecdsa_example() {
-    let key_manager = create_key_manager_example();
+    let key_manager = create_key_manager_example("sign_verify_ecdsa");
 
     // --- Signing and verifying a message using ECDSA
 

@@ -10,7 +10,7 @@ fn main() {
 
 pub fn import_key_to_key_manager_example() {
     let network = Network::Regtest;
-    let key_manager = create_key_manager_example();
+    let key_manager = create_key_manager_example("key_import");
 
     // --- Key importing
     use bitcoin::secp256k1::SecretKey;

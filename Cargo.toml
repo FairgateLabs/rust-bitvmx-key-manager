@@ -42,6 +42,7 @@ base64 = "0.22.0"
 rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "fix-partial-compare" }
 bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.2" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
+strum = { version = "0.26", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.6.0"

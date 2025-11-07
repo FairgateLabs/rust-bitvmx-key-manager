@@ -40,6 +40,12 @@ pub enum KeyManagerError {
     #[error("Invalid Mnemonic")]
     InvalidMnemonic,
 
+    #[error("Mnemonic mismatch: {0}")]
+    MnemonicMismatch(String),
+
+    #[error("Mnemonic passphrase mismatch: {0}")]
+    MnemonicPassphraseMismatch(String),
+
     #[error("Failed to open secure storage")]
     OpenError,
 
@@ -55,14 +61,20 @@ pub enum KeyManagerError {
     #[error("Failed to load Mnemonic from key store")]
     MnemonicNotFound,
 
+    #[error("Failed to load Mnemonic passphrase from key store")]
+    MnemonicPassphraseNotFound,
+
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
 
     #[error("Failed to load the BIP39 key derivation seed from key store")]
     KeyDerivationSeedNotFound,
 
-    #[error("Invalid BIP39 key derivation seed")]
-    InvalidKeyDerivationSeed,
+    #[error("Corrupted BIP39 key derivation seed")]
+    CorruptedKeyDerivationSeed,
+
+    #[error("Corrupted Winternitz seed")]
+    CorruptedWinternitzSeed,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,

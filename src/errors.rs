@@ -87,6 +87,12 @@ pub enum KeyManagerError {
 
     #[error("Rsa key not found")]
     RsaKeyNotFound,
+
+    #[error("Cannot use ECDSA with Taproot (P2TR) keys. Use Schnorr signature instead")]
+    EcdsaWithTaprootKey,
+
+    #[error("Cannot use Schnorr signature with non-Taproot keys. Use ECDSA signature instead")]
+    SchnorrWithNonTaprootKey,
 }
 
 #[derive(Error, Debug)]

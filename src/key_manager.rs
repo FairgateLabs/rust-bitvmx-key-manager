@@ -201,9 +201,13 @@ impl KeyManager {
     }
 
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
+        self.import_private_key_typed(private_key, None)
+    }
+
+    pub fn import_private_key_typed(&self, private_key: &str, key_type: Option<BitcoinKeyType>) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
-        self.keystore.store_keypair(private_key, public_key)?;
+        self.keystore.store_keypair(private_key, public_key, key_type)?;
 
         Ok(public_key)
     }
@@ -213,11 +217,20 @@ impl KeyManager {
         secret_key: &str,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
+        self.import_secret_key_typed(secret_key, network, None)
+    }
+
+    pub fn import_secret_key_typed(
+        &self,
+        secret_key: &str,
+        network: Network,
+        key_type: Option<BitcoinKeyType>
+    ) -> Result<PublicKey, KeyManagerError> {
         let secret_key = SecretKey::from_str(secret_key)?;
         let private_key = PrivateKey::new(secret_key, network);
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
-        self.keystore.store_keypair(private_key, public_key)?;
+        self.keystore.store_keypair(private_key, public_key, key_type)?;
         Ok(public_key)
     }
 
@@ -234,7 +247,8 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        self.keystore.store_keypair(private_key, public_key)?;
+        // TODO discuss with diego, should be p2tr always to use them with musig2 and schnorr
+        self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
 
@@ -251,7 +265,8 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        self.keystore.store_keypair(private_key, public_key)?;
+        // TODO discuss with diego, should be p2tr always to use them with musig2 and schnorr
+        self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
 
@@ -423,7 +438,7 @@ impl KeyManager {
             )
         };
 
-        self.keystore.store_keypair(private_key, public_key)?;
+        self.keystore.store_keypair(private_key, public_key, Some(key_type))?;
         Ok(public_key)
     }
 
@@ -596,14 +611,15 @@ impl KeyManager {
     /*********************************/
     /*********** Signing *************/
     /*********************************/
+
+    // TODO discuss with diegoM. key type checks for signing, we were using any key for ecdsa or schnorr
+
     pub fn sign_ecdsa_message(
         &self,
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
-        // TODO, check for error if key is p2tr, as ecdsa is not supported for taproot keys, must use schnorr
-        // TODO, chat with Diego, in the past we use any key for ecds and schnorr???
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -614,6 +630,13 @@ impl KeyManager {
             }
         };
 
+        // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
+        if let Some(key_type) = key_type {
+            if key_type == BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::EcdsaWithTaprootKey);
+            }
+        }
+
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
     }
 
@@ -622,7 +645,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::RecoverableSignature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -632,6 +655,13 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
+        if let Some(key_type) = key_type {
+            if key_type == BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::EcdsaWithTaprootKey);
+            }
+        }
 
         Ok(self.secp.sign_ecdsa_recoverable(message, &sk.inner))
     }
@@ -672,7 +702,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -682,6 +712,14 @@ impl KeyManager {
                 )));
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
@@ -695,7 +733,7 @@ impl KeyManager {
         public_key: &PublicKey,
         merkle_root: Option<TapNodeHash>,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -705,6 +743,14 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
@@ -723,7 +769,7 @@ impl KeyManager {
         public_key: &PublicKey,
         tweak: &Scalar,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -733,6 +779,14 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
         let tweaked_keypair = keypair.add_xonly_tweak(&self.secp, tweak)?;
@@ -797,7 +851,7 @@ impl KeyManager {
     /// The KeyType is not required here since the keystore is a simple pubkey -> privkey mapping.
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
-            Some(entry) => Ok(entry.0),
+            Some((private_key, _, _)) => Ok(private_key),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "export_secret compressed {} public key: {:?}",
                 pubkey.to_string(),
@@ -852,13 +906,15 @@ impl KeyManager {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey).unwrap();
 
         match self.keystore.load_keypair(&my_pub_key)? {
-            Some(entry) => Ok(entry),
+            Some((private_key, public_key, _)) => Ok((private_key, public_key)),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "get_key_pair_for_too_insecure compressed {} public key: {:?}",
                 my_pub_key.to_string(),
                 my_pub_key
             ))),
         }
+
+        // TODO discuss with Diego M. check key types p2tr for musig2? backwards compatible?
     }
 
     pub fn sign_partial_message(
@@ -872,7 +928,7 @@ impl KeyManager {
     ) -> Result<PartialSignature, KeyManagerError> {
         let key_aggregation_context = self.musig2.get_key_agg_context(aggregated_pubkey, tweak)?;
 
-        let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
+        let (private_key, _, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -901,6 +957,8 @@ impl KeyManager {
                 Err(KeyManagerError::FailedToSignMessage)
             }
         }
+
+        // TODO discuss with Diego M. check key types p2tr for musig2? backwards compatible?
     }
 
     pub fn generate_nonce_seed(
@@ -908,7 +966,7 @@ impl KeyManager {
         index: u32,
         public_key: PublicKey,
     ) -> Result<[u8; 32], KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(&public_key)? {
+        let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -1374,9 +1432,9 @@ mod tests {
             let private_key = PrivateKey::new(secret_key, Network::Regtest);
             let public_key = PublicKey::from_private_key(&secp, &private_key);
 
-            keystore.store_keypair(private_key, public_key)?;
+            keystore.store_keypair(private_key, public_key, None)?;
 
-            let (restored_sk, restored_pk) = match keystore.load_keypair(&public_key)? {
+            let (restored_sk, restored_pk, _) = match keystore.load_keypair(&public_key)? {
                 Some(entry) => entry,
                 None => {
                     panic!("Failed to find key");
@@ -1419,9 +1477,9 @@ mod tests {
         let private_key = PrivateKey::new(secret_key, Network::Regtest);
         let public_key = PublicKey::from_private_key(&secp, &private_key);
 
-        keystore.store_keypair(private_key, public_key)?;
+        keystore.store_keypair(private_key, public_key, None)?;
 
-        let (_, recovered_public_key) = match keystore.load_keypair(&public_key)? {
+        let (_, recovered_public_key, _) = match keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => panic!("Failed to find key"),
         };
@@ -1471,6 +1529,56 @@ mod tests {
         )?;
         let result = key_manager.sign_ecdsa_message(&random_message(), &fake_public_key);
         assert!(matches!(result, Err(KeyManagerError::KeyPairNotFound(_))));
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_key_type_signature_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test P2TR key validation
+        let p2tr_public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+
+        // Attempt to sign with ECDSA using P2TR key - should fail
+        let result = key_manager.sign_ecdsa_message(&message, &p2tr_public_key);
+        assert!(matches!(result, Err(KeyManagerError::EcdsaWithTaprootKey)));
+
+        // Attempt to sign with ECDSA recoverable using P2TR key - should also fail
+        let result = key_manager.sign_ecdsa_recoverable_message(&message, &p2tr_public_key);
+        assert!(matches!(result, Err(KeyManagerError::EcdsaWithTaprootKey)));
+
+        // Schnorr signing should work fine with P2TR keys
+        let schnorr_result = key_manager.sign_schnorr_message(&message, &p2tr_public_key);
+        assert!(schnorr_result.is_ok());
+
+        // Test non-Taproot key validation
+        let p2wpkh_public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+
+        // ECDSA should work fine with non-Taproot keys
+        let ecdsa_result = key_manager.sign_ecdsa_message(&message, &p2wpkh_public_key);
+        assert!(ecdsa_result.is_ok());
+
+        // Schnorr signing with non-Taproot keys should fail
+        let result = key_manager.sign_schnorr_message(&message, &p2wpkh_public_key);
+        assert!(matches!(result, Err(KeyManagerError::SchnorrWithNonTaprootKey)));
+
+        // Test imported key (key_type = None) - should allow both ECDSA and Schnorr
+        let imported_key = key_manager.import_private_key("L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ")?;
+
+        // Both ECDSA and Schnorr should work with imported keys (no specific type)
+        let ecdsa_result = key_manager.sign_ecdsa_message(&message, &imported_key);
+        assert!(ecdsa_result.is_ok());
+
+        let schnorr_result = key_manager.sign_schnorr_message(&message, &imported_key);
+        assert!(schnorr_result.is_ok());
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -1646,6 +1754,103 @@ mod tests {
         }
         drop(key_manager);
         cleanup_storage(&keystore_path);
+    }
+
+    #[test]
+    fn test_imported_key_type_storage_and_retrieval() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        // Test importing keys with each possible key type
+        let test_cases = vec![
+            (
+                "L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ",
+                Some(BitcoinKeyType::P2pkh),
+                "P2PKH key import"
+            ),
+            (
+                "KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617",
+                Some(BitcoinKeyType::P2shP2wpkh),
+                "P2SH-P2WPKH key import"
+            ),
+            (
+                "L5oLkpV3aqBjhki6LmvChTCV6odsp4SXM6FfU2Gppt5kFLaHLuZ9",
+                Some(BitcoinKeyType::P2wpkh),
+                "P2WPKH key import"
+            ),
+            (
+                "KyBsPXxTuVD82av65KZkrGrWi5qLMah5SdNq6uftawDbgKa2wv6S",
+                Some(BitcoinKeyType::P2tr),
+                "P2TR key import"
+            ),
+            (
+                "L3Hq7a8FEQwJkW1M2GNKDW28546Vp5miewcCzSqUD9kCAXrJdS3g",
+                None,
+                "Untyped key import"
+            ),
+        ];
+
+        for (private_key_wif, expected_key_type, description) in test_cases {
+            // Import the key with specific type
+            let public_key = key_manager.import_private_key_typed(private_key_wif, expected_key_type)?;
+
+            // Retrieve the key and verify the type is preserved
+            let (_, _, stored_key_type) = match key_manager.keystore.load_keypair(&public_key)? {
+                Some(entry) => entry,
+                None => panic!("Failed to retrieve imported key for {}", description),
+            };
+
+            // Verify the key type matches what was set during import
+            assert_eq!(stored_key_type, expected_key_type,
+                      "Key type mismatch for {}: expected {:?}, got {:?}",
+                      description, expected_key_type, stored_key_type);
+
+            println!("✓ {}: Key type correctly stored as {:?}", description, stored_key_type);
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_derived_key_type_storage_and_retrieval() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
+
+        // Test deriving keys for each possible key type
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+            BitcoinKeyType::P2tr,
+        ];
+
+        for (index, expected_key_type) in key_types.iter().enumerate() {
+            // Derive a key of the specific type
+            let public_key = key_manager.derive_keypair(*expected_key_type, index as u32)?;
+
+            // Retrieve the key and verify the type is preserved
+            let (_, _, stored_key_type) = match key_manager.keystore.load_keypair(&public_key)? {
+                Some(entry) => entry,
+                None => panic!("Failed to retrieve derived key for {:?}", expected_key_type),
+            };
+
+            // Verify the key type matches what was used during derivation
+            let expected_option = Some(*expected_key_type);
+            assert_eq!(stored_key_type, expected_option,
+                      "Key type mismatch for derived {:?}: expected {:?}, got {:?}",
+                      expected_key_type, expected_option, stored_key_type);
+
+            println!("✓ Derived {:?} key: Key type correctly stored as {:?}",
+                     expected_key_type, stored_key_type);
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
     }
 
     fn test_random_key_manager(

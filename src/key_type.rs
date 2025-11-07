@@ -1,7 +1,8 @@
 use clap::ValueEnum;
+use strum::EnumString;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, EnumString)]
+#[strum(ascii_case_insensitive)]
 pub enum BitcoinKeyType {
     P2pkh,
     P2shP2wpkh,

@@ -1,4 +1,4 @@
-use crate::{errors::KeyManagerError, rsa::RSAKeyPair};
+use crate::{errors::KeyManagerError, key_type::BitcoinKeyType, rsa::RSAKeyPair};
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
@@ -15,6 +15,7 @@ impl KeyStore {
     const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
+    const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
 
     // TODO store key type info?
 
@@ -30,9 +31,17 @@ impl KeyStore {
         &self,
         private_key: PrivateKey,
         public_key: PublicKey,
+        key_type: Option<BitcoinKeyType>,
     ) -> Result<(), KeyManagerError> {
         let key = public_key.to_string();
-        self.store.set(key, private_key, None)?;
+
+        let key_type_str = match key_type {
+            Some(kt) => format!("{:?}", kt),
+            None => Self::UNKNOWN_TYPE.to_string(),
+        };
+
+        let typed_private_key = format!("{}:{}", key_type_str, private_key.to_string());
+        self.store.set(key, typed_private_key, None)?;
 
         Ok(())
     }
@@ -40,13 +49,28 @@ impl KeyStore {
     pub fn load_keypair(
         &self,
         public_key: &PublicKey,
-    ) -> Result<Option<(PrivateKey, PublicKey)>, KeyManagerError> {
+    ) -> Result<Option<(PrivateKey, PublicKey, Option<BitcoinKeyType>)>, KeyManagerError> {
         let key = public_key.to_string();
         let data = self.store.get::<String, String>(key)?;
 
-        if let Some(private_key) = data {
-            let private_key = PrivateKey::from_str(&private_key)?;
-            return Ok(Some((private_key, *public_key)));
+        if let Some(private_key_str) = data {
+            if let Some(colon_pos) = private_key_str.find(':') {
+                let (key_type_str, private_key_part) = private_key_str.split_at(colon_pos);
+                let private_key_part = &private_key_part[1..]; // Remove the ':'
+
+                let key_type = if key_type_str == Self::UNKNOWN_TYPE {
+                    None
+                } else {
+                    key_type_str.parse::<BitcoinKeyType>().ok()
+                };
+
+                let private_key = PrivateKey::from_str(private_key_part)?;
+                return Ok(Some((private_key, *public_key, key_type)));
+            } else {
+                // Legacy case: no ":" found, assume old format without key type information
+                let private_key = PrivateKey::from_str(&private_key_str)?;
+                return Ok(Some((private_key, *public_key, None)));
+            }
         }
 
         Ok(None)

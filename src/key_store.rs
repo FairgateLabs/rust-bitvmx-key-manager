@@ -12,6 +12,7 @@ pub struct KeyStore {
 
 impl KeyStore {
     const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
+    const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
 
@@ -64,6 +65,19 @@ impl KeyStore {
         Ok(m)
     }
 
+    pub fn store_mnemonic_passphrase(&self, passphrase: &str) -> Result<(), KeyManagerError> {
+        self.store.set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase.to_string(), None)?;
+        Ok(())
+    }
+
+    pub fn load_mnemonic_passphrase(&self) -> Result<String, KeyManagerError> {
+        let passphrase: String = self
+            .store
+            .get(Self::MNEMONIC_PASSPHRASE_KEY)?
+            .ok_or(KeyManagerError::MnemonicPassphraseNotFound)?;
+        Ok(passphrase)
+    }
+
     pub fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyManagerError> {
         self.store.set(Self::WINTERNITZ_KEY, seed, None)?;
         Ok(())
@@ -94,10 +108,10 @@ impl KeyStore {
 
         let decoded = general_purpose::STANDARD
             .decode(&encoded)
-            .map_err(|_| KeyManagerError::InvalidKeyDerivationSeed)?;
+            .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?;
 
         if decoded.len() != 64 {
-            return Err(KeyManagerError::InvalidKeyDerivationSeed);
+            return Err(KeyManagerError::CorruptedKeyDerivationSeed);
         }
 
         let mut seed = [0u8; 64];

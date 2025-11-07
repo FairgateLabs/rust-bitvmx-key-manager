@@ -71,52 +71,122 @@ impl KeyManager {
     ) -> Result<Self, KeyManagerError> {
         let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
-        let passphrase_for_mnemonic = mnemonic_passphrase.unwrap_or("".to_string());
 
         // TODO discus with Diego M. do we want to store the passphrase too or just use it temporarily?
+        // TODO add load_mnemonic_passphrase
 
         // Store or load mnemonic
-        if keystore.load_mnemonic().is_err() {
-            match mnemonic {
-                Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
-                None => {
-                    let mut entropy = [0u8; 32]; // 256 bits for 24 words
-                    secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
-                    let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
-                    keystore.store_mnemonic(&random_mnemonic)?;
-                    tracing::warn!("Random mnemonic generated, make sure to back it up securely!");
+        match keystore.load_mnemonic() {
+            Ok(stored_mnemonic) => {
+                // Mnemonic found in storage
+                if let Some(provided_mnemonic) = &mnemonic {
+                    // Both stored and provided mnemonics exist - they must match
+                    if stored_mnemonic != *provided_mnemonic {
+                        return Err(KeyManagerError::MnemonicMismatch(
+                            "Stored mnemonic does not match the provided mnemonic".to_string()
+                        ));
+                    }
+                }
+                // If no mnemonic was provided or they match, continue with stored mnemonic
+            }
+            Err(_) => {
+                // No mnemonic in storage, store the provided one or generate a new one
+                match mnemonic {
+                    Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
+                    None => {
+                        let mut entropy = [0u8; 32]; // 256 bits for 24 words
+                        secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
+                        let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+                        keystore.store_mnemonic(&random_mnemonic)?;
+                        tracing::warn!("Random mnemonic generated, make sure to back it up securely!");
 
-                    println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
+                        println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
+                    }
                 }
             }
         }
 
-        // TODO inform team Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them so we don't have to recalculate them each time, similar to storing non-imported (derived) keys
+        // Store or load mnemonic passphrase
+        let mnemonic_passphrase = match keystore.load_mnemonic_passphrase() {
+            Ok(stored_passphrase) => {
+                // Passphrase found in storage
+                if let Some(provided_passphrase) = &mnemonic_passphrase {
+                    // Both stored and provided passphrases exist - they must match
+                    if stored_passphrase != *provided_passphrase {
+                        return Err(KeyManagerError::MnemonicPassphraseMismatch(
+                            "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
+                        ));
+                    }
+                }
+                // If no passphrase was provided or they match, continue with stored passphrase
+                stored_passphrase
+            }
+            Err(_) => {
+                // No passphrase in storage, store the provided one or use empty string as default
+                let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
+                keystore.store_mnemonic_passphrase(&passphrase)?;
+                passphrase
+            }
+        };
 
-        if keystore.load_key_derivation_seed().is_err() {
-            let key_derivation_seed = keystore.load_mnemonic()?.to_seed(passphrase_for_mnemonic);
-            println!(
-                "stored Key derivation seed (64 bytes): {:?}",
-                key_derivation_seed
-            ); // TODO remove after debugging
-            keystore.store_key_derivation_seed(key_derivation_seed)?;
+        // Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them
+        // so we don't have to recalculate them each time for performance reasons, similar to storing non-imported (derived) keys.
+        // Since these values can be regenerated from the mnemonic and passphrase, we validate the stored seed matches
+        // the expected value to detect potential corruption.
+
+        let expected_key_derivation_seed = keystore.load_mnemonic()?.to_seed(&mnemonic_passphrase);
+
+        match keystore.load_key_derivation_seed() {
+            Ok(stored_seed) => {
+                // Validate that the stored seed matches what would be generated from mnemonic + passphrase
+                if stored_seed != expected_key_derivation_seed {
+                    return Err(KeyManagerError::CorruptedKeyDerivationSeed);
+                }
+                println!(
+                    "validated Key derivation seed (64 bytes): {:?}",
+                    stored_seed
+                ); // TODO remove after debugging
+            }
+            Err(_) => {
+                // No seed stored, generate and store it
+                println!(
+                    "storing Key derivation seed (64 bytes): {:?}",
+                    expected_key_derivation_seed
+                ); // TODO remove after debugging
+                keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
+            }
         }
-
-        println!(
-            "loaded Key derivation seed (64 bytes): {:?}",
-            keystore.load_key_derivation_seed().unwrap()
-        ); // TODO remove after debugging
 
         let secp = secp256k1::Secp256k1::new();
 
-        if keystore.load_winternitz_seed().is_err() {
-            let winternitz_seed = Self::derive_winternitz_master_seed(
-                secp.clone(),
-                &keystore.load_key_derivation_seed()?,
-                network,
-                Self::ACCOUNT_DERIVATION_INDEX,
-            )?;
-            keystore.store_winternitz_seed(winternitz_seed)?;
+        // Validate or generate Winternitz seed - similar to key derivation seed validation
+        // The Winternitz seed is derived from the key derivation seed, so we validate it to detect corruption.
+        let expected_winternitz_seed = Self::derive_winternitz_master_seed(
+            secp.clone(),
+            &keystore.load_key_derivation_seed()?,
+            network,
+            Self::ACCOUNT_DERIVATION_INDEX,
+        )?;
+
+        match keystore.load_winternitz_seed() {
+            Ok(stored_winternitz_seed) => {
+                // Validate that the stored Winternitz seed matches what would be derived from key derivation seed
+                if stored_winternitz_seed != expected_winternitz_seed {
+                    return Err(KeyManagerError::CorruptedWinternitzSeed);
+                }
+                println!(
+                    "validated Winternitz seed (32 bytes): {:?}",
+                    stored_winternitz_seed
+                ); // TODO remove after debugging
+            }
+            Err(_) => {
+                // No Winternitz seed stored, generate and store it
+                println!(
+                    "storing Winternitz seed (32 bytes): {:?}",
+                    expected_winternitz_seed
+                ); // TODO remove after debugging
+                keystore.store_winternitz_seed(expected_winternitz_seed)?;
+            }
         }
 
         let musig2 = MuSig2Signer::new(keystore.store_clone());
@@ -1600,6 +1670,7 @@ mod tests {
     fn test_deterministic_key_manager(
         storage_config: StorageConfig,
     ) -> Result<KeyManager, KeyManagerError> {
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
@@ -1749,6 +1820,208 @@ mod tests {
         assert_ne!(pubkey_from_keypair_1, pubkey_from_keypair_2);
 
         drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_constructor() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone())?;
+
+        drop(key_manager1);
+
+        // --- Create the 2nd KeyManager with different Mnemonic but using the same keystore_storage_config
+        // This should fail with MnemonicMismatch error
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone());
+
+        // Expect MnemonicMismatch error
+        assert!(matches!(
+            key_manager2,
+            Err(KeyManagerError::MnemonicMismatch(_))
+        ));
+
+
+        // --- Create the 3rd KeyManager with the same stored mnemonic
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config)?;
+
+        drop(key_manager3);
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mnemonic_passphrase_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic and passphrase
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let passphrase1 = "test_passphrase_123".to_string();
+
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(passphrase1.clone()),
+            keystore_storage_config.clone())?;
+
+        drop(key_manager1);
+
+        // --- Test 1: Create KeyManager with same mnemonic and same passphrase (should succeed)
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(passphrase1.clone()),
+            keystore_storage_config.clone())?;
+
+        drop(key_manager2);
+
+        // --- Test 2: Create KeyManager with same mnemonic but different passphrase (should fail)
+        let different_passphrase = "different_passphrase_456".to_string();
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(different_passphrase),
+            keystore_storage_config.clone());
+
+        // Expect MnemonicPassphraseMismatch error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::MnemonicPassphraseMismatch(_))
+        ));
+
+        // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config)?;
+
+        drop(key_manager3);
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_key_derivation_seed_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seed
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone())?;
+
+        drop(key_manager1);
+
+        // --- Manually corrupt the stored key derivation seed to test validation
+        {
+            use std::rc::Rc;
+            let key_store = Rc::new(Storage::new(&keystore_storage_config)?);
+            let keystore = KeyStore::new(key_store);
+
+            // Store a corrupted seed (different from what the mnemonic would generate)
+            let corrupted_seed = [0u8; 64]; // All zeros - definitely wrong
+            keystore.store_key_derivation_seed(corrupted_seed)?;
+        }
+
+        // --- Try to create KeyManager with the same mnemonic (should fail due to seed validation)
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone());
+
+        // Expect CorruptedKeyDerivationSeed error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::CorruptedKeyDerivationSeed)
+        ));
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_seed_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone())?;
+
+        drop(key_manager1);
+
+        // --- Manually corrupt the stored Winternitz seed to test validation
+        {
+            use std::rc::Rc;
+            let key_store = Rc::new(Storage::new(&keystore_storage_config)?);
+            let keystore = KeyStore::new(key_store);
+
+            // Store a corrupted Winternitz seed (different from what would be derived)
+            let corrupted_winternitz_seed = [0u8; 32]; // All zeros - definitely wrong
+            keystore.store_winternitz_seed(corrupted_winternitz_seed)?;
+        }
+
+        // --- Try to create KeyManager with the same mnemonic (should fail due to Winternitz seed validation)
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone());
+
+        // Expect CorruptedWinternitzSeed error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::CorruptedWinternitzSeed)
+        ));
+
         cleanup_storage(&keystore_path);
         Ok(())
     }

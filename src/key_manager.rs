@@ -1162,8 +1162,6 @@ mod tests {
 
     const REGTEST: Network = Network::Regtest;
 
-    // TODO add tests, keymanager with and without mnemonic passphrase
-
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
@@ -1592,8 +1590,6 @@ mod tests {
 
         let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        // TODO add KeyType::P2tr and expect error at sign_ecdsa_message?
-
         let key_types = vec![
             BitcoinKeyType::P2pkh,
             BitcoinKeyType::P2shP2wpkh,
@@ -1670,8 +1666,6 @@ mod tests {
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
         let signature = key_manager.sign_schnorr_message(&message, &pk1).unwrap();
-
-        // TODO add KeyType and expect error at sign_schnorr_message if the key is not P2tr?
 
         assert!(!signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
 

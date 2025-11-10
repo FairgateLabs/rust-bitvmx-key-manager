@@ -33,7 +33,7 @@ use crate::{
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
-const DEFAULT_RSA_BITS: usize = 2048; // RSA key size in bits
+const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -61,6 +61,7 @@ impl KeyManager {
     const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
     const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
     const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
+    const STARTING_DERIVATION_INDEX: u32 = 0; // Starting index for derivation
 
     // TODO discus with Diego M. the idea behind the store/load of this constructor
     pub fn new(
@@ -200,6 +201,9 @@ impl KeyManager {
         &self.musig2
     }
 
+    /*********************************/
+    /******     Imports     **********/
+    /*********************************/
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
         self.import_private_key_typed(private_key, None)
     }
@@ -414,6 +418,14 @@ impl KeyManager {
         Ok(account_xpub)
     }
 
+    /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// **⚠️ Usage of this function is discouraged in favor of [`next_keypair`](Self::next_keypair).**
+    ///
+    /// The `next_keypair` function provides better index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
     pub fn derive_keypair(
         &self,
         key_type: BitcoinKeyType,
@@ -440,6 +452,40 @@ impl KeyManager {
 
         self.keystore.store_keypair(private_key, public_key, Some(key_type))?;
         Ok(public_key)
+    }
+
+    /// Generates the next Bitcoin keypair in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for keypair generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_keypair`](Self::derive_keypair).
+    ///
+    /// The function automatically tracks and increments the derivation index for each key type, ensuring that:
+    /// - Each call generates a unique keypair
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    ///
+    pub fn next_keypair(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<PublicKey, KeyManagerError> {
+        let index = self.next_keypair_index(key_type)?;
+        let pubkey = self.derive_keypair(key_type, index)?;
+        // if derivation was successful, store the next index
+        self.keystore.store_next_keypair_index(key_type, index+1)?;
+        println!("next_keypair: key_type: {:?}, index: {}", key_type, index); // TODO remove after debugging
+        println!("stored next index: {}", index+1); // TODO remove after debugging
+        Ok(pubkey)
+    }
+
+    fn next_keypair_index(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<u32, KeyManagerError> {
+
+        match self.keystore.load_next_keypair_index(key_type) {
+            Ok(stored_index) => Ok(stored_index),
+            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+        }
     }
 
     // This method changes the parity of a keypair to be even, this is needed for Taproot.
@@ -966,6 +1012,7 @@ impl KeyManager {
         index: u32,
         public_key: PublicKey,
     ) -> Result<[u8; 32], KeyManagerError> {
+        // TODO * leaking secret key material?, consider using HKDF or similar KDF with a salt instead
         let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
@@ -1172,7 +1219,7 @@ mod tests {
 
         let pub_key2: PublicKey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
 
-        // TODO Discuss with Diego M. what is the generate_nonce_seed used for in bitvmx, is it leaking the priv key bytes?
+        // TODO * Discuss with Diego M. what is the generate_nonce_seed used for in bitvmx, is it leaking the priv key bytes?
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(

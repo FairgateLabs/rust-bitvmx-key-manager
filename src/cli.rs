@@ -33,6 +33,20 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
+
+    NextKeypair {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
+    },
+
+    DeriveKeypair {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
+    },
+
     NewAccountXpub {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: BitcoinKeyType,
@@ -47,14 +61,6 @@ enum Commands {
 
         #[arg(value_name = "account_xpub", short = 'a', long = "account_xpub")]
         account_xpub: String,
-    },
-
-    DeriveKeypair {
-        #[arg(value_name = "key_type", short = 't', long = "key_type")]
-        key_type: BitcoinKeyType,
-
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
     },
 
     NewWinternitzKey {
@@ -213,6 +219,10 @@ impl Cli {
                 key_index,
             } => {
                 self.derive_keypair(*key_type, *key_index)?;
+            }
+
+            Commands::NextKeypair { key_type } => {
+                self.next_keypair(*key_type)?;
             }
 
             Commands::NewWinternitzKey {
@@ -438,6 +448,12 @@ impl Cli {
 
         info!("New Keypair created. Public key is: {}", pk.to_string());
 
+        Ok(())
+    }
+
+    fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<()> {
+        let pk = self.key_manager()?.next_keypair(key_type)?;
+        info!("Next Keypair created. Public key is: {}", pk.to_string());
         Ok(())
     }
 

@@ -16,8 +16,9 @@ impl KeyStore {
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
+    const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
 
-    // TODO store key type info?
+    // TODO inform team: storing key type info
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -75,6 +76,25 @@ impl KeyStore {
 
         Ok(None)
     }
+
+    pub fn store_next_keypair_index(&self, key_type: BitcoinKeyType, index: u32) -> Result<(), KeyManagerError> {
+        let key_type_str = format!("{:?}", key_type);
+        let typed_next_keypair_index_key = format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
+        // this will store the next keypair index for the given key type eg: p2tr:next_keypair_index
+        self.store.set(typed_next_keypair_index_key, index, None)?;
+        Ok(())
+    }
+
+    pub fn load_next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
+        let key_type_str = format!("{:?}", key_type);
+        let typed_next_keypair_index_key = format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
+        let next_index: u32 = self
+            .store
+            .get(typed_next_keypair_index_key)?
+            .ok_or(KeyManagerError::NextKeypairIndexNotFound)?;
+        Ok(next_index)
+    }
+
 
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
         let phrase = mnemonic.to_string(); // normalized space-separated phrase

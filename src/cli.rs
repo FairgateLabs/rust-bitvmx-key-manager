@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::WinternitzSignature,
+    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::{WinternitzSignature},
 };
 use bitcoin::{
     bip32::Xpub,
@@ -69,9 +69,6 @@ enum Commands {
 
         #[arg(value_name = "message_length", short = 'm', long = "message_length")]
         message_length: usize,
-
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
     },
 
     NewRsaKey,
@@ -228,9 +225,8 @@ impl Cli {
             Commands::NewWinternitzKey {
                 winternitz_type,
                 message_length,
-                key_index,
             } => {
-                self.generate_winternitz_key(winternitz_type, *message_length, *key_index)?;
+                self.generate_winternitz_key(winternitz_type, *message_length)?;
             }
 
             Commands::NewRsaKey => {
@@ -338,15 +334,15 @@ impl Cli {
         &self,
         winternitz_type: &str,
         msg_len_bytes: usize,
-        index: u32,
     ) -> Result<()> {
         let key_manager = self.key_manager()?;
 
         let public_key =
-            key_manager.derive_winternitz(msg_len_bytes, winternitz_type.parse()?, index)?;
+            key_manager.next_winternitz(msg_len_bytes, winternitz_type.parse()?)?;
 
         info!(
-            "New key pair created of Winternitz Key. Public key is: {}",
+            "New key pair created of Winternitz Key. Index is: {} Public key is: {}",
+            public_key.derivation_index()?,
             hex::encode(public_key.to_bytes())
         );
 

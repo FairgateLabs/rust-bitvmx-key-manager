@@ -16,7 +16,7 @@ fn key_gen_winternitz_example() {
     // Key size in bytes. A Winternitz key needs to be of the same size as the message that will be signed with it.
     let key_size = 32;
     let winternitz_key = key_manager
-        .derive_winternitz(key_size, WinternitzType::SHA256, 0)
+        .next_winternitz(key_size, WinternitzType::SHA256)
         .unwrap();
     println!(
         "Winternitz public key: {:?}",

@@ -64,6 +64,9 @@ pub enum KeyManagerError {
     #[error("Failed to load Next keypair index from key store")]
     NextKeypairIndexNotFound,
 
+    #[error("Failed to load Next Winternitz index from key store")]
+    NextWinternitzIndexNotFound,
+
     #[error("Failed to load Mnemonic passphrase from key store")]
     MnemonicPassphraseNotFound,
 

@@ -26,6 +26,8 @@ A random mnemonic will be auto generated and stored, is no one is provided by co
 ### [Key Generation & Derivation](examples/key_gen.rs)
 *Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.*
 
+*`next_keypair` is always the preferred way to get a new keypair, as it manages the derivation index automatically.*
+
 ### [Signing and verifying a message using ECDSA](examples/sign_verify_ecdsa.rs)
 
 ### [Signing and verifying a message using Schnorr & Taproot Signatures](examples/sign_verify_schnorr_taproot.rs)

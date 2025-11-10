@@ -46,8 +46,20 @@ A random mnemonic will be auto generated and stored, is no one is provided by co
 3. Run tests: `cargo test -- --test-threads=1`
 
 ## Examples
-- **[keymanager_usage:](examples/keymanager_usage.rs)**
-    1. run with `cargo run --example keymanager_usage`
+- **[create:](examples/create.rs)**
+run with `cargo run --example create`
+- **[key_gen:](examples/key_gen.rs)**
+run with `cargo run --example key_gen`
+- **[key_import:](examples/key_import.rs)**
+run with `cargo run --example key_import`
+- **[deriving_winternitz:](examples/deriving_winternitz.rs)**
+run with `cargo run --example deriving_winternitz`
+- **[sign_verify_ecdsa:](examples/sign_verify_ecdsa.rs)**
+run with `cargo run --example sign_verify_ecdsa`
+- **[sign_verify_schnorr_taproot:](examples/sign_verify_schnorr_taproot.rs)**
+run with `cargo run --example sign_verify_schnorr_taproot`
+- **[sign_verify_winternitz:](examples/sign_verify_winternitz.rs)**
+run with `cargo run --example sign_verify_winternitz`
 
 
 ## Contributing

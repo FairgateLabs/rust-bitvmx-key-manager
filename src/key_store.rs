@@ -17,6 +17,7 @@ impl KeyStore {
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
+    const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
 
     // TODO inform team: storing key type info
 
@@ -92,6 +93,21 @@ impl KeyStore {
             .store
             .get(typed_next_keypair_index_key)?
             .ok_or(KeyManagerError::NextKeypairIndexNotFound)?;
+        Ok(next_index)
+    }
+
+    pub fn store_next_winternitz_index(&self, index: u32) -> Result<(), KeyManagerError> {
+        // best practice: never reuse the index, as it can compromise security, even if the hash type changes
+        // this will store the next winternitz index
+        self.store.set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, None)?;
+        Ok(())
+    }
+
+    pub fn load_next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
+        let next_index: u32 = self
+            .store
+            .get(Self::NEXT_WINTERNITZ_INDEX_KEY)?
+            .ok_or(KeyManagerError::NextWinternitzIndexNotFound)?;
         Ok(next_index)
     }
 

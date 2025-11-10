@@ -13,8 +13,7 @@ use itertools::izip;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
-// TODO discuss with Diego M.: if we want a better management of indexes with a counter (manage for winternitz, both options for the rest)
-// TODO discuss with Diego M.: if we want RSA derivation from mnemonic too (yes but audit)
+// TODO discuss with Diego M.: if we want RSA derivation from mnemonic too (yes but audit) and managed indexes
 
 use crate::{
     errors::KeyManagerError,
@@ -27,7 +26,7 @@ use crate::{
     },
     rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
-        self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
+        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
     },
 };
 
@@ -420,7 +419,7 @@ impl KeyManager {
 
     /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
     ///
-    /// **⚠️ Usage of this function is discouraged in favor of [`next_keypair`](Self::next_keypair).**
+    /// ** Usage of this function is discouraged in favor of [`next_keypair`](Self::next_keypair).**
     ///
     /// The `next_keypair` function provides better index management by automatically tracking
     /// the next available derivation index, preventing accidental key reuse and simplifying
@@ -577,6 +576,15 @@ impl KeyManager {
         }
     }
 
+    /// Derives a Winternitz OT key at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_winternitz`](Self::next_winternitz) instead. **
+    ///
+    /// The `next_winternitz` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    // TODO make private in the future
     pub fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -600,6 +608,47 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    /// Generates the next Winternitz OT key in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Winternitz key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_winternitz`](Self::derive_winternitz).
+    ///
+    /// The function automatically tracks and increments the derivation index for each Winternitz type and message size combination, ensuring that:
+    /// - Each call generates a unique Winternitz key
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    /// - Different message sizes for the same Winternitz type have separate index counters
+    ///
+    pub fn next_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+    ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
+        let index = self.next_winternitz_index()?;
+        let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
+        // if derivation was successful, store the next index
+        self.keystore.store_next_winternitz_index(index + 1)?;
+        println!("next_winternitz: key_type: {:?}, message_size: {}, index: {}", key_type, message_size_in_bytes, index); // TODO remove after debugging
+        println!("stored next index: {}", index + 1); // TODO remove after debugging
+        Ok(pubkey)
+    }
+
+    fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
+        match self.keystore.load_next_winternitz_index() {
+            Ok(stored_index) => Ok(stored_index),
+            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+        }
+    }
+
+    /// Derives n Winternitz OT key starting at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_multiple_winternitz`](Self::next_multiple_winternitz) instead. **
+    ///
+    /// The `next_multiple_winternitz` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    // TODO make private in the future
     pub fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -629,6 +678,32 @@ impl KeyManager {
         Ok(public_keys)
     }
 
+    /// Generates the next n Winternitz OT keys in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Winternitz key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_multiple_winternitz`](Self::derive_multiple_winternitz).
+    ///
+    pub fn next_multiple_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        number_of_keys: u32,
+    ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
+        let initial_index = self.next_winternitz_index()?;
+        let pubkeys = self.derive_multiple_winternitz(
+            message_size_in_bytes,
+            key_type,
+            initial_index,
+            number_of_keys,
+        )?;
+        // if derivation was successful, store the next index
+        self.keystore.store_next_winternitz_index(initial_index + number_of_keys)?;
+        println!("next_multiple_winternitz: key_type: {:?}, message_size: {}, initial_index: {}", key_type, message_size_in_bytes, initial_index); // TODO remove after debugging
+        println!("stored next index: {}", initial_index + number_of_keys); // TODO remove after debugging
+
+        Ok(pubkeys)
+    }
+
     // Dev note: this key is not related to the key derivation seed used for HD wallets
     // In the future we can find a way to securely derive it from a mnemonic too
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
@@ -648,6 +723,7 @@ impl KeyManager {
         rng: &mut R,
         bits: usize,
     ) -> Result<String, KeyManagerError> {
+        // TODO error if bits > 16384 ?? avoid too large keys
         let rsa_keypair = RSAKeyPair::new(rng, bits)?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
@@ -887,6 +963,19 @@ impl KeyManager {
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
         Ok(signature)
+    }
+
+    // For one-time winternitz keys
+    pub fn sign_winternitz_message_by_pubkey(
+        &self,
+        message_bytes: &[u8],
+        public_key: &WinternitzPublicKey,
+    ) -> Result<WinternitzSignature, KeyManagerError> {
+        self.sign_winternitz_message(
+            message_bytes,
+            public_key.key_type(),
+            public_key.derivation_index()?,
+        )
     }
 
     /// Exports the private key for a given public key.
@@ -1601,6 +1690,74 @@ mod tests {
         // 13. Verify that derive_keypair for P2wpkh with index 0 gives the same as next_keypair
         let derived_p2wpkh_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
         assert_eq!(first_p2wpkh_pubkey, derived_p2wpkh_pubkey, "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result");
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_next_winternitz_auto_indexing() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // Create a fresh KeyManager
+        let key_manager = KeyManager::new(
+            Network::Regtest,
+            None, // No mnemonic provided, will generate one
+            None,
+            keystore_storage_config,
+        )?;
+
+        let message_size_32_bytes = 32;
+        let message_size_20_bytes = 20;
+
+        // 1. Get next_winternitz for SHA256 with 32 bytes - should use index 0 and increment global counter
+        let first_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+
+        // 2. Verify that derive_winternitz with index 0 gives the same as the 1st pubkey
+        let derived_first_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 0)?;
+        assert_eq!(first_pubkey, derived_first_pubkey, "Expected derive_winternitz(0) to match first next_winternitz result");
+
+        // 3. Get next_winternitz again - should use index 1 and increment global counter
+        let second_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+
+        // 4. Verify that the two pubkeys are different
+        assert_ne!(first_pubkey, second_pubkey, "Expected different public keys from successive next_winternitz calls");
+
+        // 5. Verify that derive_winternitz with index 1 gives the same as the 2nd pubkey
+        let derived_second_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 1)?;
+        assert_eq!(second_pubkey, derived_second_pubkey, "Expected derive_winternitz(1) to match second next_winternitz result");
+
+        // 6. Get next_winternitz for a different type - should use index 2 (global counter continues)
+        let third_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::HASH160)?;
+
+        // 7. Verify that derive_winternitz for HASH160 with index 2 gives the same result
+        let derived_third_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::HASH160, 2)?;
+        assert_eq!(third_pubkey, derived_third_pubkey, "Expected derive_winternitz(HASH160, 32, 2) to match third next_winternitz result");
+
+        // 8. Get next_winternitz for different message size - should use index 3 (global counter continues)
+        let fourth_pubkey = key_manager.next_winternitz(message_size_20_bytes, WinternitzType::SHA256)?;
+
+        // 9. Verify that derive_winternitz for SHA256:20 with index 3 gives the same result
+        let derived_fourth_pubkey = key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::SHA256, 3)?;
+        assert_eq!(fourth_pubkey, derived_fourth_pubkey, "Expected derive_winternitz(SHA256, 20, 3) to match fourth next_winternitz result");
+
+        // 10. Get next_winternitz for yet another combination - should use index 4
+        let fifth_pubkey = key_manager.next_winternitz(message_size_20_bytes, WinternitzType::HASH160)?;
+
+        // 11. Verify that derive_winternitz for HASH160:20 with index 4 gives the same result
+        let derived_fifth_pubkey = key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::HASH160, 4)?;
+        assert_eq!(fifth_pubkey, derived_fifth_pubkey, "Expected derive_winternitz(HASH160, 20, 4) to match fifth next_winternitz result");
+
+        // 12. Verify all keys are different (security requirement - no reuse)
+        let all_pubkeys = vec![&first_pubkey, &second_pubkey, &third_pubkey, &fourth_pubkey, &fifth_pubkey];
+        for (i, key1) in all_pubkeys.iter().enumerate() {
+            for (j, key2) in all_pubkeys.iter().enumerate() {
+                if i != j {
+                    assert_ne!(key1, key2, "Expected all Winternitz keys to be different - found duplicate at indices {} and {}", i, j);
+                }
+            }
+        }
 
         cleanup_storage(&keystore_path);
         Ok(())

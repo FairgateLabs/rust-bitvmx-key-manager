@@ -1537,6 +1537,76 @@ mod tests {
     }
 
     #[test]
+    fn test_next_keypair_auto_indexing() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // Create a fresh KeyManager
+        let key_manager = KeyManager::new(
+            Network::Regtest,
+            None, // No mnemonic provided, will generate one
+            None,
+            keystore_storage_config,
+        )?;
+
+        // 1. Verify that with a fresh keymanager, there is no stored index for P2tr
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr).is_err());
+
+        // 2. Verify that there is also no stored index for other key types
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh).is_err());
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+
+        // 3. Get next_keypair for P2tr type - should return a public key and store index 1
+        let first_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
+
+        // 4. Verify that index 1 is now stored for P2tr (next index after using index 0)
+        let stored_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(stored_index, 1, "Expected next index to be 1 after first keypair generation");
+
+        // 5. Verify that there is still no index stored for other types
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh).is_err());
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+
+        // 6. Get next_keypair again - should return a different pubkey and store index 2
+        let second_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
+
+        // 7. Verify that index 2 is now stored for P2tr
+        let stored_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(stored_index, 2, "Expected next index to be 2 after second keypair generation");
+
+        // 8. Verify that the two pubkeys are different
+        assert_ne!(first_pubkey, second_pubkey, "Expected different public keys from successive next_keypair calls");
+
+        // 9. Use derive_keypair with index 0 - should give the same as the 1st pubkey
+        let derived_first_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        assert_eq!(first_pubkey, derived_first_pubkey, "Expected derive_keypair(0) to match first next_keypair result");
+
+        // 10. Use derive_keypair with index 1 - should give the same as the 2nd pubkey
+        let derived_second_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
+        assert_eq!(second_pubkey, derived_second_pubkey, "Expected derive_keypair(1) to match second next_keypair result");
+
+        // 11. Verify that calling next_keypair for a different key type starts fresh indexing
+        let first_p2wpkh_pubkey = key_manager.next_keypair(BitcoinKeyType::P2wpkh)?;
+        let stored_p2wpkh_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
+        assert_eq!(stored_p2wpkh_index, 1, "Expected P2wpkh next index to start at 1");
+
+        // 12. Verify that P2tr index is still at 2 and other types are still not set
+        let p2tr_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(p2tr_index, 2, "P2tr index should remain unchanged");
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
+        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+
+        // 13. Verify that derive_keypair for P2wpkh with index 0 gives the same as next_keypair
+        let derived_p2wpkh_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        assert_eq!(first_p2wpkh_pubkey, derived_p2wpkh_pubkey, "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result");
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
     fn test_error_handling() -> Result<(), KeyManagerError> {
         let message = random_message();
         let keystore_path = temp_storage();

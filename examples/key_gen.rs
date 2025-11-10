@@ -17,6 +17,20 @@ fn key_generation_example() {
     // stores the private key and the corresponding public key in the encrypted keystore.
     // The public key is later used to select the corresponding private key for signing.
 
+    // next_keypair is always the preferred way to get a new keypair, as it manages the derivation index automatically.
+
+    let next_p2tr_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr).unwrap();
+    println!("Next p2tr keypair public key: {}", next_p2tr_keypair_pubkey);
+
+    let next_p2pkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2pkh).unwrap();
+    println!("Next p2pkh keypair public key: {}", next_p2pkh_keypair_pubkey);
+
+    let next_p2sh_p2wpkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2shP2wpkh).unwrap();
+    println!("Next p2sh_p2wpkh keypair public key: {}", next_p2sh_p2wpkh_keypair_pubkey);
+
+    let next_p2wpkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2wpkh).unwrap();
+    println!("Next p2wpkh keypair public key: {}", next_p2wpkh_keypair_pubkey);
+
     // Derive a child keypair (e.g., for indexed wallets)
     let derived_0_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();
     println!("derived_0_pubkey: {}", derived_0_pubkey);

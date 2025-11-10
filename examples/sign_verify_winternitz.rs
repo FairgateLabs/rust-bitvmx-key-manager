@@ -26,12 +26,37 @@ fn sign_verify_winternitz_example() {
     let message = Message::from_digest(digest);
     println!("Message: {:?}", message);
 
+    // Using next - recommended
+
+    // Get the Winternitz public key for the index 0 using the SHA-256 hash function
+    let winternitz_key = key_manager
+        .next_winternitz(message[..].len(), WinternitzType::SHA256)
+        .unwrap();
+
+    // Create a Winternitz signature
+    let signature = key_manager
+        .sign_winternitz_message_by_pubkey(&message[..], &winternitz_key)
+        .unwrap();
+    println!(
+        "(using next) Winternitz signature: {:?}",
+        hex::encode(signature.to_bytes())
+    );
+    // Verify the signature
+    let signature_verifier = SignatureVerifier::new();
+    let is_valid =
+        signature_verifier.verify_winternitz_signature(&signature, &message[..], &winternitz_key);
+    println!("(using next) Is signature valid: {:?}", is_valid);
+    assert!(is_valid);
+
+
+    // Using derive - discouraged
+
     // Create a Winternitz signature. Internally a Winternitz key pair for the derivation index 0 is created using the SHA-256 hash function
     let signature = key_manager
         .sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)
         .unwrap();
     println!(
-        "Winternitz signature: {:?}",
+        "(using derive) Winternitz signature: {:?}",
         hex::encode(signature.to_bytes())
     );
 
@@ -45,4 +70,5 @@ fn sign_verify_winternitz_example() {
     let is_valid =
         signature_verifier.verify_winternitz_signature(&signature, &message[..], &winternitz_key);
     println!("Is signature valid: {:?}", is_valid);
+    assert!(is_valid);
 }

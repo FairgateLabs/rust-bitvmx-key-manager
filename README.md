@@ -13,9 +13,40 @@ A random mnemonic will be auto generated and stored, is no one is provided by co
 
 - 🔑 **Key Generation and Storage**: Generate new keys and store them securely.
 - 📥 **Key Importing**: Import existing private keys into the keystore.
-- 🌐 **Key Derivation**: Derive keys using BIP32 hierarchical deterministic wallets.
+- 🌐 **Key Derivation**: Derive keys using BIP39, BIP44 hierarchical deterministic wallets.
 - ✍️ **Message Signing**: Sign messages using ECDSA, Schnorr, Winternitz, and MuSig2 algorithms.
 - ✅ **Signature Verification**: Verify signatures for ECDSA, Schnorr, Winternitz, and MuSig2.
+
+## DESIGN
+
+### Key Derivation and Storage Strategy
+
+The BitVMX Key Manager implements different strategies for key derivation and storage based on the cryptographic algorithm and practical considerations:
+
+#### Bitcoin Keys (ECDSA/Schnorr)
+- **HD Derivation**: Bitcoin keys are derived using hierarchical deterministic (HD) derivation following BIP39/BIP44 standards from a master seed/mnemonic
+- **Storage**: Both private and public keys are stored in the encrypted keystore for persistent access
+- **Rationale**: Standard Bitcoin practice enabling deterministic key generation and wallet recovery
+
+#### Winternitz One-Time Signature Keys
+- **HD Derivation**: Winternitz keys are HD derived from the same master seed for consistency
+- **Storage**: Keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed
+- **Rationale**: Storage scalability - Winternitz signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency
+
+#### RSA Keys
+- **Fresh Entropy**: RSA keys are generated using fresh entropy provided by the user, with **no correlation** to the HD mnemonic
+- **Storage**: Private and public keys are stored in the encrypted keystore
+- **Rationale**: While HD derivation of RSA keys is theoretically possible (as explored in [research](https://ethresear.ch/t/an-rsa-deterministic-key-generation-scheme-algorithm-and-security-analysis/19745)), we deliberately choose fresh entropy generation to:
+  - Align with RSA industry standards and best practices
+  - Provide stronger security guarantees independent of the HD seed
+  - Acknowledge that users must backup the keystore anyway due to key importing features
+
+#### Imported Keys
+- **No HD Correlation**: Imported keys have no relationship to the master HD mnemonic by design
+- **Storage**: Stored in the encrypted keystore alongside generated keys
+- **Rationale**: Preserves the original entropy and properties of externally generated keys
+
+**Important**: Since the key manager supports importing external keys and uses fresh entropy for RSA keys, users must backup the entire encrypted keystore in addition to the HD mnemonic. The mnemonic alone is insufficient for complete wallet recovery.
 
 ## Usage
 
@@ -37,6 +68,8 @@ A random mnemonic will be auto generated and stored, is no one is provided by co
 *The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.*
 
 ### [Signing and verifying a message using Winternitz](examples/sign_verify_winternitz.rs)
+
+### [Generating keys, Signing and verifying a message using RSA](examples/rsa.rs)
 
 
 ## Development Setup
@@ -60,6 +93,8 @@ run with `cargo run --example sign_verify_ecdsa`
 run with `cargo run --example sign_verify_schnorr_taproot`
 - **[sign_verify_winternitz:](examples/sign_verify_winternitz.rs)**
 run with `cargo run --example sign_verify_winternitz`
+- **[rsa:](examples/rsa.rs)**
+run with `cargo run --example rsa`
 
 
 ## Contributing

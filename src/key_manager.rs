@@ -407,8 +407,12 @@ impl KeyManager {
     /*********************************/
 
     // Generate account-level xpub (hardened up to account)
-    pub fn generate_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
+    pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        println!(
+            "key_derivation_seed: {}",
+            hex::encode(&key_derivation_seed)
+        ); // TODO remove after debugging
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
@@ -417,11 +421,13 @@ impl KeyManager {
         println!("account_derivation_path: {}", account_derivation_path); // TODO remove after debugging
 
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+        println!("account_xpriv: {}", account_xpriv); // TODO remove after debugging
         let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
+        println!("account_xpub: {}", account_xpub); // TODO remove after debugging
 
         // Dev note: do not touch parity here
         // Parity normalization (even-Y) is a Taproot/Schnorr (BIP-340/341/86) concern and should be applied
-        // only when you form the Taproot internal key for each address when usign the full derivation path
+        // only when you form the Taproot internal key for each address when using the full derivation path
         Ok(account_xpub)
     }
 
@@ -1292,10 +1298,7 @@ impl KeyManager {
 mod tests {
     use bip39::Mnemonic;
     use bitcoin::{
-        hex::DisplayHex,
-        key::rand::{self, RngCore},
-        secp256k1::{self, Message, SecretKey},
-        Network, PrivateKey, PublicKey,
+        Network, PrivateKey, PublicKey, bip32::Xpriv, hex::DisplayHex, key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -1980,7 +1983,7 @@ mod tests {
         ];
 
         for key_type in key_types {
-            let account_xpub = key_manager.generate_account_xpub(key_type).unwrap();
+            let account_xpub = key_manager.get_account_xpub(key_type).unwrap();
 
             for i in 0..5 {
                 let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
@@ -2023,7 +2026,7 @@ mod tests {
         let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
         let account_xpub = key_manager
-            .generate_account_xpub(BitcoinKeyType::P2tr)
+            .get_account_xpub(BitcoinKeyType::P2tr)
             .unwrap();
 
         for i in 0..5 {
@@ -2076,7 +2079,7 @@ mod tests {
         for key_type in key_types {
             for i in 0..5 {
                 // Generate account-level xpub in key_manager_1 (hardened up to account level)
-                let account_xpub = key_manager_1.generate_account_xpub(key_type).unwrap();
+                let account_xpub = key_manager_1.get_account_xpub(key_type).unwrap();
 
                 // Derive public key in key_manager_1 using account xpub
                 let public_from_account_xpub_km1 = key_manager_1
@@ -2614,6 +2617,186 @@ mod tests {
             Err(KeyManagerError::CorruptedWinternitzSeed)
         ));
 
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bitcoin_regtest_keys_derivation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        // hardcoded values from https://iancoleman.io/bip39/
+
+        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed()?;
+        let key_derivation_seed_hex = key_derivation_seed.to_hex_string(bitcoin::hex::Case::Lower);
+        let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
+        assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
+
+        let master_xpriv = Xpriv::new_master(REGTEST, &key_derivation_seed)?;
+        let master_xpriv_hex = master_xpriv.to_string();
+        let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
+        assert_eq!(master_xpriv_hex, expected_master_xpriv);
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
+        let expected_p2pkh_0 =
+            PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
+        assert_eq!(p2pkh_0, expected_p2pkh_0);
+
+        let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
+        let expected_p2pkh_15 =
+            PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
+        assert_eq!(p2pkh_15, expected_p2pkh_15);
+
+        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2shP2wpkh)?;
+        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        // let expected_account_extended_pubkey = ""; // missing value
+        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 =
+            PublicKey::from_str("03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f")?;
+        assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
+
+        let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
+        let expected_p2shp2wpkh_15 =
+            PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
+        assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
+
+        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
+        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        // let expected_account_extended_pubkey = ""; // missing value
+        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let expected_p2wpkh_0 =
+            PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
+        assert_eq!(p2wpkh_0, expected_p2wpkh_0);
+
+        let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
+        let expected_p2wpkh_15 =
+            PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
+        assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bitcoin_mainnet_keys_derivation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager = KeyManager::new(
+            Network::Bitcoin,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
+
+        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed()?;
+        let key_derivation_seed_hex = key_derivation_seed.to_hex_string(bitcoin::hex::Case::Lower);
+        let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
+        assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
+
+        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &key_derivation_seed)?;
+        let master_xpriv_hex = master_xpriv.to_string();
+        let expected_master_xpriv = "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu";
+        assert_eq!(master_xpriv_hex, expected_master_xpriv);
+
+        // BIP44 - Legacy (P2PKH)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
+        let expected_p2pkh_0 =
+            PublicKey::from_str("03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e")?;
+        assert_eq!(p2pkh_0, expected_p2pkh_0);
+
+        let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
+        let expected_p2pkh_15 =
+            PublicKey::from_str("028d6cd1027a8e2c01a08ddc7eca9399e00e83380d9b1553446b10c5e80e4e03ab")?;
+        assert_eq!(p2pkh_15, expected_p2pkh_15);
+
+        // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        // TODO
+        let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP"; // missing value
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 =
+            PublicKey::from_str("039b3b694b8fc5b5e07fb069c783cac754f5d38c3e08bed1960e31fdb1dda35c24")?;
+        assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
+
+        let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
+        let expected_p2shp2wpkh_15 =
+            PublicKey::from_str("0213a9cf215d46ee5327a679231f0fd555ba3a67f7721a15e655aa48e69f795149")?;
+        assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
+
+        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
+        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        // let expected_account_extended_pubkey = ""; // missing value
+        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let expected_p2wpkh_0 =
+            PublicKey::from_str("0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c")?;
+        assert_eq!(p2wpkh_0, expected_p2wpkh_0);
+
+        let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
+        let expected_p2wpkh_15 =
+            PublicKey::from_str("02b05e67ab098575526f23a7c4f3b69449125604c34a9b34909def7432a792fbf6")?;
+        assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        // TODO taproot verify parity management
+
+        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
+        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        // let expected_account_extended_pubkey = ""; // missing value
+        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        // let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        // let expected_p2tr_0 =
+        //     PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        // assert_eq!(p2tr_0, expected_p2tr_0);
+
+        // let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
+        // let expected_p2tr_15 =
+        //     PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
+        // assert_eq!(p2tr_15, expected_p2tr_15);
+
+        drop(key_manager);
         cleanup_storage(&keystore_path);
         Ok(())
     }

@@ -48,7 +48,7 @@ fn key_generation_example() {
 
     // Generate a master extended x public key
     let account_xpub = key_manager
-        .generate_account_xpub(BitcoinKeyType::P2tr)
+        .get_account_xpub(BitcoinKeyType::P2tr)
         .unwrap();
 
     // Derive public key only

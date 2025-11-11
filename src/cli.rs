@@ -198,7 +198,7 @@ impl Cli {
         match &menu.command {
             Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
-                let xpub = key_manager.generate_account_xpub(*key_type)?;
+                let xpub = key_manager.get_account_xpub(*key_type)?;
                 info!("Account Xpub: {}", xpub);
             }
 

@@ -13,8 +13,6 @@ use itertools::izip;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
-// TODO discuss with Diego M.: if we want RSA derivation from mnemonic too (yes but audit) and managed indexes
-
 use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
@@ -63,7 +61,7 @@ impl KeyManager {
     const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
     const STARTING_DERIVATION_INDEX: u32 = 0; // Starting index for derivation
 
-    // TODO discus with Diego M. the idea behind the store/load of this constructor
+    // TODO i discus with Diego M. the idea behind the store/load of this constructor
     pub fn new(
         network: Network,
         mnemonic: Option<Mnemonic>,
@@ -372,7 +370,7 @@ impl KeyManager {
     ) -> Result<[u8; 32], KeyManagerError> {
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
             Self::WINTERNITZ_PURPOSE_INDEX,
-            Self::get_bitcoin_coin_type_by_network(network), //TODO: inform team. Dev note: nice to differentiate by network as they are OT
+            Self::get_bitcoin_coin_type_by_network(network), //TODO i inform team. Dev note: nice to differentiate by network as they are OT
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
@@ -440,7 +438,7 @@ impl KeyManager {
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // For taproot keys (Schnorr keys be “x-only with even-Y”.)
-        // TODO inform team: Dev note: adjust parity only for Taproot keys, not for every key type
+        // TODO i inform team: Dev note: adjust parity only for Taproot keys, not for every key type
         let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr {
             self.adjust_parity(internal_keypair)
         } else {
@@ -569,7 +567,7 @@ impl KeyManager {
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
 
-        // TODO inform team: Dev note: adjust parity only for Taproot keys
+        // TODO i inform team: Dev note: adjust parity only for Taproot keys
         if key_type == BitcoinKeyType::P2tr {
             Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
         } else {

@@ -19,7 +19,7 @@ impl KeyStore {
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
 
-    // TODO inform team: storing key type info
+    // TODO i inform team: storing key type info
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }

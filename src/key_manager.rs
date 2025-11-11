@@ -6,7 +6,7 @@ use bitcoin::{
     hashes::{self, Hash},
     key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey, TapNodeHash,
+    base58, Network, PrivateKey, PublicKey, TapNodeHash,
 };
 
 use itertools::izip;
@@ -370,6 +370,58 @@ impl KeyManager {
         }
     }
 
+    /// Get the version bytes for extended private keys based on the key type and network
+    fn get_xpriv_version_bytes(key_type: BitcoinKeyType, network: Network) -> [u8; 4] {
+        match (key_type, network) {
+            // Mainnet
+            (BitcoinKeyType::P2pkh, Network::Bitcoin) => [0x04, 0x88, 0xAD, 0xE4], // xprv
+            (BitcoinKeyType::P2shP2wpkh, Network::Bitcoin) => [0x04, 0x9D, 0x78, 0x78], // yprv
+            (BitcoinKeyType::P2wpkh, Network::Bitcoin) => [0x04, 0xB2, 0x43, 0x0C], // zprv
+            (BitcoinKeyType::P2tr, Network::Bitcoin) => [0x04, 0x88, 0xAD, 0xE4], // xprv (no specific version for taproot)
+
+            // Testnet/Testnet4/Regtest/Signet (all use the same version bytes)
+            (BitcoinKeyType::P2pkh, _) => [0x04, 0x35, 0x83, 0x94], // tprv
+            (BitcoinKeyType::P2shP2wpkh, _) => [0x04, 0x4A, 0x4E, 0x28], // uprv
+            (BitcoinKeyType::P2wpkh, _) => [0x04, 0x5F, 0x18, 0xBC], // vprv
+            (BitcoinKeyType::P2tr, _) => [0x04, 0x35, 0x83, 0x94], // tprv (no specific version for taproot)
+        }
+    }
+
+    /// Get the version bytes for extended public keys based on the key type and network
+    fn get_xpub_version_bytes(key_type: BitcoinKeyType, network: Network) -> [u8; 4] {
+        match (key_type, network) {
+            // Mainnet
+            (BitcoinKeyType::P2pkh, Network::Bitcoin) => [0x04, 0x88, 0xB2, 0x1E], // xpub
+            (BitcoinKeyType::P2shP2wpkh, Network::Bitcoin) => [0x04, 0x9D, 0x7C, 0xB2], // ypub
+            (BitcoinKeyType::P2wpkh, Network::Bitcoin) => [0x04, 0xB2, 0x47, 0x46], // zpub
+            (BitcoinKeyType::P2tr, Network::Bitcoin) => [0x04, 0x88, 0xB2, 0x1E], // xpub (no specific version for taproot)
+
+            // Testnet/Testnet4/Regtest/Signet (all use the same version bytes)
+            (BitcoinKeyType::P2pkh, _) => [0x04, 0x35, 0x87, 0xCF], // tpub
+            (BitcoinKeyType::P2shP2wpkh, _) => [0x04, 0x4A, 0x52, 0x62], // upub
+            (BitcoinKeyType::P2wpkh, _) => [0x04, 0x5F, 0x1C, 0xF6], // vpub
+            (BitcoinKeyType::P2tr, _) => [0x04, 0x35, 0x87, 0xCF], // tpub (no specific version for taproot)
+        }
+    }
+
+    /// Convert an extended key string from one version to another by replacing version bytes
+    fn convert_extended_key_version(extended_key: &str, target_version: [u8; 4]) -> Result<String, KeyManagerError> {
+        // Decode the base58check encoded extended key
+        let decoded = base58::decode_check(extended_key)
+            .map_err(|_| KeyManagerError::CorruptedData)?;
+
+        if decoded.len() != 78 {
+            return Err(KeyManagerError::CorruptedData);
+        }
+
+        let mut new_data = decoded;
+        // Replace the first 4 bytes (version) with the target version
+        new_data[0..4].copy_from_slice(&target_version);
+
+        // Re-encode with checksum
+        Ok(base58::encode_check(&new_data))
+    }
+
     // Winternitz uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for winternitz:
     fn derive_winternitz_master_seed(
         secp: secp256k1::Secp256k1<All>,
@@ -429,6 +481,36 @@ impl KeyManager {
         // Parity normalization (even-Y) is a Taproot/Schnorr (BIP-340/341/86) concern and should be applied
         // only when you form the Taproot internal key for each address when using the full derivation path
         Ok(account_xpub)
+    }
+
+    /// Generate account-level extended public key with the correct BIP-specific version prefix
+    /// Returns: xpub for BIP-44, ypub for BIP-49, zpub for BIP-84, etc.
+    pub fn get_account_xpub_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+        let account_xpub = self.get_account_xpub(key_type)?;
+        let standard_xpub_string = account_xpub.to_string();
+
+        // Convert to the appropriate version based on key type
+        let target_version = Self::get_xpub_version_bytes(key_type, self.network);
+        Self::convert_extended_key_version(&standard_xpub_string, target_version)
+    }
+
+    /// Generate account-level extended private key with the correct BIP-specific version prefix
+    /// Returns: xprv for BIP-44, yprv for BIP-49, zprv for BIP-84, etc.
+    #[allow(dead_code)] // I want this method for tests and might be useful in a future xpriv export
+    fn get_account_xpriv_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+
+        // Build the full derivation path and extract only up to account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
+        let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+        let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+
+        let standard_xpriv_string = account_xpriv.to_string();
+
+        // Convert to the appropriate version based on key type
+        let target_version = Self::get_xpriv_version_bytes(key_type, self.network);
+        Self::convert_extended_key_version(&standard_xpriv_string, target_version)
     }
 
     /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
@@ -2650,6 +2732,8 @@ mod tests {
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
 
+        // BIP44 - Legacy (P2PKH)
+
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
@@ -2665,10 +2749,11 @@ mod tests {
             PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
         assert_eq!(p2pkh_15, expected_p2pkh_15);
 
-        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2shP2wpkh)?;
-        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
-        // let expected_account_extended_pubkey = ""; // missing value
-        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
         let expected_p2shp2wpkh_0 =
@@ -2680,10 +2765,11 @@ mod tests {
             PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
         assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
 
-        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
-        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
-        // let expected_account_extended_pubkey = ""; // missing value
-        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        // BIP84 - Native SegWit (P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
         let expected_p2wpkh_0 =
@@ -2694,6 +2780,9 @@ mod tests {
         let expected_p2wpkh_15 =
             PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
         assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        // TODO taproot keys
+        // BIP86 - Taproot (P2TR)
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -2748,10 +2837,8 @@ mod tests {
 
         // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
 
-        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2shP2wpkh)?;
-        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
-        // TODO
-        let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP"; // missing value
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
@@ -2764,10 +2851,11 @@ mod tests {
             PublicKey::from_str("0213a9cf215d46ee5327a679231f0fd555ba3a67f7721a15e655aa48e69f795149")?;
         assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
 
-        // let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
-        // let account_extended_pubkey_hex = account_extended_pubkey.to_string();
-        // let expected_account_extended_pubkey = ""; // missing value
-        // assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        // BIP84 - Native SegWit (P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_pubkey = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
         let expected_p2wpkh_0 =
@@ -2778,6 +2866,8 @@ mod tests {
         let expected_p2wpkh_15 =
             PublicKey::from_str("02b05e67ab098575526f23a7c4f3b69449125604c34a9b34909def7432a792fbf6")?;
         assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        // BIP86 - Taproot (P2TR)
 
         // TODO taproot verify parity management
 

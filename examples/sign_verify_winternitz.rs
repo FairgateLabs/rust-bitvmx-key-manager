@@ -48,7 +48,6 @@ fn sign_verify_winternitz_example() {
     println!("(using next) Is signature valid: {:?}", is_valid);
     assert!(is_valid);
 
-
     // Using derive - discouraged
 
     // Create a Winternitz signature. Internally a Winternitz key pair for the derivation index 0 is created using the SHA-256 hash function

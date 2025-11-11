@@ -24,7 +24,8 @@ use crate::{
     },
     rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
-        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
+        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
+        WinternitzType,
     },
 };
 
@@ -79,7 +80,7 @@ impl KeyManager {
                     // Both stored and provided mnemonics exist - they must match
                     if stored_mnemonic != *provided_mnemonic {
                         return Err(KeyManagerError::MnemonicMismatch(
-                            "Stored mnemonic does not match the provided mnemonic".to_string()
+                            "Stored mnemonic does not match the provided mnemonic".to_string(),
                         ));
                     }
                 }
@@ -94,7 +95,9 @@ impl KeyManager {
                         secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
                         let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
                         keystore.store_mnemonic(&random_mnemonic)?;
-                        tracing::warn!("Random mnemonic generated, make sure to back it up securely!");
+                        tracing::warn!(
+                            "Random mnemonic generated, make sure to back it up securely!"
+                        );
 
                         println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
                     }
@@ -206,10 +209,15 @@ impl KeyManager {
         self.import_private_key_typed(private_key, None)
     }
 
-    pub fn import_private_key_typed(&self, private_key: &str, key_type: Option<BitcoinKeyType>) -> Result<PublicKey, KeyManagerError> {
+    pub fn import_private_key_typed(
+        &self,
+        private_key: &str,
+        key_type: Option<BitcoinKeyType>,
+    ) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
-        self.keystore.store_keypair(private_key, public_key, key_type)?;
+        self.keystore
+            .store_keypair(private_key, public_key, key_type)?;
 
         Ok(public_key)
     }
@@ -226,13 +234,14 @@ impl KeyManager {
         &self,
         secret_key: &str,
         network: Network,
-        key_type: Option<BitcoinKeyType>
+        key_type: Option<BitcoinKeyType>,
     ) -> Result<PublicKey, KeyManagerError> {
         let secret_key = SecretKey::from_str(secret_key)?;
         let private_key = PrivateKey::new(secret_key, network);
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
-        self.keystore.store_keypair(private_key, public_key, key_type)?;
+        self.keystore
+            .store_keypair(private_key, public_key, key_type)?;
         Ok(public_key)
     }
 
@@ -448,7 +457,8 @@ impl KeyManager {
             )
         };
 
-        self.keystore.store_keypair(private_key, public_key, Some(key_type))?;
+        self.keystore
+            .store_keypair(private_key, public_key, Some(key_type))?;
         Ok(public_key)
     }
 
@@ -462,24 +472,18 @@ impl KeyManager {
     /// - No derivation indices are accidentally reused
     /// - The sequence of generated keys is deterministic and recoverable
     ///
-    pub fn next_keypair(
-        &self,
-        key_type: BitcoinKeyType,
-    ) -> Result<PublicKey, KeyManagerError> {
+    pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
         let index = self.next_keypair_index(key_type)?;
         let pubkey = self.derive_keypair(key_type, index)?;
         // if derivation was successful, store the next index
-        self.keystore.store_next_keypair_index(key_type, index+1)?;
+        self.keystore
+            .store_next_keypair_index(key_type, index + 1)?;
         println!("next_keypair: key_type: {:?}, index: {}", key_type, index); // TODO remove after debugging
-        println!("stored next index: {}", index+1); // TODO remove after debugging
+        println!("stored next index: {}", index + 1); // TODO remove after debugging
         Ok(pubkey)
     }
 
-    fn next_keypair_index(
-        &self,
-        key_type: BitcoinKeyType,
-    ) -> Result<u32, KeyManagerError> {
-
+    fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_keypair_index(key_type) {
             Ok(stored_index) => Ok(stored_index),
             Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
@@ -627,7 +631,10 @@ impl KeyManager {
         let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
         // if derivation was successful, store the next index
         self.keystore.store_next_winternitz_index(index + 1)?;
-        println!("next_winternitz: key_type: {:?}, message_size: {}, index: {}", key_type, message_size_in_bytes, index); // TODO remove after debugging
+        println!(
+            "next_winternitz: key_type: {:?}, message_size: {}, index: {}",
+            key_type, message_size_in_bytes, index
+        ); // TODO remove after debugging
         println!("stored next index: {}", index + 1); // TODO remove after debugging
         Ok(pubkey)
     }
@@ -696,8 +703,12 @@ impl KeyManager {
             number_of_keys,
         )?;
         // if derivation was successful, store the next index
-        self.keystore.store_next_winternitz_index(initial_index + number_of_keys)?;
-        println!("next_multiple_winternitz: key_type: {:?}, message_size: {}, initial_index: {}", key_type, message_size_in_bytes, initial_index); // TODO remove after debugging
+        self.keystore
+            .store_next_winternitz_index(initial_index + number_of_keys)?;
+        println!(
+            "next_multiple_winternitz: key_type: {:?}, message_size: {}, initial_index: {}",
+            key_type, message_size_in_bytes, initial_index
+        ); // TODO remove after debugging
         println!("stored next index: {}", initial_index + number_of_keys); // TODO remove after debugging
 
         Ok(pubkeys)
@@ -723,9 +734,10 @@ impl KeyManager {
         bits: usize,
     ) -> Result<String, KeyManagerError> {
         if bits > MAX_RSA_BITS {
-            return Err(KeyManagerError::InvalidRSAKeySize(
-                format!("RSA key size too large, maximum is {} bits", MAX_RSA_BITS),
-            ));
+            return Err(KeyManagerError::InvalidRSAKeySize(format!(
+                "RSA key size too large, maximum is {} bits",
+                MAX_RSA_BITS
+            )));
         }
         let rsa_keypair = RSAKeyPair::new(rng, bits)?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
@@ -1642,57 +1654,113 @@ mod tests {
         )?;
 
         // 1. Verify that with a fresh keymanager, there is no stored index for P2tr
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr).is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)
+            .is_err());
 
         // 2. Verify that there is also no stored index for other key types
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh).is_err());
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
 
         // 3. Get next_keypair for P2tr type - should return a public key and store index 1
         let first_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
 
         // 4. Verify that index 1 is now stored for P2tr (next index after using index 0)
-        let stored_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
-        assert_eq!(stored_index, 1, "Expected next index to be 1 after first keypair generation");
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(
+            stored_index, 1,
+            "Expected next index to be 1 after first keypair generation"
+        );
 
         // 5. Verify that there is still no index stored for other types
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh).is_err());
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
 
         // 6. Get next_keypair again - should return a different pubkey and store index 2
         let second_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
 
         // 7. Verify that index 2 is now stored for P2tr
-        let stored_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
-        assert_eq!(stored_index, 2, "Expected next index to be 2 after second keypair generation");
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(
+            stored_index, 2,
+            "Expected next index to be 2 after second keypair generation"
+        );
 
         // 8. Verify that the two pubkeys are different
-        assert_ne!(first_pubkey, second_pubkey, "Expected different public keys from successive next_keypair calls");
+        assert_ne!(
+            first_pubkey, second_pubkey,
+            "Expected different public keys from successive next_keypair calls"
+        );
 
         // 9. Use derive_keypair with index 0 - should give the same as the 1st pubkey
         let derived_first_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
-        assert_eq!(first_pubkey, derived_first_pubkey, "Expected derive_keypair(0) to match first next_keypair result");
+        assert_eq!(
+            first_pubkey, derived_first_pubkey,
+            "Expected derive_keypair(0) to match first next_keypair result"
+        );
 
         // 10. Use derive_keypair with index 1 - should give the same as the 2nd pubkey
         let derived_second_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
-        assert_eq!(second_pubkey, derived_second_pubkey, "Expected derive_keypair(1) to match second next_keypair result");
+        assert_eq!(
+            second_pubkey, derived_second_pubkey,
+            "Expected derive_keypair(1) to match second next_keypair result"
+        );
 
         // 11. Verify that calling next_keypair for a different key type starts fresh indexing
         let first_p2wpkh_pubkey = key_manager.next_keypair(BitcoinKeyType::P2wpkh)?;
-        let stored_p2wpkh_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
-        assert_eq!(stored_p2wpkh_index, 1, "Expected P2wpkh next index to start at 1");
+        let stored_p2wpkh_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
+        assert_eq!(
+            stored_p2wpkh_index, 1,
+            "Expected P2wpkh next index to start at 1"
+        );
 
         // 12. Verify that P2tr index is still at 2 and other types are still not set
-        let p2tr_index = key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        let p2tr_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
         assert_eq!(p2tr_index, 2, "P2tr index should remain unchanged");
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2pkh).is_err());
-        assert!(key_manager.keystore.load_next_keypair_index(BitcoinKeyType::P2shP2wpkh).is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
 
         // 13. Verify that derive_keypair for P2wpkh with index 0 gives the same as next_keypair
         let derived_p2wpkh_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
-        assert_eq!(first_p2wpkh_pubkey, derived_p2wpkh_pubkey, "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result");
+        assert_eq!(
+            first_p2wpkh_pubkey, derived_p2wpkh_pubkey,
+            "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result"
+        );
 
         cleanup_storage(&keystore_path);
         Ok(())
@@ -1715,45 +1783,79 @@ mod tests {
         let message_size_20_bytes = 20;
 
         // 1. Get next_winternitz for SHA256 with 32 bytes - should use index 0 and increment global counter
-        let first_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+        let first_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
 
         // 2. Verify that derive_winternitz with index 0 gives the same as the 1st pubkey
-        let derived_first_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 0)?;
-        assert_eq!(first_pubkey, derived_first_pubkey, "Expected derive_winternitz(0) to match first next_winternitz result");
+        let derived_first_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 0)?;
+        assert_eq!(
+            first_pubkey, derived_first_pubkey,
+            "Expected derive_winternitz(0) to match first next_winternitz result"
+        );
 
         // 3. Get next_winternitz again - should use index 1 and increment global counter
-        let second_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+        let second_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
 
         // 4. Verify that the two pubkeys are different
-        assert_ne!(first_pubkey, second_pubkey, "Expected different public keys from successive next_winternitz calls");
+        assert_ne!(
+            first_pubkey, second_pubkey,
+            "Expected different public keys from successive next_winternitz calls"
+        );
 
         // 5. Verify that derive_winternitz with index 1 gives the same as the 2nd pubkey
-        let derived_second_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 1)?;
-        assert_eq!(second_pubkey, derived_second_pubkey, "Expected derive_winternitz(1) to match second next_winternitz result");
+        let derived_second_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 1)?;
+        assert_eq!(
+            second_pubkey, derived_second_pubkey,
+            "Expected derive_winternitz(1) to match second next_winternitz result"
+        );
 
         // 6. Get next_winternitz for a different type - should use index 2 (global counter continues)
-        let third_pubkey = key_manager.next_winternitz(message_size_32_bytes, WinternitzType::HASH160)?;
+        let third_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::HASH160)?;
 
         // 7. Verify that derive_winternitz for HASH160 with index 2 gives the same result
-        let derived_third_pubkey = key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::HASH160, 2)?;
-        assert_eq!(third_pubkey, derived_third_pubkey, "Expected derive_winternitz(HASH160, 32, 2) to match third next_winternitz result");
+        let derived_third_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::HASH160, 2)?;
+        assert_eq!(
+            third_pubkey, derived_third_pubkey,
+            "Expected derive_winternitz(HASH160, 32, 2) to match third next_winternitz result"
+        );
 
         // 8. Get next_winternitz for different message size - should use index 3 (global counter continues)
-        let fourth_pubkey = key_manager.next_winternitz(message_size_20_bytes, WinternitzType::SHA256)?;
+        let fourth_pubkey =
+            key_manager.next_winternitz(message_size_20_bytes, WinternitzType::SHA256)?;
 
         // 9. Verify that derive_winternitz for SHA256:20 with index 3 gives the same result
-        let derived_fourth_pubkey = key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::SHA256, 3)?;
-        assert_eq!(fourth_pubkey, derived_fourth_pubkey, "Expected derive_winternitz(SHA256, 20, 3) to match fourth next_winternitz result");
+        let derived_fourth_pubkey =
+            key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::SHA256, 3)?;
+        assert_eq!(
+            fourth_pubkey, derived_fourth_pubkey,
+            "Expected derive_winternitz(SHA256, 20, 3) to match fourth next_winternitz result"
+        );
 
         // 10. Get next_winternitz for yet another combination - should use index 4
-        let fifth_pubkey = key_manager.next_winternitz(message_size_20_bytes, WinternitzType::HASH160)?;
+        let fifth_pubkey =
+            key_manager.next_winternitz(message_size_20_bytes, WinternitzType::HASH160)?;
 
         // 11. Verify that derive_winternitz for HASH160:20 with index 4 gives the same result
-        let derived_fifth_pubkey = key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::HASH160, 4)?;
-        assert_eq!(fifth_pubkey, derived_fifth_pubkey, "Expected derive_winternitz(HASH160, 20, 4) to match fifth next_winternitz result");
+        let derived_fifth_pubkey =
+            key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::HASH160, 4)?;
+        assert_eq!(
+            fifth_pubkey, derived_fifth_pubkey,
+            "Expected derive_winternitz(HASH160, 20, 4) to match fifth next_winternitz result"
+        );
 
         // 12. Verify all keys are different (security requirement - no reuse)
-        let all_pubkeys = vec![&first_pubkey, &second_pubkey, &third_pubkey, &fourth_pubkey, &fifth_pubkey];
+        let all_pubkeys = vec![
+            &first_pubkey,
+            &second_pubkey,
+            &third_pubkey,
+            &fourth_pubkey,
+            &fifth_pubkey,
+        ];
         for (i, key1) in all_pubkeys.iter().enumerate() {
             for (j, key2) in all_pubkeys.iter().enumerate() {
                 if i != j {
@@ -1843,10 +1945,14 @@ mod tests {
 
         // Schnorr signing with non-Taproot keys should fail
         let result = key_manager.sign_schnorr_message(&message, &p2wpkh_public_key);
-        assert!(matches!(result, Err(KeyManagerError::SchnorrWithNonTaprootKey)));
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::SchnorrWithNonTaprootKey)
+        ));
 
         // Test imported key (key_type = None) - should allow both ECDSA and Schnorr
-        let imported_key = key_manager.import_private_key("L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ")?;
+        let imported_key = key_manager
+            .import_private_key("L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ")?;
 
         // Both ECDSA and Schnorr should work with imported keys (no specific type)
         let ecdsa_result = key_manager.sign_ecdsa_message(&message, &imported_key);
@@ -2038,33 +2144,34 @@ mod tests {
             (
                 "L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ",
                 Some(BitcoinKeyType::P2pkh),
-                "P2PKH key import"
+                "P2PKH key import",
             ),
             (
                 "KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617",
                 Some(BitcoinKeyType::P2shP2wpkh),
-                "P2SH-P2WPKH key import"
+                "P2SH-P2WPKH key import",
             ),
             (
                 "L5oLkpV3aqBjhki6LmvChTCV6odsp4SXM6FfU2Gppt5kFLaHLuZ9",
                 Some(BitcoinKeyType::P2wpkh),
-                "P2WPKH key import"
+                "P2WPKH key import",
             ),
             (
                 "KyBsPXxTuVD82av65KZkrGrWi5qLMah5SdNq6uftawDbgKa2wv6S",
                 Some(BitcoinKeyType::P2tr),
-                "P2TR key import"
+                "P2TR key import",
             ),
             (
                 "L3Hq7a8FEQwJkW1M2GNKDW28546Vp5miewcCzSqUD9kCAXrJdS3g",
                 None,
-                "Untyped key import"
+                "Untyped key import",
             ),
         ];
 
         for (private_key_wif, expected_key_type, description) in test_cases {
             // Import the key with specific type
-            let public_key = key_manager.import_private_key_typed(private_key_wif, expected_key_type)?;
+            let public_key =
+                key_manager.import_private_key_typed(private_key_wif, expected_key_type)?;
 
             // Retrieve the key and verify the type is preserved
             let (_, _, stored_key_type) = match key_manager.keystore.load_keypair(&public_key)? {
@@ -2073,11 +2180,16 @@ mod tests {
             };
 
             // Verify the key type matches what was set during import
-            assert_eq!(stored_key_type, expected_key_type,
-                      "Key type mismatch for {}: expected {:?}, got {:?}",
-                      description, expected_key_type, stored_key_type);
+            assert_eq!(
+                stored_key_type, expected_key_type,
+                "Key type mismatch for {}: expected {:?}, got {:?}",
+                description, expected_key_type, stored_key_type
+            );
 
-            println!("✓ {}: Key type correctly stored as {:?}", description, stored_key_type);
+            println!(
+                "✓ {}: Key type correctly stored as {:?}",
+                description, stored_key_type
+            );
         }
 
         drop(key_manager);
@@ -2111,12 +2223,16 @@ mod tests {
 
             // Verify the key type matches what was used during derivation
             let expected_option = Some(*expected_key_type);
-            assert_eq!(stored_key_type, expected_option,
-                      "Key type mismatch for derived {:?}: expected {:?}, got {:?}",
-                      expected_key_type, expected_option, stored_key_type);
+            assert_eq!(
+                stored_key_type, expected_option,
+                "Key type mismatch for derived {:?}: expected {:?}, got {:?}",
+                expected_key_type, expected_option, stored_key_type
+            );
 
-            println!("✓ Derived {:?} key: Key type correctly stored as {:?}",
-                     expected_key_type, stored_key_type);
+            println!(
+                "✓ Derived {:?} key: Key type correctly stored as {:?}",
+                expected_key_type, stored_key_type
+            );
         }
 
         drop(key_manager);
@@ -2311,7 +2427,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone())?;
+            keystore_storage_config.clone(),
+        )?;
 
         drop(key_manager1);
 
@@ -2319,13 +2436,15 @@ mod tests {
         // This should fail with MnemonicMismatch error
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
-        let mnemonic_sentence = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+        let mnemonic_sentence =
+            "legal winner thank year wave sausage worth useful legal winner thank yellow";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
         let key_manager2 = KeyManager::new(
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone());
+            keystore_storage_config.clone(),
+        );
 
         // Expect MnemonicMismatch error
         assert!(matches!(
@@ -2333,17 +2452,13 @@ mod tests {
             Err(KeyManagerError::MnemonicMismatch(_))
         ));
 
-
         // --- Create the 3rd KeyManager with the same stored mnemonic
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager3 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
-            None,
-            keystore_storage_config)?;
+        let key_manager3 =
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -2367,7 +2482,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone())?;
+            keystore_storage_config.clone(),
+        )?;
 
         drop(key_manager1);
 
@@ -2376,7 +2492,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone())?;
+            keystore_storage_config.clone(),
+        )?;
 
         drop(key_manager2);
 
@@ -2386,7 +2503,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(different_passphrase),
-            keystore_storage_config.clone());
+            keystore_storage_config.clone(),
+        );
 
         // Expect MnemonicPassphraseMismatch error
         assert!(matches!(
@@ -2395,11 +2513,8 @@ mod tests {
         ));
 
         // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
-        let key_manager3 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
-            None,
-            keystore_storage_config)?;
+        let key_manager3 =
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -2421,7 +2536,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone())?;
+            keystore_storage_config.clone(),
+        )?;
 
         drop(key_manager1);
 
@@ -2441,7 +2557,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone());
+            keystore_storage_config.clone(),
+        );
 
         // Expect CorruptedKeyDerivationSeed error
         assert!(matches!(
@@ -2467,7 +2584,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone())?;
+            keystore_storage_config.clone(),
+        )?;
 
         drop(key_manager1);
 
@@ -2487,7 +2605,8 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone());
+            keystore_storage_config.clone(),
+        );
 
         // Expect CorruptedWinternitzSeed error
         assert!(matches!(

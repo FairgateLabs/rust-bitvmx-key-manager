@@ -50,14 +50,18 @@ fn rsa_example() {
     let message = random_message().to_string().as_bytes().to_vec();
     let signature_verifier = SignatureVerifier::new();
 
-    let signature = key_manager.sign_rsa_message(&message, &public_key_pem_a).unwrap();
+    let signature = key_manager
+        .sign_rsa_message(&message, &public_key_pem_a)
+        .unwrap();
     let verified_a = signature_verifier
         .verify_rsa_signature(&signature, &message, &public_key_pem_a)
         .unwrap();
 
     println!("RSA signature A verified: {}", verified_a);
 
-    let signature = key_manager.sign_rsa_message(&message, &public_key_pem_b).unwrap();
+    let signature = key_manager
+        .sign_rsa_message(&message, &public_key_pem_b)
+        .unwrap();
     let verified_b = signature_verifier
         .verify_rsa_signature(&signature, &message, &public_key_pem_b)
         .unwrap();

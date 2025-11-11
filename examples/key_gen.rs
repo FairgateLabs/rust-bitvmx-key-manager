@@ -23,13 +23,24 @@ fn key_generation_example() {
     println!("Next p2tr keypair public key: {}", next_p2tr_keypair_pubkey);
 
     let next_p2pkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2pkh).unwrap();
-    println!("Next p2pkh keypair public key: {}", next_p2pkh_keypair_pubkey);
+    println!(
+        "Next p2pkh keypair public key: {}",
+        next_p2pkh_keypair_pubkey
+    );
 
-    let next_p2sh_p2wpkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2shP2wpkh).unwrap();
-    println!("Next p2sh_p2wpkh keypair public key: {}", next_p2sh_p2wpkh_keypair_pubkey);
+    let next_p2sh_p2wpkh_keypair_pubkey = key_manager
+        .next_keypair(BitcoinKeyType::P2shP2wpkh)
+        .unwrap();
+    println!(
+        "Next p2sh_p2wpkh keypair public key: {}",
+        next_p2sh_p2wpkh_keypair_pubkey
+    );
 
     let next_p2wpkh_keypair_pubkey = key_manager.next_keypair(BitcoinKeyType::P2wpkh).unwrap();
-    println!("Next p2wpkh keypair public key: {}", next_p2wpkh_keypair_pubkey);
+    println!(
+        "Next p2wpkh keypair public key: {}",
+        next_p2wpkh_keypair_pubkey
+    );
 
     // Derive a child keypair (e.g., for indexed wallets)
     let derived_0_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0).unwrap();

@@ -78,17 +78,26 @@ impl KeyStore {
         Ok(None)
     }
 
-    pub fn store_next_keypair_index(&self, key_type: BitcoinKeyType, index: u32) -> Result<(), KeyManagerError> {
+    pub fn store_next_keypair_index(
+        &self,
+        key_type: BitcoinKeyType,
+        index: u32,
+    ) -> Result<(), KeyManagerError> {
         let key_type_str = format!("{:?}", key_type);
-        let typed_next_keypair_index_key = format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
+        let typed_next_keypair_index_key =
+            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
         // this will store the next keypair index for the given key type eg: p2tr:next_keypair_index
         self.store.set(typed_next_keypair_index_key, index, None)?;
         Ok(())
     }
 
-    pub fn load_next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
+    pub fn load_next_keypair_index(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<u32, KeyManagerError> {
         let key_type_str = format!("{:?}", key_type);
-        let typed_next_keypair_index_key = format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
+        let typed_next_keypair_index_key =
+            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
         let next_index: u32 = self
             .store
             .get(typed_next_keypair_index_key)?
@@ -99,7 +108,8 @@ impl KeyStore {
     pub fn store_next_winternitz_index(&self, index: u32) -> Result<(), KeyManagerError> {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next winternitz index
-        self.store.set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, None)?;
+        self.store
+            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, None)?;
         Ok(())
     }
 
@@ -110,7 +120,6 @@ impl KeyStore {
             .ok_or(KeyManagerError::NextWinternitzIndexNotFound)?;
         Ok(next_index)
     }
-
 
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
         let phrase = mnemonic.to_string(); // normalized space-separated phrase
@@ -128,7 +137,8 @@ impl KeyStore {
     }
 
     pub fn store_mnemonic_passphrase(&self, passphrase: &str) -> Result<(), KeyManagerError> {
-        self.store.set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase.to_string(), None)?;
+        self.store
+            .set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase.to_string(), None)?;
         Ok(())
     }
 

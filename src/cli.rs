@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::{WinternitzSignature},
+    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::WinternitzSignature,
 };
 use bitcoin::{
     bip32::Xpub,
@@ -33,7 +33,6 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
-
     NextKeypair {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: BitcoinKeyType,
@@ -330,15 +329,10 @@ impl Cli {
     // Commands
     //
 
-    fn generate_winternitz_key(
-        &self,
-        winternitz_type: &str,
-        msg_len_bytes: usize,
-    ) -> Result<()> {
+    fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize) -> Result<()> {
         let key_manager = self.key_manager()?;
 
-        let public_key =
-            key_manager.next_winternitz(msg_len_bytes, winternitz_type.parse()?)?;
+        let public_key = key_manager.next_winternitz(msg_len_bytes, winternitz_type.parse()?)?;
 
         info!(
             "New key pair created of Winternitz Key. Index is: {} Public key is: {}",

@@ -3346,4 +3346,63 @@ mod tests {
             Ok(())
         })
     }
+
+    #[test]
+    pub fn test_master_xpub_determinism_and_parity() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            // Generate master xpub
+            let master_xpub = key_manager.generate_master_xpub()?;
+
+            // Check a small range of indices for determinism and even parity
+            for i in 0..5u32 {
+                let derived_priv = key_manager.derive_keypair(i)?;
+                let derived_pub = key_manager.derive_public_key(master_xpub, i)?;
+
+                // Determinism: public keys derived from xpub match those derived from xpriv
+                assert_eq!(derived_priv.to_string(), derived_pub.to_string());
+
+                // Parity: ensure x-only parity is even
+                let (_xonly, parity) = derived_pub.inner.x_only_public_key();
+                assert_eq!(parity, bitcoin::key::Parity::Even);
+            }
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_adjust_public_key_only_parity_ensures_even() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let secp = secp256k1::Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+
+            // Create a random public key
+            let secret_key = secp256k1::SecretKey::new(&mut rng);
+            let private_key = PrivateKey::new(secret_key, REGTEST);
+            let public_key = PublicKey::from_private_key(&secp, &private_key);
+
+            // Make sure we have an odd-parity public key to exercise the branch
+            let (_x, parity) = public_key.inner.x_only_public_key();
+            let odd_pub = if parity == bitcoin::key::Parity::Odd {
+                public_key
+            } else {
+                // negate to flip parity
+                PublicKey::new(public_key.inner.negate(&secp))
+            };
+
+            // Normalize parity using KeyManager's helper
+            let normalized = key_manager.adjust_public_key_only_parity(odd_pub.clone());
+
+            // Ensure the normalized public key has even x-only parity
+            let (_n_x, n_parity) = normalized.inner.x_only_public_key();
+            assert_eq!(n_parity, bitcoin::key::Parity::Even);
+
+            // Calling it again on an already-even key should keep it even
+            let normalized_again = key_manager.adjust_public_key_only_parity(normalized.clone());
+            let (_na_x, na_parity) = normalized_again.inner.x_only_public_key();
+            assert_eq!(na_parity, bitcoin::key::Parity::Even);
+
+            Ok(())
+        })
+    }
 }

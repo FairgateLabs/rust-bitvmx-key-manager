@@ -536,6 +536,8 @@ impl KeyManager {
 
         // For taproot keys (Schnorr keys be “x-only with even-Y”.)
         // TODO i inform team: Dev note: adjust parity only for Taproot keys, not for every key type
+
+        // TODO * discuss with Diego M. about this parity adjustment for Taproot keys
         let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr {
             self.adjust_parity(internal_keypair)
         } else {
@@ -1380,7 +1382,7 @@ impl KeyManager {
 mod tests {
     use bip39::Mnemonic;
     use bitcoin::{
-        Network, PrivateKey, PublicKey, bip32::Xpriv, hex::DisplayHex, key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}
+        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey, bip32::Xpriv, hex::DisplayHex, key::rand::{self, RngCore}, secp256k1::{self, Message, SecretKey}
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -2913,10 +2915,15 @@ mod tests {
 
         // TODO taproot verify parity management
 
-        // let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
-        // let expected_p2tr_0 =
-        //     PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
-        // assert_eq!(p2tr_0, expected_p2tr_0);
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+        assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
+
+        let expected_p2tr_0 =
+            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        // assert_eq!(p2tr_0, expected_p2tr_0); // TODO check with Diego
 
         // let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
         // let expected_p2tr_15 =

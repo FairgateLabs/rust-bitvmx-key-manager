@@ -33,6 +33,7 @@ use crate::{
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
 const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
+const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid performance issues
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -522,7 +523,7 @@ impl KeyManager {
     // Security vulnerability: If any child private key is compromised + the master xpub is known, an attacker can derive ALL other private keys in the wallet
     // Correct BIP-44 Implementation
     // The xpub should only be exposed at the account level (after hardened derivation):
-    // TODO remove this function after sync with Diego, see new method derive_public_key_from_account_xpub
+    // TODO * remove this function after sync with Diego, see new method derive_public_key_from_account_xpub
     // fn derive_public_key(
     //     &self,
     //     master_xpub: Xpub,
@@ -584,7 +585,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make private in the future
+    // TODO make private in the future to force the use of next_winternitz
     pub fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -648,7 +649,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make private in the future
+    // TODO make private in the future to force next_multiple_winternitz
     pub fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -723,7 +724,11 @@ impl KeyManager {
         rng: &mut R,
         bits: usize,
     ) -> Result<String, KeyManagerError> {
-        // TODO error if bits > 16384 ?? avoid too large keys
+        if bits > MAX_RSA_BITS {
+            return Err(KeyManagerError::InvalidRSAKeySize(
+                format!("RSA key size too large, maximum is {} bits", MAX_RSA_BITS),
+            ));
+        }
         let rsa_keypair = RSAKeyPair::new(rng, bits)?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
@@ -734,7 +739,7 @@ impl KeyManager {
     /*********** Signing *************/
     /*********************************/
 
-    // TODO discuss with diegoM. key type checks for signing, we were using any key for ecdsa or schnorr
+    // TODO discuss with diegoM. added key type checks for signing, we were using any key for ecdsa or schnorr
 
     pub fn sign_ecdsa_message(
         &self,

@@ -94,6 +94,9 @@ pub enum KeyManagerError {
     #[error("Rsa key not found")]
     RsaKeyNotFound,
 
+    #[error("Invalid RSA key size: {0}")]
+    InvalidRSAKeySize(String),
+
     #[error("Cannot use ECDSA with Taproot (P2TR) keys. Use Schnorr signature instead")]
     EcdsaWithTaprootKey,
 

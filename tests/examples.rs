@@ -50,6 +50,13 @@ mod sign_verify_winternitz_example {
     }
 }
 
+mod rsa_example {
+    include!("../examples/rsa.rs");
+    pub fn run_example() {
+        main();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -85,5 +92,10 @@ mod tests {
     #[test]
     fn test_sign_verify_winternitz_example() {
         super::sign_verify_winternitz_example::run_example();
+    }
+
+    #[test]
+    fn test_rsa_example() {
+        super::rsa_example::run_example();
     }
 }

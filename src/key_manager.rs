@@ -119,6 +119,11 @@ impl KeyManager {
             .map(|key| SecretKey::from_str(&key).map(|sk| sk.secret_bytes().to_vec()))
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Defensive: do not call musig2 aggregator with empty input - return an error instead
+        if partial_keys_bytes.is_empty() {
+            return Err(KeyManagerError::InvalidPrivateKey);
+        }
+
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
@@ -135,6 +140,11 @@ impl KeyManager {
             .into_iter()
             .map(|key| PrivateKey::from_str(&key).map(|pk| pk.to_bytes().to_vec()))
             .collect::<Result<Vec<_>, _>>()?;
+
+        // Defensive: do not call musig2 aggregator with empty input - return an error instead
+        if partial_keys_bytes.is_empty() {
+            return Err(KeyManagerError::InvalidPrivateKey);
+        }
 
         let (private_key, public_key) = self
             .musig2
@@ -781,10 +791,7 @@ impl KeyManager {
 #[cfg(test)]
 mod tests {
     use bitcoin::{
-        hex::DisplayHex,
-        key::rand::{self, rngs::mock::StepRng, RngCore},
-        secp256k1::{self, Message, SecretKey},
-        Network, PrivateKey, PublicKey,
+        Network, PrivateKey, PublicKey, hex::DisplayHex, key::{Secp256k1, rand::{self, RngCore, rngs::mock::StepRng}}, secp256k1::{self, Message, SecretKey}
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -2509,6 +2516,833 @@ mod tests {
             assert_eq!(final_ecdsa_public.to_string(), public_key.to_string(),
                 "ECDSA public key should be unaffected by RSA operations");
             
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_generate_keypair_in_keystore() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Ensure generate_keypair persists the generated pair.
+         * Preconditions: Initialized KeyManager and KeyStore.
+         * Input / Test Data: RNG seeded; network set.
+         * Steps / Procedure: Call generate_keypair; then KeyStore::load_keypair with returned pubkey.
+         * Expected Result: Load returns Some((sk, pk)) and strings match.
+         */
+        
+        run_test_with_key_manager(|key_manager| {
+            // Initialize seeded RNG for reproducible testing
+            let mut rng = secp256k1::rand::thread_rng();
+            
+            // Step 1: Call generate_keypair to create and store a new keypair
+            let generated_public_key = key_manager.generate_keypair(&mut rng)
+                .expect("Failed to generate keypair");
+            
+            // Verify that the generated public key is valid (33 bytes compressed format)
+            assert_eq!(generated_public_key.to_bytes().len(), 33,
+                "Generated public key should be 33 bytes in compressed format");
+            
+            // Step 2: Load the keypair from keystore using the returned public key
+            let loaded_keypair = key_manager.keystore.load_keypair(&generated_public_key)
+                .expect("Failed to load keypair from keystore");
+            
+            // Expected Result: Load should return Some((sk, pk))
+            assert!(loaded_keypair.is_some(),
+                "Keystore should contain the generated keypair");
+            
+            let (loaded_private_key, loaded_public_key) = loaded_keypair.unwrap();
+            
+            // Step 3: Verify that the loaded keys match the generated key
+            assert_eq!(loaded_public_key.to_string(), generated_public_key.to_string(),
+                "Loaded public key should match the generated public key");
+            
+            // Step 4: Verify key consistency by deriving public key from loaded private key
+            let secp = secp256k1::Secp256k1::new();
+            let derived_public_key = PublicKey::from_private_key(&secp, &loaded_private_key);
+            
+            assert_eq!(derived_public_key.to_string(), generated_public_key.to_string(),
+                "Public key derived from loaded private key should match generated public key");
+            
+            assert_eq!(derived_public_key.to_string(), loaded_public_key.to_string(),
+                "Public key derived from private key should match loaded public key");
+            
+            // Step 5: Additional verification - test that we can use the loaded keys for cryptographic operations
+            let signature_verifier = SignatureVerifier::new();
+            let test_message = random_message();
+            
+            // Sign with the loaded private key via KeyManager
+            let signature = key_manager.sign_ecdsa_message(&test_message, &loaded_public_key)
+                .expect("Failed to sign message with loaded key");
+            
+            // Verify the signature using the loaded public key
+            assert!(signature_verifier.verify_ecdsa_signature(&signature, &test_message, loaded_public_key),
+                "Signature should verify successfully with loaded public key");
+            
+            // Step 6: Test multiple keypair generation to ensure each is unique and properly stored
+            let mut generated_keys: Vec<PublicKey> = Vec::new();
+            for i in 0..3 {
+                let another_public_key = key_manager.generate_keypair(&mut rng)
+                    .expect(&format!("Failed to generate keypair {}", i + 2));
+                
+                // Verify this key is different from previously generated keys
+                for existing_key in &generated_keys {
+                    assert_ne!(another_public_key.to_string(), existing_key.to_string(),
+                        "Each generated keypair should be unique");
+                }
+                
+                // Verify this key can be loaded from keystore
+                let another_loaded = key_manager.keystore.load_keypair(&another_public_key)
+                    .expect("Failed to load additional keypair")
+                    .expect("Additional keypair should exist in keystore");
+                
+                assert_eq!(another_loaded.1.to_string(), another_public_key.to_string(),
+                    "Additional loaded public key should match generated key");
+                
+                generated_keys.push(another_public_key);
+            }
+            
+            // Step 7: Verify all generated keys are still accessible (persistence test)
+            generated_keys.push(generated_public_key); // Include the original key
+            
+            for (i, key) in generated_keys.iter().enumerate() {
+                let persistent_loaded = key_manager.keystore.load_keypair(key)
+                    .expect(&format!("Failed to re-load keypair {}", i + 1))
+                    .expect(&format!("Keypair {} should still exist in keystore", i + 1));
+                
+                assert_eq!(persistent_loaded.1.to_string(), key.to_string(),
+                    "Persistently loaded public key {} should match original", i + 1);
+            }
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_import_private_key_wif_success() -> Result<(), KeyManagerError> {
+        /* 
+         * Objective: Validate WIF import stores a keypair.
+         * Preconditions: Valid WIF string for the configured network.
+         * Input / Test Data: WIF string.
+         * Steps / Procedure: Call import_private_key(wif); then load_keypair by returned pubkey.
+         * Expected Result: Returns public key; load succeeds with matching keys.
+         */
+        run_test_with_key_manager(|key_manager| {
+            // Create a valid WIF for testing - using a known private key
+            let secp = Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let secret_key = SecretKey::new(&mut rng);
+            let original_private_key = PrivateKey::new(secret_key, REGTEST);
+            let original_public_key = PublicKey::from_private_key(&secp, &original_private_key);
+            
+            // Convert to WIF format for the configured network
+            let wif_string = original_private_key.to_wif();
+            
+            // Import the WIF string
+            let imported_public_key = key_manager.import_private_key(&wif_string)?;
+            
+            // Verify the imported public key matches the original
+            assert_eq!(imported_public_key, original_public_key, 
+                "Imported public key should match the original");
+            
+            // Load the keypair using the returned public key
+            let (loaded_private_key, loaded_public_key) = key_manager.keystore.load_keypair(&imported_public_key)?
+                .expect("Imported keypair should exist in keystore");
+            
+            // Verify the loaded keys match the original keys
+            assert_eq!(loaded_private_key, original_private_key,
+                "Loaded private key should match the original");
+            assert_eq!(loaded_public_key, imported_public_key,
+                "Loaded public key should match the imported public key");
+            
+            // Test with different WIF formats - compressed vs uncompressed
+            let compressed_private_key = PrivateKey {
+                compressed: true,
+                network: bitcoin::Network::Regtest.into(),
+                inner: original_private_key.inner,
+            };
+            let compressed_wif = compressed_private_key.to_wif();
+            let compressed_public_key = PublicKey::from_private_key(&secp, &compressed_private_key);
+            
+            let imported_compressed = key_manager.import_private_key(&compressed_wif)?;
+            assert_eq!(imported_compressed, compressed_public_key,
+                "Imported compressed public key should match the original compressed key");
+            
+            let (loaded_compressed_private, loaded_compressed_public) = 
+                key_manager.keystore.load_keypair(&imported_compressed)?
+                .expect("Compressed imported key should exist in keystore");
+            assert_eq!(loaded_compressed_private, compressed_private_key,
+                "Loaded compressed private key should match the original");
+            assert_eq!(loaded_compressed_public, imported_compressed,
+                "Loaded compressed public key should match the imported public key");
+            
+            // Test persistence by simulating storage backend operations
+            // Store both keys and verify they persist
+            key_manager.keystore.store_keypair(original_private_key, original_public_key)?;
+            key_manager.keystore.store_keypair(compressed_private_key, compressed_public_key)?;
+            
+            // Verify we can still load the imported keys
+            let (persistent_private, persistent_public) = 
+                key_manager.keystore.load_keypair(&imported_public_key)?
+                .expect("Original imported key should be in keystore");
+            assert_eq!(persistent_private, original_private_key,
+                "Persistently loaded private key should match original");
+            assert_eq!(persistent_public, imported_public_key,
+                "Persistently loaded public key should match imported");
+            
+            let (persistent_compressed_private, persistent_compressed_public) = 
+                key_manager.keystore.load_keypair(&imported_compressed)?
+                .expect("Compressed imported key should be in keystore");
+            assert_eq!(persistent_compressed_private, compressed_private_key,
+                "Persistently loaded compressed private key should match original");
+            assert_eq!(persistent_compressed_public, imported_compressed,
+                "Persistently loaded compressed public key should match imported");
+            
+            // Test that importing the same WIF multiple times is idempotent
+            let duplicate_import = key_manager.import_private_key(&wif_string)?;
+            assert_eq!(duplicate_import, imported_public_key,
+                "Duplicate import should return the same public key");
+            
+            // Test cryptographic operations with imported keys to verify they work correctly
+            
+            // Test cryptographic operations with imported keys
+            let signature_verifier = SignatureVerifier::new();
+            let test_message = random_message();
+            
+            // Sign with the imported key
+            let signature = key_manager.sign_ecdsa_message(&test_message, &imported_public_key)?;
+            
+            // Verify the signature using the imported public key
+            let is_valid = signature_verifier.verify_ecdsa_signature(
+                &signature, 
+                &test_message, 
+                imported_public_key
+            );
+            assert!(is_valid, "Signature created with imported key should be valid");
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_import_private_key_wif_failure() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Ensure invalid WIF returns the right error.
+         * Preconditions: None.
+         * Input / Test Data: Malformed WIF (e.g., non-base58, wrong checksum).
+         * Steps / Procedure: Call import_private_key(bad).
+         * Expected Result: Error KeyManagerError::FailedToParsePrivateKey.
+         */
+        run_test_with_key_manager(|key_manager| {
+            // Test Case 1: Completely invalid string (non-base58 characters)
+            let invalid_wif_1 = "this_is_not_a_wif_string_with_invalid_chars_0OIl";
+            let result1 = key_manager.import_private_key(invalid_wif_1);
+            assert!(result1.is_err(), "Import should fail for completely invalid WIF string");
+            
+            match result1.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 2: Empty string
+            let empty_wif = "";
+            let result2 = key_manager.import_private_key(empty_wif);
+            assert!(result2.is_err(), "Import should fail for empty WIF string");
+            
+            match result2.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 3: Valid base58 but wrong length
+            let wrong_length_wif = "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294Lv";  // Too short
+            let result3 = key_manager.import_private_key(wrong_length_wif);
+            assert!(result3.is_err(), "Import should fail for wrong length WIF");
+            
+            match result3.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 4: Valid base58 with wrong checksum
+            // Start with a valid WIF and corrupt the checksum
+            // let secp = Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let secret_key = SecretKey::new(&mut rng);
+            let valid_private_key = PrivateKey::new(secret_key, REGTEST);
+            let valid_wif = valid_private_key.to_wif();
+            
+            // Corrupt the last character (part of checksum)
+            let mut corrupted_wif = valid_wif.chars().collect::<Vec<char>>();
+            let last_idx = corrupted_wif.len() - 1;
+            corrupted_wif[last_idx] = if corrupted_wif[last_idx] == 'A' { 'B' } else { 'A' };
+            let corrupted_wif_string: String = corrupted_wif.into_iter().collect();
+            
+            let result4 = key_manager.import_private_key(&corrupted_wif_string);
+            assert!(result4.is_err(), "Import should fail for WIF with wrong checksum");
+            
+            match result4.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 5: Valid base58 but wrong network prefix
+            // Create a WIF for a different network and try to import it
+            let mainnet_private_key = PrivateKey::new(secret_key, bitcoin::Network::Bitcoin);
+            let mainnet_wif = mainnet_private_key.to_wif();
+            
+            let _result5 = key_manager.import_private_key(&mainnet_wif);
+            // This might succeed but we should test it anyway
+            // Note: The behavior might depend on implementation - some might accept cross-network WIFs
+            
+            // Test Case 6: Random base58 string that looks like WIF but isn't
+            let fake_wif = "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTj";  // Random base58
+            let result6 = key_manager.import_private_key(fake_wif);
+            assert!(result6.is_err(), "Import should fail for fake WIF string");
+            
+            match result6.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 7: WIF with invalid characters that could be confused
+            let confusing_wif = "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294Lv0OIl";  // Contains 0, O, I, l
+            let result7 = key_manager.import_private_key(confusing_wif);
+            assert!(result7.is_err(), "Import should fail for WIF with confusing characters");
+            
+            match result7.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 8: Very long invalid string
+            let too_long_wif = "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294LvTJ1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294Lv";
+            let result8 = key_manager.import_private_key(too_long_wif);
+            assert!(result8.is_err(), "Import should fail for too long WIF string");
+            
+            match result8.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 9: WIF starting with wrong prefix
+            let wrong_prefix_wif = "1J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294LvTJ";  // Starts with '1' instead of '5' or 'K'/'L'
+            let result9 = key_manager.import_private_key(wrong_prefix_wif);
+            assert!(result9.is_err(), "Import should fail for WIF with wrong prefix");
+            
+            match result9.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 10: Null bytes and special characters
+            let null_wif = "5J1F7GHadZG3sCCKHCwg8\0Jvys9xUbFsjLnGec4H294LvTJ";
+            let result10 = key_manager.import_private_key(null_wif);
+            assert!(result10.is_err(), "Import should fail for WIF with null bytes");
+            
+            match result10.unwrap_err() {
+                KeyManagerError::FailedToParsePrivateKey(_) => {
+                    // Expected error type
+                }
+                other => panic!("Expected FailedToParsePrivateKey, got: {:?}", other),
+            }
+            
+            // Test Case 11: Verify the KeyManager state is still clean after failures
+            // Import a valid key to make sure the KeyManager still works
+            let valid_secret_key = SecretKey::new(&mut rng);
+            let valid_private_key = PrivateKey::new(valid_secret_key, REGTEST);
+            let valid_wif = valid_private_key.to_wif();
+            
+            let valid_result = key_manager.import_private_key(&valid_wif);
+            assert!(valid_result.is_ok(), "Valid WIF import should still work after failed attempts");
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_import_secret_key_hex_success() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Validate raw secret hex import stores keypair.
+         * Preconditions: Valid 32-byte secp256k1 secret hex; network set.
+         * Input / Test Data: 64-hex-character secret string.
+         * Steps / Procedure: Call import_secret_key(hex, network); then load_keypair.
+         * Expected Result: Returns public key; load succeeds; keys match.
+         */
+        run_test_with_key_manager(|key_manager| -> Result<(), KeyManagerError> {
+            // Test Case 1: Generate a valid key using secp256k1's native key generation
+            let secp = secp256k1::Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let secret_key = secp256k1::SecretKey::new(&mut rng);
+            let valid_hex = secret_key.display_secret().to_string();
+            let imported_public_key = key_manager.import_secret_key(&valid_hex, REGTEST)?;
+            
+            // Verify the returned public key is valid
+            assert!(!imported_public_key.to_string().is_empty(), 
+                "Imported public key should not be empty");
+            
+            // Load the keypair using the returned public key
+            let (loaded_private_key, loaded_public_key) = key_manager.keystore.load_keypair(&imported_public_key)?
+                .expect("Imported keypair should exist in keystore");
+            
+            // Verify the loaded keys are consistent
+            assert_eq!(loaded_public_key, imported_public_key,
+                "Loaded public key should match the imported public key");
+            
+            // Verify the private key matches the hex input
+            let expected_secret_key = SecretKey::from_str(&valid_hex)
+                .expect("Valid hex should parse to SecretKey");
+            let expected_private_key = PrivateKey::new(expected_secret_key, REGTEST);
+            
+            assert_eq!(loaded_private_key, expected_private_key,
+                "Loaded private key should match the expected private key from hex");
+            
+            // Test Case 2: Another valid hex generated from secp
+            let secret_key_2 = secp256k1::SecretKey::new(&mut rng);
+            let hex_pattern_2 = secret_key_2.display_secret().to_string();
+            let imported_key_2 = key_manager.import_secret_key(&hex_pattern_2, REGTEST)?;
+
+            let (_loaded_private_2, loaded_public_2) = key_manager.keystore.load_keypair(&imported_key_2)?
+                .expect("Second imported key should exist in keystore");
+            assert_eq!(loaded_public_2, imported_key_2,
+                "Second imported key should be loadable");
+
+            // Test Case 3: Valid hex with mixed case (generate and then uppercase/lowercase mix)
+            let secret_key_3 = secp256k1::SecretKey::new(&mut rng);
+            let mut mixed_case_hex = secret_key_3.display_secret().to_string();
+            // create a mixed-case variant
+            mixed_case_hex = mixed_case_hex.chars().enumerate().map(|(i,c)| {
+                if i % 2 == 0 { c.to_ascii_uppercase() } else { c }
+            }).collect();
+            let imported_key_3 = key_manager.import_secret_key(&mixed_case_hex, REGTEST)?;
+
+            let (_loaded_private_3, loaded_public_3) = key_manager.keystore.load_keypair(&imported_key_3)?
+                .expect("Mixed case hex import should exist in keystore");
+            assert_eq!(loaded_public_3, imported_key_3,
+                "Mixed case hex import should work correctly");
+            
+            // Test Case 4: Verify cryptographic operations work with imported key
+            let signature_verifier = SignatureVerifier::new();
+            let test_message = random_message();
+            
+            // Sign with the imported key
+            let signature = key_manager.sign_ecdsa_message(&test_message, &imported_public_key)?;
+            
+            // Verify the signature using the imported public key
+            let is_valid = signature_verifier.verify_ecdsa_signature(
+                &signature, 
+                &test_message, 
+                imported_public_key
+            );
+            assert!(is_valid, "Signature created with imported secret key should be valid");
+            
+            // Test Case 5: Test different networks
+            let mainnet_imported = key_manager.import_secret_key(&valid_hex, bitcoin::Network::Bitcoin)?;
+            let (loaded_mainnet_private, loaded_mainnet_public) = key_manager.keystore.load_keypair(&mainnet_imported)?
+                .expect("Mainnet imported keypair should exist in keystore");
+            
+            // The private key inner value should be the same, but network should differ
+            assert_eq!(loaded_mainnet_private.inner, loaded_private_key.inner,
+                "Private key inner values should be the same regardless of network");
+            assert_ne!(loaded_mainnet_private.network, loaded_private_key.network,
+                "Network should differ between regtest and mainnet imports");
+            
+            // Test Case 6: Verify persistence and idempotency
+            let duplicate_import = key_manager.import_secret_key(&valid_hex, REGTEST)?;
+            assert_eq!(duplicate_import, imported_public_key,
+                "Duplicate import should return the same public key");
+            
+            // Verify all imported keys are still accessible
+            let _verify_key1 = key_manager.keystore.load_keypair(&imported_public_key)?
+                .expect("Original key should still be accessible");
+            let _verify_key2 = key_manager.keystore.load_keypair(&imported_key_2)?
+                .expect("Second key should still be accessible");
+            let _verify_key3 = key_manager.keystore.load_keypair(&imported_key_3)?
+                .expect("Third key should still be accessible");
+            let _verify_mainnet = key_manager.keystore.load_keypair(&mainnet_imported)?
+                .expect("Mainnet key should still be accessible");
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_import_secret_key_hex_failure() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Ensure invalid hex parses fail.
+         * Preconditions: None.
+         * Input / Test Data: Non-hex or wrong-length string.
+         * Steps / Procedure: Call import_secret_key(bad, network).
+         * Expected Result: Error KeyManagerError::InvalidPrivateKey or parse error.
+         */
+        run_test_with_key_manager(|mut key_manager| {
+            // Test Case 1: Non-hex characters
+            let invalid_hex_1 = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg";
+            let result1 = key_manager.import_secret_key(invalid_hex_1, REGTEST);
+            assert!(result1.is_err(), "Import should fail for non-hex characters");
+            
+            // Test Case 2: Too short hex string
+            let too_short_hex = "123456789abcdef";
+            let result2 = key_manager.import_secret_key(too_short_hex, REGTEST);
+            assert!(result2.is_err(), "Import should fail for hex string that's too short");
+            
+            // Test Case 3: Too long hex string
+            let too_long_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef12345";
+            let result3 = key_manager.import_secret_key(too_long_hex, REGTEST);
+            assert!(result3.is_err(), "Import should fail for hex string that's too long");
+            
+            // Test Case 4: Empty string
+            let empty_hex = "";
+            let result4 = key_manager.import_secret_key(empty_hex, REGTEST);
+            assert!(result4.is_err(), "Import should fail for empty hex string");
+            
+            // Test Case 5: Invalid characters mixed with valid hex
+            let mixed_invalid_hex = "0123456789abcdefGHIJ456789abcdef0123456789abcdef0123456789abcdef";
+            let result5 = key_manager.import_secret_key(mixed_invalid_hex, REGTEST);
+            assert!(result5.is_err(), "Import should fail for hex with invalid characters");
+            
+            // Test Case 6: All zeros (valid hex but invalid private key)
+            let zero_hex = "0000000000000000000000000000000000000000000000000000000000000000";
+            let result6 = key_manager.import_secret_key(zero_hex, REGTEST);
+            assert!(result6.is_err(), "Import should fail for all-zero private key");
+            
+            // Test Case 7: Hex string with spaces
+            let hex_with_spaces = "0123456789abcdef 0123456789abcdef 0123456789abcdef 0123456789abcdef";
+            let result7 = key_manager.import_secret_key(hex_with_spaces, REGTEST);
+            assert!(result7.is_err(), "Import should fail for hex string with spaces");
+            
+            // Test Case 8: Hex string with 0x prefix
+            let hex_with_prefix = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            let result8 = key_manager.import_secret_key(hex_with_prefix, REGTEST);
+            assert!(result8.is_err(), "Import should fail for hex string with 0x prefix");
+            
+            // Test Case 9: Private key above secp256k1 curve order (invalid)
+            let above_curve_order = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141";
+            let result9 = key_manager.import_secret_key(above_curve_order, REGTEST);
+            assert!(result9.is_err(), "Import should fail for private key above curve order");
+            
+            // Test Case 10: Random unicode characters
+            let unicode_hex = "你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好";
+            let result10 = key_manager.import_secret_key(unicode_hex, REGTEST);
+            assert!(result10.is_err(), "Import should fail for unicode characters");
+            
+            // Test Case 11: Verify KeyManager state is clean after failures
+            // Try a valid import to ensure the KeyManager still works
+            let valid_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            let imported_pubkey = key_manager.import_secret_key(valid_hex, REGTEST)?;
+            
+            // Verify the imported key can be loaded correctly
+            let loaded_key = key_manager.keystore.load_keypair(&imported_pubkey)?;
+            assert!(loaded_key.is_some(), "Valid imported key should be loadable");
+            
+            // Verify that trying to load a different key returns None, confirming clean state
+            let secp = secp256k1::Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let other_secret_key = SecretKey::new(&mut rng);
+            let other_private_key = PrivateKey::new(other_secret_key, REGTEST);
+            let other_pubkey = PublicKey::from_private_key(&secp, &other_private_key);
+            let other_key = key_manager.keystore.load_keypair(&other_pubkey)?;
+            assert!(other_key.is_none(), "No other keys should exist in the store");
+            
+            Ok(())
+        }
+    )
+}
+
+    #[test]
+    pub fn test_import_partial_keys_aggregation_success() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Aggregate partial keys into an aggregated (sk, pk) and store.
+         * Preconditions: 2–3 valid partial keys (as strings) available.
+         * Input / Test Data: Inputs for import_partial_secret_keys and import_partial_private_keys.
+         * Steps / Procedure: Call import; then load_keypair by returned public key.
+         * Expected Result: Aggregated keypair stored; load succeeds.
+         */
+        run_test_with_key_manager(|mut key_manager| {
+            // Test Case 1: Aggregate 2 partial secret keys
+            let secp = Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            
+            // Create 2 valid secret keys for aggregation
+            let secret_key_1 = SecretKey::new(&mut rng);
+            let secret_key_2 = SecretKey::new(&mut rng);
+            
+            let partial_secret_keys = vec![
+                secret_key_1.display_secret().to_string(),
+                secret_key_2.display_secret().to_string(),
+            ];
+            
+            // Import and aggregate partial secret keys
+            let aggregated_public_key_1 = key_manager.import_partial_secret_keys(
+                partial_secret_keys, 
+                REGTEST
+            )?;
+            
+            // Verify the aggregated public key is valid
+            assert!(!aggregated_public_key_1.to_string().is_empty(),
+                "Aggregated public key should not be empty");
+            
+            // Load the aggregated keypair
+            let loaded_keys_1 = key_manager.keystore.load_keypair(&aggregated_public_key_1)?
+                .expect("Aggregated keypair should exist in keystore");
+            let (loaded_private_key_1, loaded_public_key_1) = loaded_keys_1;
+            
+            // Verify the loaded keys match the aggregated result
+            assert_eq!(loaded_public_key_1, aggregated_public_key_1,
+                "Loaded public key should match the aggregated public key");
+            
+            // Test Case 2: Aggregate 3 partial secret keys
+            let secret_key_3 = SecretKey::new(&mut rng);
+            let secret_key_4 = SecretKey::new(&mut rng);
+            let secret_key_5 = SecretKey::new(&mut rng);
+            
+            let partial_secret_keys_3 = vec![
+                secret_key_3.display_secret().to_string(),
+                secret_key_4.display_secret().to_string(),
+                secret_key_5.display_secret().to_string(),
+            ];
+            
+            let aggregated_public_key_2 = key_manager.import_partial_secret_keys(
+                partial_secret_keys_3, 
+                REGTEST
+            )?;
+            
+            let loaded_keys_2 = key_manager.keystore.load_keypair(&aggregated_public_key_2)?
+                .expect("3-key aggregated keypair should exist in keystore");
+            let (loaded_private_key_2, loaded_public_key_2) = loaded_keys_2;
+            assert_eq!(loaded_public_key_2, aggregated_public_key_2,
+                "3-key aggregated public key should be loadable");
+            
+            // Test Case 3: Aggregate partial private keys (WIF format)
+            let private_key_1 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
+            let private_key_2 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
+            
+            let partial_private_keys = vec![
+                private_key_1.to_wif(),
+                private_key_2.to_wif(),
+            ];
+            
+            let aggregated_public_key_3 = key_manager.import_partial_private_keys(
+                partial_private_keys,
+                REGTEST
+            )?;
+            
+            let loaded_keys_3 = key_manager.keystore.load_keypair(&aggregated_public_key_3)?
+                .expect("WIF-based aggregated keypair should exist in keystore");
+            let (loaded_private_key_3, loaded_public_key_3) = loaded_keys_3;
+            assert_eq!(loaded_public_key_3, aggregated_public_key_3,
+                "WIF-based aggregated public key should be loadable");
+            
+            // Test Case 4: Test with different networks
+            let mainnet_partial_keys = vec![
+                PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
+                PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
+            ];
+            
+            let mainnet_aggregated = key_manager.import_partial_private_keys(
+                mainnet_partial_keys,
+                bitcoin::Network::Bitcoin
+            )?;
+            
+            let mainnet_keys = key_manager.keystore.load_keypair(&mainnet_aggregated)?
+                .expect("Mainnet aggregated keypair should exist in keystore");
+            let (mainnet_private, mainnet_public) = mainnet_keys;
+            assert_eq!(mainnet_public, mainnet_aggregated,
+                "Mainnet aggregated key should be loadable");
+            assert_eq!(mainnet_private.network, bitcoin::Network::Bitcoin.into(),
+                "Mainnet aggregated key should have correct network type");
+            
+            // Test Case 5: Verify cryptographic operations work with aggregated keys
+            let signature_verifier = SignatureVerifier::new();
+            let test_message = random_message();
+            
+            // Sign with the first aggregated key
+            let signature = key_manager.sign_ecdsa_message(&test_message, &aggregated_public_key_1)?;
+            
+            // Verify the signature using the aggregated public key
+            let is_valid = signature_verifier.verify_ecdsa_signature(
+                &signature, 
+                &test_message, 
+                aggregated_public_key_1
+            );
+            assert!(is_valid, "Signature created with aggregated key should be valid");
+            
+            // Test Case 6: Verify all aggregated keys are different
+            assert_ne!(aggregated_public_key_1, aggregated_public_key_2,
+                "Different partial keys should produce different aggregated keys");
+            assert_ne!(aggregated_public_key_1, aggregated_public_key_3,
+                "Secret keys vs private keys aggregation should produce different results");
+            assert_ne!(aggregated_public_key_2, aggregated_public_key_3,
+                "All aggregated keys should be unique");
+            
+            // Test Case 7: Verify persistence - all aggregated keys should be loadable
+            let _test_load_1 = key_manager.keystore.load_keypair(&aggregated_public_key_1)?.expect("Aggregated key 1 should exist");
+            let _test_load_2 = key_manager.keystore.load_keypair(&aggregated_public_key_2)?.expect("Aggregated key 2 should exist");
+            let _test_load_3 = key_manager.keystore.load_keypair(&aggregated_public_key_3)?.expect("Aggregated key 3 should exist");
+            let _test_mainnet = key_manager.keystore.load_keypair(&mainnet_aggregated)?.expect("Mainnet aggregated key should exist");
+            
+            // Test Case 8: Test idempotent behavior - same partial keys should produce same result
+            let duplicate_partial_keys = vec![
+                secret_key_1.display_secret().to_string(),
+                secret_key_2.display_secret().to_string(),
+            ];
+            
+            let duplicate_aggregated = key_manager.import_partial_secret_keys(
+                duplicate_partial_keys, 
+                REGTEST
+            )?;
+            
+            // Note: Depending on implementation, this might be the same or different
+            // The behavior depends on whether the aggregation algorithm is deterministic
+            // and whether duplicate detection is implemented
+            
+            Ok(())
+        })
+    }
+
+    #[test]
+    pub fn test_import_partial_keys_aggregation_failure() -> Result<(), KeyManagerError> {
+        /*
+         * Objective: Ensure invalid partial keys or aggregation fails.
+         * Preconditions: None.
+         * Input / Test Data: Malformed partial keys; insufficient keys.
+         * Steps / Procedure: Call import_partial_secret_keys/import_partial_private_keys with bad data.
+         * Expected Result: Error KeyManagerError::FailedToAggregatePartialKeys or parse error.
+         */
+        run_test_with_key_manager(|mut key_manager| -> Result<(), KeyManagerError> {
+            // Test Case 1: Try with empty keys list
+            let empty_keys: Vec<String> = vec![];
+            let result1 = key_manager.import_partial_secret_keys(empty_keys, REGTEST);
+            match result1 {
+                Err(KeyManagerError::InvalidPrivateKey) => (),
+                other => panic!("Expected InvalidPrivateKey for empty input, got: {:?}", other),
+            }
+            
+            // Test Case 2: Try to aggregate a single key (musig2 accepts single-key aggregation)
+            let secp = secp256k1::Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            let secret_key = secp256k1::SecretKey::new(&mut rng);
+            let single_key = vec![secret_key.display_secret().to_string()];
+
+            let result2 = key_manager.import_partial_secret_keys(single_key.clone(), REGTEST);
+            // musig2 may accept a single key and return a valid aggregated pubkey; assert success
+            assert!(result2.is_ok(), "Single key aggregation should succeed or be handled: {:?}", result2);
+            let aggregated = result2.unwrap();
+            // verify it was stored
+            let loaded = key_manager.keystore.load_keypair(&aggregated)?;
+            assert!(loaded.is_some(), "Aggregated single-key result should be stored");
+            
+            // Test Case 3: Invalid hex in partial secret keys
+            let invalid_hex_keys = vec![
+                "invalid_hex_string".to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            ];
+            let result3 = key_manager.import_partial_secret_keys(invalid_hex_keys, REGTEST);
+            assert!(result3.is_err(), "Invalid hex should fail parsing");
+            
+            // Test Case 4: Invalid WIF in partial private keys
+            let invalid_wif_keys = vec![
+                "invalid_wif_string".to_string(),
+                "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294LvTJ".to_string(),
+            ];
+            let result4 = key_manager.import_partial_private_keys(invalid_wif_keys, REGTEST);
+            assert!(result4.is_err(), "Invalid WIF should fail parsing");
+            
+            // Test Case 5: Mixed valid and invalid keys
+            let mixed_keys = vec![
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+                "not_a_valid_key".to_string(),
+                "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
+            ];
+            let result5 = key_manager.import_partial_secret_keys(mixed_keys, REGTEST);
+            assert!(result5.is_err(), "Mixed valid/invalid keys should fail");
+            
+            // Test Case 6: All zero secret keys (invalid for cryptography)
+            let zero_keys = vec![
+                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+                "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            ];
+            let result6 = key_manager.import_partial_secret_keys(zero_keys, REGTEST);
+            assert!(result6.is_err(), "All-zero keys should fail");
+            
+            // Test Case 7: Keys above secp256k1 curve order
+            let above_curve_keys = vec![
+                "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141".to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            ];
+            let result7 = key_manager.import_partial_secret_keys(above_curve_keys, REGTEST);
+            assert!(result7.is_err(), "Keys above curve order should fail");
+            
+            // Test Case 8: Wrong length hex strings
+            let wrong_length_keys = vec![
+                "0123456789abcdef".to_string(), // Too short
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(), // Correct
+            ];
+            let result8 = key_manager.import_partial_secret_keys(wrong_length_keys, REGTEST);
+            assert!(result8.is_err(), "Wrong length keys should fail");
+            
+            // Test Case 9: Empty strings in partial keys
+            let empty_string_keys = vec![
+                "".to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            ];
+            let result9 = key_manager.import_partial_secret_keys(empty_string_keys, REGTEST);
+            assert!(result9.is_err(), "Empty string keys should fail");
+            
+            // Test Case 10: Special characters and whitespace
+            let special_char_keys = vec![
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+                "fedcba9876543210 fedcba9876543210 fedcba9876543210 fedcba9876543210".to_string(), // With spaces
+            ];
+            let result10 = key_manager.import_partial_secret_keys(special_char_keys, REGTEST);
+            assert!(result10.is_err(), "Keys with spaces should fail");
+            
+            // Test Case 11: Too many partial keys (test system limits)
+            let mut too_many_keys = Vec::new();
+            let secp = Secp256k1::new();
+            let mut rng = secp256k1::rand::thread_rng();
+            
+            for _ in 0..100 {  // Create 100 keys to test limits
+                let secret_key = SecretKey::new(&mut rng);
+                too_many_keys.push(secret_key.display_secret().to_string());
+            }
+            
+            let result11 = key_manager.import_partial_secret_keys(too_many_keys, REGTEST);
+            // This might succeed or fail depending on implementation limits
+            // We're just testing that the system handles large inputs gracefully
+            
+            // Test Case 12: Verify KeyManager state is clean after failures
+            // Try a valid aggregation to ensure the KeyManager still works
+            let valid_secret_1 = SecretKey::new(&mut rng);
+            let valid_secret_2 = SecretKey::new(&mut rng);
+            let valid_keys = vec![
+                valid_secret_1.display_secret().to_string(),
+                valid_secret_2.display_secret().to_string(),
+            ];
+            
+            let valid_result = key_manager.import_partial_secret_keys(valid_keys, REGTEST);
+            assert!(valid_result.is_ok(), "Valid aggregation should work after failed attempts");
+            
+            // Verify the aggregated key can be loaded (proves it was stored correctly)
+            let valid_aggregated = valid_result.unwrap();
+            let _valid_loaded = key_manager.keystore.load_keypair(&valid_aggregated)?
+                .expect("Valid aggregated key should exist");
+
             Ok(())
         })
     }

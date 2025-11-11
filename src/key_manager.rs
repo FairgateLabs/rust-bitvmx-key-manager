@@ -2739,6 +2739,10 @@ mod tests {
         let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
         let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
         let expected_p2pkh_0 =
             PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
@@ -2754,6 +2758,10 @@ mod tests {
         let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
         let expected_p2shp2wpkh_0 =
@@ -2771,6 +2779,10 @@ mod tests {
         let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
         let expected_p2wpkh_0 =
             PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
@@ -2783,6 +2795,15 @@ mod tests {
 
         // TODO taproot keys
         // BIP86 - Taproot (P2TR)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX"; // missing value
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -2825,9 +2846,9 @@ mod tests {
         let expected_account_extended_pubkey = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "xprv9xpXFhFpqdQK3TmytPBqXtGSwS3DLjojFhTGht8gwAAii8py5X6pxeBnQ6ehJiyJ6nDjWGJfZ95WxByFXVkDxHXrqu53WCRGypk2ttuqncb";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_privkey);
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
         let expected_p2pkh_0 =
@@ -2845,9 +2866,9 @@ mod tests {
         let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "yprvAHwhK6RbpuS3dgCYHM5jc2ZvEKd7Bi61u9FVhYMpgMSuZS613T1xxQeKTffhrHY79hZ5PsskBjcc6C2V7DrnsMsNaGDaWev3GLRQRgV7hxF";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_privkey);
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
         let expected_p2shp2wpkh_0 =
@@ -2865,9 +2886,9 @@ mod tests {
         let expected_account_extended_pubkey = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_privkey);
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
         let expected_p2wpkh_0 =
@@ -2886,9 +2907,9 @@ mod tests {
         let expected_account_extended_pubkey = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ"; // missing value
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_privkey);
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         // TODO taproot verify parity management
 

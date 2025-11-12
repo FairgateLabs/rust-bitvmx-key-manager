@@ -8,6 +8,8 @@ use bitcoin::{
     secp256k1::{self, All, Message, Scalar, SecretKey},
     base58, Network, PrivateKey, PublicKey, TapNodeHash,
 };
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 use itertools::izip;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -33,6 +35,10 @@ use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
 const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
 const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid performance issues
+
+// HKDF domain separator for MuSig2 nonce seed generation
+// Version 1 - ensures derived nonce seeds are unique to this specific use case
+const MUSIG2_NONCE_HKDF_INFO: &[u8] = b"KeyManager-MuSig2-Nonce-v1";
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -275,7 +281,7 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        // TODO discuss with diego, should be p2tr always to use them with musig2 and schnorr
+        // Dev note: here we should be able to assume taproot keys..
         self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
@@ -1232,7 +1238,6 @@ impl KeyManager {
         index: u32,
         public_key: PublicKey,
     ) -> Result<[u8; 32], KeyManagerError> {
-        // TODO * leaking secret key material?, consider using HKDF or similar KDF with a salt instead
         let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
@@ -1244,11 +1249,23 @@ impl KeyManager {
             }
         };
 
-        let mut data = Vec::new();
-        data.extend_from_slice(&sk.to_bytes());
-        data.extend_from_slice(&index.to_le_bytes());
+        // Use HKDF for secure key derivation with salt and context info
+        // Salt: derived from public key to ensure different salts for different keys
+        let salt = hashes::sha256::Hash::hash(&public_key.to_bytes()).to_byte_array();
 
-        let nonce_seed = hashes::sha256::Hash::hash(data.as_slice()).to_byte_array();
+        // Input key material: secret key bytes
+        let ikm = sk.to_bytes();
+
+        // Context info: includes index and a domain separator
+        let mut info = Vec::new();
+        info.extend_from_slice(MUSIG2_NONCE_HKDF_INFO);
+        info.extend_from_slice(&index.to_le_bytes());
+
+        // Derive the nonce seed using HKDF-SHA256
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
+        let mut nonce_seed = [0u8; 32];
+        hkdf.expand(&info, &mut nonce_seed)
+            .map_err(|_| KeyManagerError::FailedToGenerateNonceSeed)?;
 
         Ok(nonce_seed)
     }
@@ -1440,7 +1457,7 @@ mod tests {
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "ab491b51448b89f1bfab75ae95f48a2b462cbbd0555b72e84bd3771a830757a1"
+            "018365b1811bbf730dbcda2fc621e79470057679a13239bcbb5719b418ac9fa0"
         );
         let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
@@ -1452,19 +1469,19 @@ mod tests {
         let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
         assert_eq!(
             nonce_seed_1.to_lower_hex_string(),
-            "99b88224e42ba9bcdeaa5ccaeb4fb2fe1355ff42d2c71e932b7021910836e52d"
+            "bdd5ee7734d2edda684c1e52ff8db1244bba20f992437c58e816ec3e1af915d5"
         );
         let nonce_seed_4 = key_manager.generate_nonce_seed(4, pub_key)?;
         assert_eq!(
             nonce_seed_4.to_lower_hex_string(),
-            "7a7b2ba29139b59f00af9faafcbd1946453b7665ea762cfe18e07c46b46f012f"
+            "09d494894e401d604e88874bc54b18a71168d29190697f1d213746613b83f84f"
         );
 
         // Test that the nonce is different for different public key
         let nonce_seed_2 = key_manager.generate_nonce_seed(0, pub_key2)?;
         assert_eq!(
             nonce_seed_2.to_lower_hex_string(),
-            "1b60e65d0dfe2c7e311ea4cf702866c935387e1bdf7dacc054597f146fe22e3f"
+            "5e501a86513dc9940d45ec1818799fd666718ba0dc819f162249ddaa842c2633"
         );
         assert_ne!(
             nonce_seed.to_lower_hex_string(),
@@ -3001,11 +3018,11 @@ mod tests {
         // BIP84 - Native SegWit (P2WPKH)
 
         let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
-        let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc"; // TODO: fill with hardcoded value
+        let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
-        let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H"; // TODO: fill with hardcoded value
+        let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
         assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
@@ -3034,11 +3051,11 @@ mod tests {
 
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
-        let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX"; // TODO: fill with hardcoded value
+        let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX";
         assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
 
         let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
-        let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX"; // TODO: fill with hardcoded value
+        let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
         assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
         let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;

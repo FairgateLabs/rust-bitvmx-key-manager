@@ -102,6 +102,9 @@ pub enum KeyManagerError {
 
     #[error("Cannot use Schnorr signature with non-Taproot keys. Use ECDSA signature instead")]
     SchnorrWithNonTaprootKey,
+
+    #[error("Failed to generate nonce seed using HKDF")]
+    FailedToGenerateNonceSeed,
 }
 
 #[derive(Error, Debug)]

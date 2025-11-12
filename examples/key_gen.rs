@@ -53,7 +53,7 @@ fn key_generation_example() {
 
     // Derive public key only
     let pubkey = key_manager
-        .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 1)
+        .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 1, false)
         .unwrap();
     println!("Derived pubkey from xpub: {}", pubkey);
 

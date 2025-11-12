@@ -60,6 +60,9 @@ enum Commands {
 
         #[arg(value_name = "account_xpub", short = 'a', long = "account_xpub")]
         account_xpub: String,
+
+        #[arg(value_name = "adjust_parity_for_taproot", short = 'p', long = "adjust_parity_for_taproot", default_value_t = false)]
+        adjust_parity_for_taproot: bool,
     },
 
     NewWinternitzKey {
@@ -206,8 +209,9 @@ impl Cli {
                 key_type,
                 key_index,
                 account_xpub,
+                adjust_parity_for_taproot,
             } => {
-                self.derive_public_key(account_xpub, *key_type, key_index)?;
+                self.derive_public_key(account_xpub, *key_type, key_index, *adjust_parity_for_taproot)?;
             }
 
             Commands::DeriveKeypair {
@@ -557,11 +561,12 @@ impl Cli {
         account_xpub: &str,
         key_type: BitcoinKeyType,
         key_index: &u32,
+        adjust_parity_for_taproot: bool,
     ) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
         let account_xpub = Xpub::from_str(account_xpub)?;
         let public_key =
-            key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, *key_index)?;
+            key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, *key_index, adjust_parity_for_taproot)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }

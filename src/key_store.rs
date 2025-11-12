@@ -19,8 +19,6 @@ impl KeyStore {
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
 
-    // TODO i inform team: storing key type info
-
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
     }
@@ -28,6 +26,12 @@ impl KeyStore {
     pub(crate) fn store_clone(&self) -> Rc<Storage> {
         Rc::clone(&self.store)
     }
+
+    /**
+        Dev note: key_type is optional to maintain compatibility with older stored keys
+        its is stored as a prefix in the private key string, separated by a ":"
+        in the case of no key type, the prefix is "unknown"
+    */
 
     pub fn store_keypair(
         &self,

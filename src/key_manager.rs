@@ -62,7 +62,6 @@ impl KeyManager {
     const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
     const STARTING_DERIVATION_INDEX: u32 = 0; // Starting index for derivation
 
-    // TODO i discus with Diego M. the idea behind the store/load of this constructor
     pub fn new(
         network: Network,
         mnemonic: Option<Mnemonic>,
@@ -429,9 +428,11 @@ impl KeyManager {
         network: Network,
         account: u32,
     ) -> Result<[u8; 32], KeyManagerError> {
+        // Dev note: Using coin type as its nice to differentiate by network, winternitz are OT,
+        // so they should not be repeated across different networks, to avoid a kind of take from testnet and use in mainnet attack
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
             Self::WINTERNITZ_PURPOSE_INDEX,
-            Self::get_bitcoin_coin_type_by_network(network), //TODO i inform team. Dev note: nice to differentiate by network as they are OT
+            Self::get_bitcoin_coin_type_by_network(network),
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
@@ -534,10 +535,43 @@ impl KeyManager {
 
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
-        // For taproot keys (Schnorr keys be “x-only with even-Y”.)
-        // TODO i inform team: Dev note: adjust parity only for Taproot keys, not for every key type
+        // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
+        // the standars the parity should not be modified here at derivation time.
 
-        // TODO * discuss with Diego M. about this parity adjustment for Taproot keys
+        let public_key = PublicKey::new(internal_keypair.public_key());
+        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
+
+        self.keystore
+            .store_keypair(private_key, public_key, Some(key_type))?;
+        Ok(public_key)
+    }
+
+    /// Derives a Bitcoin keypair, in the case of taproot keys, adjusts the parity to be even-Y.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_keypair_adjusted`](Self::next_keypair_adjusted).**
+    ///
+    /// The `next_keypair_adjusted` function provides better index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    pub fn derive_keypair_adjust_parity(
+        &self,
+        key_type: BitcoinKeyType,
+        index: u32,
+    ) -> Result<PublicKey, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
+        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
+
+        let internal_keypair = xpriv.to_keypair(&self.secp);
+
+        // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
+        // the standars the parity should not be modified here at derivation time.
+        // but in the case of this function, we adjust parity here just to facilitate that the user
+        // in case he want the parity adjusted key to use it a some low lvl taproot/musig construction
+
         let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr {
             self.adjust_parity(internal_keypair)
         } else {
@@ -552,26 +586,26 @@ impl KeyManager {
         Ok(public_key)
     }
 
-    // TODO remove this func
-    pub fn derive_keypair_no_parity(
-        &self,
-        key_type: BitcoinKeyType,
-        index: u32,
-    ) -> Result<PublicKey, KeyManagerError> {
-        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
-        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
-        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
-
-        let internal_keypair = xpriv.to_keypair(&self.secp);
-
-        let public_key = PublicKey::new(internal_keypair.public_key());
-        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
-
+    /// Generates the next Bitcoin keypair in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    /// in the case of taproot keys, adjusts the parity to be even-Y.
+    ///
+    /// This is the **recommended** function for keypair generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_keypair_adjust_parity`](Self::derive_keypair_adjust_parity).
+    ///
+    /// The function automatically tracks and increments the derivation index for each key type, ensuring that:
+    /// - Each call generates a unique keypair
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    ///
+    pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
+        let index = self.next_keypair_index(key_type)?;
+        let pubkey = self.derive_keypair(key_type, index)?;
+        // if derivation was successful, store the next index
         self.keystore
-            .store_keypair(private_key, public_key, Some(key_type))?;
-        Ok(public_key)
+            .store_next_keypair_index(key_type, index + 1)?;
+        println!("next_keypair: key_type: {:?}, index: {}", key_type, index); // TODO remove after debugging
+        println!("stored next index: {}", index + 1); // TODO remove after debugging
+        Ok(pubkey)
     }
 
     /// Generates the next Bitcoin keypair in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
@@ -584,9 +618,9 @@ impl KeyManager {
     /// - No derivation indices are accidentally reused
     /// - The sequence of generated keys is deterministic and recoverable
     ///
-    pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
+    pub fn next_keypair_adjusted(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
         let index = self.next_keypair_index(key_type)?;
-        let pubkey = self.derive_keypair(key_type, index)?;
+        let pubkey = self.derive_keypair_adjust_parity(key_type, index)?;
         // if derivation was successful, store the next index
         self.keystore
             .store_next_keypair_index(key_type, index + 1)?;
@@ -633,37 +667,8 @@ impl KeyManager {
         }
     }
 
-    // Security Issue
-    // The current implementation allows deriving child public keys from the master xpub without hardened derivation. This means:
-
-    // Privacy leak: Anyone with the master xpub can derive ALL your public keys
-    // Security vulnerability: If any child private key is compromised + the master xpub is known, an attacker can derive ALL other private keys in the wallet
-    // Correct BIP-44 Implementation
-    // The xpub should only be exposed at the account level (after hardened derivation):
-    // TODO * remove this function after sync with Diego, see new method derive_public_key_from_account_xpub
-    // fn derive_public_key(
-    //     &self,
-    //     master_xpub: Xpub,
-    //     key_type: KeyType,
-    //     index: u32,
-    // ) -> Result<PublicKey, KeyManagerError> {
-    //     let secp = secp256k1::Secp256k1::new();
-    //     let derivation_path = KeyManager::build_derivation_path(
-    //         key_type,
-    //         self.network,
-    //         index,
-    //     );
-    //     let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
-
-    //     // TODO discuss with Diego M. // i think we should adjust parity only for Taproot keys, not for every key type
-    //     if key_type == KeyType::P2tr {
-    //         Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
-    //     } else {
-    //         Ok(xpub.to_pub().into())
-    //     }
-    // }
-
-    // Key Benefits of This Approach:
+    /// Derives the public key at a specific derivation index from an account-level extended public key (xpub).
+    ///
     // Security: Only exposes account-level xpub, not master xpub
     // BIP-44 Compliance: Follows the standard hardened derivation up to account level
     // Privacy: Different accounts remain isolated
@@ -673,6 +678,7 @@ impl KeyManager {
         account_xpub: Xpub,
         key_type: BitcoinKeyType,
         index: u32,
+        adjust_parity_for_taproot: bool,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
@@ -686,8 +692,7 @@ impl KeyManager {
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
 
-        // TODO i inform team: Dev note: adjust parity only for Taproot keys
-        if key_type == BitcoinKeyType::P2tr {
+        if adjust_parity_for_taproot && key_type == BitcoinKeyType::P2tr {
             Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
         } else {
             Ok(xpub.to_pub().into())
@@ -2097,7 +2102,7 @@ mod tests {
             for i in 0..5 {
                 let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
                 let pk2 = key_manager
-                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i, false)
                     .unwrap();
 
                 let signature_verifier = SignatureVerifier::new();
@@ -2111,7 +2116,7 @@ mod tests {
             // Test that different indices produce different keys (negative test)
             let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
             let pk2 = key_manager
-                .derive_public_key_from_account_xpub(account_xpub, key_type, 11)
+                .derive_public_key_from_account_xpub(account_xpub, key_type, 11, false)
                 .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
@@ -2141,7 +2146,7 @@ mod tests {
         for i in 0..5 {
             let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, i).unwrap();
             let pk2 = key_manager
-                .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i)
+                .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i, false)
                 .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
@@ -2155,7 +2160,7 @@ mod tests {
             .derive_keypair(BitcoinKeyType::P2tr, 10)
             .unwrap();
         let pk2 = key_manager
-            .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 11)
+            .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 11, false)
             .unwrap();
 
         let signature_verifier = SignatureVerifier::new();
@@ -2192,12 +2197,12 @@ mod tests {
 
                 // Derive public key in key_manager_1 using account xpub
                 let public_from_account_xpub_km1 = key_manager_1
-                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i, false)
                     .unwrap();
 
                 // Derive public key in key_manager_2 using account xpub
                 let public_from_account_xpub_km2 = key_manager_2
-                    .derive_public_key_from_account_xpub(account_xpub, key_type, i)
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i, false)
                     .unwrap();
 
                 // Both public keys must be equal
@@ -2866,8 +2871,8 @@ mod tests {
 
         // TODO taproot verify parity management
 
-        let p2tr_0 = key_manager.derive_keypair_no_parity(BitcoinKeyType::P2tr, 0)?;
-        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        // let secp = bitcoin::secp256k1::Secp256k1::new();
         let expected_p2tr_0 =
             PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
         assert_eq!(p2tr_0, expected_p2tr_0);
@@ -2877,7 +2882,7 @@ mod tests {
 
         // --- //
 
-        // let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        // let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
         // let p2tr_0_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
         // let expected_p2tr_0_address_with_parity = "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
         // assert_eq!(p2tr_0_regtest_address.to_string(), expected_p2tr_0_address_with_parity); // TODO check why this fails
@@ -2888,7 +2893,7 @@ mod tests {
 
         // --- //
 
-        let p2tr_15 = key_manager.derive_keypair_no_parity(BitcoinKeyType::P2tr, 15)?;
+        let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
         let expected_p2tr_15 =
             PublicKey::from_str("022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611")?;
         assert_eq!(p2tr_15, expected_p2tr_15);
@@ -2898,7 +2903,7 @@ mod tests {
 
         // --- //
 
-        // let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
+        // let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
         // let p2tr_15_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, REGTEST);
         // let expected_p2tr_15_address_with_parity = "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
         // assert_eq!(p2tr_15_regtest_address.to_string(), expected_p2tr_15_address_with_parity); // TODO check why this fails
@@ -3047,7 +3052,7 @@ mod tests {
 
         // TODO taproot verify parity management
 
-        let p2tr_0 = key_manager.derive_keypair_no_parity(BitcoinKeyType::P2tr, 0)?;
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let expected_p2tr_0 =
             PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
@@ -3058,7 +3063,7 @@ mod tests {
 
         // --- //
 
-        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
         let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
@@ -3071,7 +3076,7 @@ mod tests {
 
         // --- //
 
-        let p2tr_15 = key_manager.derive_keypair_no_parity(BitcoinKeyType::P2tr, 15)?;
+        let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
         let expected_p2tr_15 =
             PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
         assert_eq!(p2tr_15, expected_p2tr_15);
@@ -3082,7 +3087,7 @@ mod tests {
         // --- //
 
         // TODO (justo la key da even though pubkey is correct)
-        let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
+        let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
         let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
         let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
         assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);

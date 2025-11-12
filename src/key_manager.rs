@@ -257,7 +257,7 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        // TODO discuss with diego, should be p2tr always to use them with musig2 and schnorr
+        // should we assume p2tr? always to use them with musig2 and schnorr
         self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
@@ -707,7 +707,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make private in the future to force the use of next_winternitz
+    // TODO make this func private in the future to force the use of next_winternitz
     pub fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -869,7 +869,7 @@ impl KeyManager {
     /*********** Signing *************/
     /*********************************/
 
-    // TODO discuss with diegoM. added key type checks for signing, we were using any key for ecdsa or schnorr
+    // Dev note: added key type checks for signing, we were using any key for ecdsa or schnorr
 
     pub fn sign_ecdsa_message(
         &self,
@@ -1183,8 +1183,6 @@ impl KeyManager {
                 my_pub_key
             ))),
         }
-
-        // TODO discuss with Diego M. check key types p2tr for musig2? backwards compatible?
     }
 
     pub fn sign_partial_message(
@@ -1227,8 +1225,6 @@ impl KeyManager {
                 Err(KeyManagerError::FailedToSignMessage)
             }
         }
-
-        // TODO discuss with Diego M. check key types p2tr for musig2? backwards compatible?
     }
 
     pub fn generate_nonce_seed(
@@ -1440,7 +1436,6 @@ mod tests {
 
         let pub_key2: PublicKey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
 
-        // TODO * Discuss with Diego M. what is the generate_nonce_seed used for in bitvmx, is it leaking the priv key bytes?
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
@@ -3050,8 +3045,6 @@ mod tests {
         let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
         assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
 
-        // TODO taproot verify parity management
-
         let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let expected_p2tr_0 =
@@ -3061,20 +3054,19 @@ mod tests {
         let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
         assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
 
-        // --- //
-
         let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
         let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        // Dev note: address is the same for odd or even key, as address generation parity adjustment is done in the lib
         let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
         assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
 
-        // TODO * check problem here Address is correct but pubkey not match, it seems that standar derivation mecanims do not adjust parity at the pubkey level, it does so at address generation
-        // let expected_p2tr_0 =
-        //     PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
-        // assert_eq!(p2tr_0, expected_p2tr_0); // TODO check with Diego
-
-        // --- //
+        // Dev note: for this particular case coindicentally the parity adjustment changes the pubkey, as the original is odd
+        let not_expected_p2tr_0 =
+            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        assert_ne!(p2tr_0, not_expected_p2tr_0);
+        let expected_p2tr_0 = PublicKey::new(not_expected_p2tr_0.inner.negate(&secp));
+        assert_eq!(p2tr_0, expected_p2tr_0);
 
         let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
         let expected_p2tr_15 =
@@ -3084,9 +3076,7 @@ mod tests {
         let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
         assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);
 
-        // --- //
-
-        // TODO (justo la key da even though pubkey is correct)
+        // Dev note: for this particular case coindicentally the parity adjustment does not change the pubkey, as the original is already even
         let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
         let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
         let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
@@ -3094,7 +3084,7 @@ mod tests {
 
         let expected_p2tr_15 =
             PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
-        assert_eq!(p2tr_15, expected_p2tr_15); // TODO check with Diego
+        assert_eq!(p2tr_15, expected_p2tr_15);
 
         drop(key_manager);
         cleanup_storage(&keystore_path);

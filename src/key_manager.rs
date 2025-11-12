@@ -103,8 +103,6 @@ impl KeyManager {
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"
                         );
-
-                        println!("24-word mnemonic:\n\n{}\n", random_mnemonic); // TODO remove after debugging
                     }
                 }
             }
@@ -146,17 +144,9 @@ impl KeyManager {
                 if stored_seed != expected_key_derivation_seed {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
-                println!(
-                    "validated Key derivation seed (64 bytes): {:?}",
-                    stored_seed
-                ); // TODO remove after debugging
             }
             Err(_) => {
                 // No seed stored, generate and store it
-                println!(
-                    "storing Key derivation seed (64 bytes): {:?}",
-                    expected_key_derivation_seed
-                ); // TODO remove after debugging
                 keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
         }
@@ -178,17 +168,9 @@ impl KeyManager {
                 if stored_winternitz_seed != expected_winternitz_seed {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
-                println!(
-                    "validated Winternitz seed (32 bytes): {:?}",
-                    stored_winternitz_seed
-                ); // TODO remove after debugging
             }
             Err(_) => {
                 // No Winternitz seed stored, generate and store it
-                println!(
-                    "storing Winternitz seed (32 bytes): {:?}",
-                    expected_winternitz_seed
-                ); // TODO remove after debugging
                 keystore.store_winternitz_seed(expected_winternitz_seed)?;
             }
         }
@@ -446,10 +428,6 @@ impl KeyManager {
 
         let hardened_wots_account_derivation_path =
             Self::extract_account_level_path(&wots_full_derivation_path);
-        println!(
-            "hardened_wots_account_derivation_path: {}",
-            hardened_wots_account_derivation_path
-        ); // TODO remove after debugging
 
         let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
         let account_xpriv =
@@ -468,21 +446,14 @@ impl KeyManager {
     // Generate account-level xpub (hardened up to account)
     pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        println!(
-            "key_derivation_seed: {}",
-            hex::encode(&key_derivation_seed)
-        ); // TODO remove after debugging
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
-        println!("account_derivation_path: {}", account_derivation_path); // TODO remove after debugging
 
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
-        println!("account_xpriv: {}", account_xpriv); // TODO remove after debugging
         let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
-        println!("account_xpub: {}", account_xpub); // TODO remove after debugging
 
         // Dev note: do not touch parity here
         // Parity normalization (even-Y) is a Taproot/Schnorr (BIP-340/341/86) concern and should be applied
@@ -536,9 +507,8 @@ impl KeyManager {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
-        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
-        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
+        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
@@ -568,9 +538,8 @@ impl KeyManager {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
-        println!("derivation_path: {}", derivation_path); // TODO remove after debugging
-        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
 
+        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
@@ -609,8 +578,6 @@ impl KeyManager {
         // if derivation was successful, store the next index
         self.keystore
             .store_next_keypair_index(key_type, index + 1)?;
-        println!("next_keypair: key_type: {:?}, index: {}", key_type, index); // TODO remove after debugging
-        println!("stored next index: {}", index + 1); // TODO remove after debugging
         Ok(pubkey)
     }
 
@@ -630,8 +597,6 @@ impl KeyManager {
         // if derivation was successful, store the next index
         self.keystore
             .store_next_keypair_index(key_type, index + 1)?;
-        println!("next_keypair: key_type: {:?}, index: {}", key_type, index); // TODO remove after debugging
-        println!("stored next index: {}", index + 1); // TODO remove after debugging
         Ok(pubkey)
     }
 
@@ -652,9 +617,6 @@ impl KeyManager {
                 PrivateKey::new(keypair.secret_key().negate(), self.network),
             )
         } else {
-            let pubkey = PublicKey::new(keypair.public_key());// TODO remove after debugging
-            let first_20: String = pubkey.to_string().chars().take(20).collect();// TODO remove after debugging
-            println!("Key {} parity is already even, no adjustment needed.", first_20); // TODO remove after debugging
             (
                 PublicKey::new(keypair.public_key()),
                 PrivateKey::new(keypair.secret_key(), self.network),
@@ -694,7 +656,6 @@ impl KeyManager {
         // Build the full derivation path and extract only the chain part after account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
         let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
-        println!("chain_derivation_path: {}", chain_derivation_path); // TODO remove after debugging
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
 
@@ -713,7 +674,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make this func private in the future to force the use of next_winternitz
+    // TODO make this func private in the future to force the usage of next_winternitz
     pub fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -757,11 +718,6 @@ impl KeyManager {
         let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
         // if derivation was successful, store the next index
         self.keystore.store_next_winternitz_index(index + 1)?;
-        println!(
-            "next_winternitz: key_type: {:?}, message_size: {}, index: {}",
-            key_type, message_size_in_bytes, index
-        ); // TODO remove after debugging
-        println!("stored next index: {}", index + 1); // TODO remove after debugging
         Ok(pubkey)
     }
 
@@ -780,7 +736,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make private in the future to force next_multiple_winternitz
+    // TODO make this func private in the future to force the usage of next_multiple_winternitz
     pub fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -831,12 +787,6 @@ impl KeyManager {
         // if derivation was successful, store the next index
         self.keystore
             .store_next_winternitz_index(initial_index + number_of_keys)?;
-        println!(
-            "next_multiple_winternitz: key_type: {:?}, message_size: {}, initial_index: {}",
-            key_type, message_size_in_bytes, initial_index
-        ); // TODO remove after debugging
-        println!("stored next index: {}", initial_index + number_of_keys); // TODO remove after debugging
-
         Ok(pubkeys)
     }
 

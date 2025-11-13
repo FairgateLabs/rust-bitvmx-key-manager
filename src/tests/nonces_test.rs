@@ -8,8 +8,9 @@ mod tests {
 
     #[test]
     fn test_get_nonces() -> Result<(), anyhow::Error> {
-        let (key_manager, participant_1, musig) = mock_data()?;
-        let (_, participant_2, _) = mock_data()?;
+        let (key_manager, participant_1) = mock_data()?;
+        let (_, participant_2) = mock_data()?;
+        let musig = key_manager.musig2();
         let participant_pubkeys = vec![participant_1, participant_2];
 
         let id = "test_id";
@@ -41,8 +42,9 @@ mod tests {
 
     #[test]
     fn test_add_nonces() -> Result<(), anyhow::Error> {
-        let (key_manager, participant_1, musig) = mock_data()?;
-        let (_, participant_2, _) = mock_data()?;
+        let (key_manager, participant_1) = mock_data()?;
+        let (_, participant_2) = mock_data()?;
+        let musig = key_manager.musig2();
         let participant_pubkeys = vec![participant_2, participant_1];
 
         let id = "test_id";
@@ -97,9 +99,11 @@ mod tests {
     /// 1. Nonces are deterministic - requesting a nonce multiple times for the same musig session and message returns the same nonce
     /// 2. Nonces are unique across different musig sessions - requesting a nonce for a different musig session with the same message returns a different nonce
     fn test_nonce_generation() -> Result<(), anyhow::Error> {
-        let (key_manager, participant_1, musig) = mock_data()?;
-        let (key_manager2, participant_2, musig2) = mock_data()?;
-        let (_, participant_3, _) = mock_data()?;
+        let (key_manager, participant_1) = mock_data()?;
+        let (key_manager2, participant_2) = mock_data()?;
+        let musig = key_manager.musig2();
+        let musig2 = key_manager2.musig2();
+        let (_, participant_3) = mock_data()?;
 
         let participant_pubkeys = vec![participant_1, participant_2];
 

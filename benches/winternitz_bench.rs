@@ -1,27 +1,16 @@
-use std::{env, fs, rc::Rc, time::Duration};
+use std::{env, fs, time::Duration};
 
+use bip39::Mnemonic;
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
-use key_manager::{
-    errors::KeyManagerError, key_manager::KeyManager, key_store::KeyStore,
-    winternitz::WinternitzType,
-};
-use storage_backend::{storage::Storage, storage_config::StorageConfig};
-const DERIVATION_PATH: &str = "m/101/1/0/0/";
+use key_manager::{errors::KeyManagerError, key_manager::KeyManager, winternitz::WinternitzType};
+use storage_backend::storage_config::StorageConfig;
 const REGTEST: Network = Network::Regtest;
 
-fn test_key_manager(keystore: KeyStore, store: Rc<Storage>) -> Result<KeyManager, KeyManagerError> {
-    let key_derivation_seed = random_bytes();
-    let winternitz_seed = random_bytes();
+fn test_key_manager(storage_config: StorageConfig) -> Result<KeyManager, KeyManagerError> {
+    let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
 
-    let key_manager = KeyManager::new(
-        REGTEST,
-        DERIVATION_PATH,
-        Some(key_derivation_seed),
-        Some(winternitz_seed),
-        keystore,
-        store,
-    )?;
+    let key_manager = KeyManager::new(REGTEST, Some(random_mnemonic), None, storage_config)?;
 
     Ok(key_manager)
 }
@@ -44,16 +33,9 @@ fn temp_storage() -> String {
 
 fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
-    let store_path = "/tmp/key_manager_storage".to_string();
-
-    let config_storage = StorageConfig::new(storage_path.clone(), None);
-    let config_store = StorageConfig::new(store_path.clone(), Some("secret_password".to_string()));
-
-    let store = Rc::new(Storage::new(&config_storage).unwrap());
-    let store_2 = Rc::new(Storage::new(&config_store).unwrap());
-
-    let keystore = KeyStore::new(store_2);
-    let key_manager = test_key_manager(keystore, store).unwrap();
+    let config_storage =
+        StorageConfig::new(storage_path.clone(), Some("secret_password".to_string()));
+    let key_manager = test_key_manager(config_storage).unwrap();
 
     let mut criterion = Criterion::default().measurement_time(Duration::from_secs(40));
     let numbers_of_keys_to_hash = vec![2, 4, 6, 8, 10, 12, 14, 16];
@@ -92,9 +74,7 @@ fn criterion_benchmark(_c: &mut Criterion) {
             },
         );
     }
-
     fs::remove_dir_all(storage_path).unwrap();
-    fs::remove_dir_all(store_path).unwrap();
 }
 
 criterion_group!(benches, criterion_benchmark);

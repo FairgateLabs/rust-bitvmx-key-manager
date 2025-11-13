@@ -1,11 +1,10 @@
 use anyhow::{Ok, Result};
 use bitvmx_settings::settings::ConfigurationFile;
-use std::{rc::Rc, str::FromStr};
-use storage_backend::storage::Storage;
+use std::str::FromStr;
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_store::KeyStore, verifier::SignatureVerifier, winternitz::WinternitzSignature,
+    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::WinternitzSignature,
 };
 use bitcoin::{
     bip32::Xpub,
@@ -34,21 +33,36 @@ pub struct Menu {
 
 #[derive(Subcommand)]
 enum Commands {
-    NewKey,
-
-    NewMasterXpub,
-
-    DerivePublicKey {
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
-
-        #[arg(value_name = "master_xpub", short = 'm', long = "master_xpub")]
-        master_xpub: String,
+    NextKeypair {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
     },
 
     DeriveKeypair {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
+
         #[arg(value_name = "key_index", short = 'k', long = "key_index")]
         key_index: u32,
+    },
+
+    NewAccountXpub {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
+    },
+
+    DerivePublicKey {
+        #[arg(value_name = "key_type", short = 't', long = "key_type")]
+        key_type: BitcoinKeyType,
+
+        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        key_index: u32,
+
+        #[arg(value_name = "account_xpub", short = 'a', long = "account_xpub")]
+        account_xpub: String,
+
+        #[arg(value_name = "adjust_parity_for_taproot", short = 'p', long = "adjust_parity_for_taproot", default_value_t = false)]
+        adjust_parity_for_taproot: bool,
     },
 
     NewWinternitzKey {
@@ -57,15 +71,9 @@ enum Commands {
 
         #[arg(value_name = "message_length", short = 'm', long = "message_length")]
         message_length: usize,
-
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
     },
 
-    NewRsaKey {
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: usize,
-    },
+    NewRsaKey,
 
     SignECDSA {
         #[arg(value_name = "message", short = 'm', long = "message")]
@@ -98,8 +106,8 @@ enum Commands {
         #[arg(value_name = "message", short = 'm', long = "message")]
         message: String,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: usize,
+        #[arg(value_name = "public_key", short = 'k', long = "public_key")]
+        pub_key: String, // PEM format
     },
 
     VerifyEcdsa {
@@ -173,8 +181,8 @@ enum Commands {
         #[arg(value_name = "ciphertext", short = 'c', long = "ciphertext")]
         ciphertext: String,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: usize,
+        #[arg(value_name = "public_key", short = 'k', long = "public_key")]
+        pub_key: String, // PEM formate,
     },
 }
 
@@ -191,37 +199,41 @@ impl Cli {
         let menu = Menu::parse();
 
         match &menu.command {
-            Commands::NewKey => {
-                self.generate_key()?;
-            }
-
-            Commands::NewMasterXpub => {
+            Commands::NewAccountXpub { key_type } => {
                 let key_manager = self.key_manager()?;
-                let xpub = key_manager.generate_master_xpub()?;
-                info!("Master Xpub: {}", xpub);
+                let xpub = key_manager.get_account_xpub(*key_type)?;
+                info!("Account Xpub: {}", xpub);
             }
 
             Commands::DerivePublicKey {
+                key_type,
                 key_index,
-                master_xpub,
+                account_xpub,
+                adjust_parity_for_taproot,
             } => {
-                self.derive_public_key(master_xpub, key_index)?;
+                self.derive_public_key(account_xpub, *key_type, key_index, *adjust_parity_for_taproot)?;
             }
 
-            Commands::DeriveKeypair { key_index } => {
-                self.derive_keypair(*key_index)?;
+            Commands::DeriveKeypair {
+                key_type,
+                key_index,
+            } => {
+                self.derive_keypair(*key_type, *key_index)?;
+            }
+
+            Commands::NextKeypair { key_type } => {
+                self.next_keypair(*key_type)?;
             }
 
             Commands::NewWinternitzKey {
                 winternitz_type,
                 message_length,
-                key_index,
             } => {
-                self.generate_winternitz_key(winternitz_type, *message_length, *key_index)?;
+                self.generate_winternitz_key(winternitz_type, *message_length)?;
             }
 
-            Commands::NewRsaKey { key_index } => {
-                self.generate_rsa_key(*key_index)?;
+            Commands::NewRsaKey => {
+                self.generate_rsa_key()?;
             }
 
             Commands::SignECDSA {
@@ -246,8 +258,8 @@ impl Cli {
                 self.sign_winternitz(message, winternitz_type, *key_index)?;
             }
 
-            Commands::SignRsa { message, key_index } => {
-                self.sign_rsa(message, *key_index)?;
+            Commands::SignRsa { message, pub_key } => {
+                self.sign_rsa(message, pub_key)?;
             }
 
             Commands::VerifyEcdsa {
@@ -298,19 +310,18 @@ impl Cli {
             Commands::EncryptRsa { message, pub_key } => {
                 let key_manager = self.key_manager()?;
                 let bytes = hex::decode(message)?;
-                let ciphertext =
-                    key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key.clone())?;
+                let ciphertext = key_manager.encrypt_rsa_message(bytes.as_slice(), pub_key)?;
                 info!("Encrypted message: {}", hex::encode(ciphertext));
             }
 
             Commands::DecryptRsa {
                 ciphertext,
-                key_index,
+                pub_key,
             } => {
                 let key_manager = self.key_manager()?;
                 let bytes = hex::decode(ciphertext)?;
                 let decrypted_message =
-                    key_manager.decrypt_rsa_message(bytes.as_slice(), *key_index)?;
+                    key_manager.decrypt_rsa_message(bytes.as_slice(), pub_key)?;
                 info!("Decrypted message: {}", hex::encode(decrypted_message));
             }
         }
@@ -321,44 +332,26 @@ impl Cli {
     //
     // Commands
     //
-    fn generate_key(&self) -> Result<()> {
-        let key_manager = self.key_manager()?;
-        let mut rng = secp256k1::rand::thread_rng();
 
-        let pk = key_manager.generate_keypair(&mut rng)?;
-
-        info!(
-            "New key pair created and stored. Public key is: {}",
-            pk.to_string()
-        );
-
-        Ok(())
-    }
-
-    fn generate_winternitz_key(
-        &self,
-        winternitz_type: &str,
-        msg_len_bytes: usize,
-        index: u32,
-    ) -> Result<()> {
+    fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize) -> Result<()> {
         let key_manager = self.key_manager()?;
 
-        let public_key =
-            key_manager.derive_winternitz(msg_len_bytes, winternitz_type.parse()?, index)?;
+        let public_key = key_manager.next_winternitz(msg_len_bytes, winternitz_type.parse()?)?;
 
         info!(
-            "New key pair created of Winternitz Key. Public key is: {}",
+            "New key pair created of Winternitz Key. Index is: {} Public key is: {}",
+            public_key.derivation_index()?,
             hex::encode(public_key.to_bytes())
         );
 
         Ok(())
     }
 
-    fn generate_rsa_key(&self, key_index: usize) -> Result<()> {
+    fn generate_rsa_key(&self) -> Result<()> {
         let key_manager = self.key_manager()?;
 
         let mut rng = secp256k1::rand::thread_rng();
-        let pubkey = key_manager.generate_rsa_keypair(&mut rng, key_index)?;
+        let pubkey = key_manager.generate_rsa_keypair(&mut rng)?;
 
         info!(
             "New RSA key pair created and stored. Public key is: {}",
@@ -431,24 +424,30 @@ impl Cli {
         Ok(())
     }
 
-    fn sign_rsa(&self, message: &str, key_index: usize) -> Result<()> {
+    fn sign_rsa(&self, message: &str, pub_key: &str) -> Result<()> {
         let key_manager = self.key_manager()?;
         let bytes = hex::decode(message)?;
 
-        let signature = key_manager.sign_rsa_message(bytes.as_slice(), key_index)?;
+        let signature = key_manager.sign_rsa_message(bytes.as_slice(), pub_key)?;
 
         info!("RSA Message signed. Signature is: {:?}", signature);
 
         Ok(())
     }
 
-    fn derive_keypair(&self, key_index: u32) -> Result<()> {
+    fn derive_keypair(&self, key_type: BitcoinKeyType, key_index: u32) -> Result<()> {
         let key_manager = self.key_manager()?;
 
-        let pk = key_manager.derive_keypair(key_index)?;
+        let pk = key_manager.derive_keypair(key_type, key_index)?;
 
         info!("New Keypair created. Public key is: {}", pk.to_string());
 
+        Ok(())
+    }
+
+    fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<()> {
+        let pk = self.key_manager()?.next_keypair(key_type)?;
+        info!("Next Keypair created. Public key is: {}", pk.to_string());
         Ok(())
     }
 
@@ -557,22 +556,25 @@ impl Cli {
         Ok(())
     }
 
-    fn derive_public_key(&self, master_xpub: &str, key_index: &u32) -> Result<(), anyhow::Error> {
+    fn derive_public_key(
+        &self,
+        account_xpub: &str,
+        key_type: BitcoinKeyType,
+        key_index: &u32,
+        adjust_parity_for_taproot: bool,
+    ) -> Result<(), anyhow::Error> {
         let key_manager = self.key_manager()?;
-        let master_xpub = Xpub::from_str(master_xpub)?;
-        let public_key = key_manager.derive_public_key(master_xpub, *key_index)?;
+        let account_xpub = Xpub::from_str(account_xpub)?;
+        let public_key =
+            key_manager.derive_public_key_from_account_xpub(account_xpub, key_type, *key_index, adjust_parity_for_taproot)?;
         info!("Derived public key: {}", public_key);
         Ok(())
     }
 
     fn key_manager(&self) -> Result<KeyManager> {
-        let store = Rc::new(Storage::new(&self.config.storage)?);
-        let keystore = KeyStore::new(store.clone());
-
         Ok(create_key_manager_from_config(
             &self.config.key_manager,
-            keystore,
-            store,
+            self.config.storage.clone(),
         )?)
     }
 

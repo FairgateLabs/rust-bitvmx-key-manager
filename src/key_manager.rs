@@ -1,23 +1,24 @@
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 
+use bip39::Mnemonic;
 use bitcoin::{
-    bip32::{DerivationPath, Xpriv, Xpub},
+    bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
-    key::{
-        rand::{Rng, RngCore},
-        Keypair, Parity, TapTweak,
-    },
+    key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey, TapNodeHash,
+    base58, Network, PrivateKey, PublicKey, TapNodeHash,
 };
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 use itertools::izip;
-use storage_backend::storage::Storage;
+use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
 
 use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
+    key_type::BitcoinKeyType,
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
@@ -25,13 +26,19 @@ use crate::{
     },
     rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
-        self, checksum_length, to_checksummed_message, WinternitzSignature, WinternitzType,
+        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
+        WinternitzType,
     },
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
-const RSA_BITS: usize = 2048; // RSA key size in bits
+const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
+const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid performance issues
+
+// HKDF domain separator for MuSig2 nonce seed generation
+// Version 1 - ensures derived nonce seeds are unique to this specific use case
+const MUSIG2_NONCE_HKDF_INFO: &[u8] = b"KeyManager-MuSig2-Nonce-v1";
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -40,58 +47,164 @@ const RSA_BITS: usize = 2048; // RSA key size in bits
 pub struct KeyManager {
     secp: secp256k1::Secp256k1<All>,
     network: Network,
-    key_derivation_path: String,
     musig2: MuSig2Signer,
     keystore: KeyStore,
 }
 
 impl KeyManager {
+    /*
+        Up to now, This KeyManager:
+        - Is not a fully HD wallet.
+        - Only handles one account.
+        - Its purpose is fixed for bitcoin depending on the key type and network, it does not support other coins like ETH.
+        - It adds support for:
+            - Taproot keys.
+            - Winternitz keys.
+            - RSA keys.
+            - MuSig2 signing.
+    */
+    const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
+    const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
+    const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
+    const STARTING_DERIVATION_INDEX: u32 = 0; // Starting index for derivation
+
     pub fn new(
         network: Network,
-        key_derivation_path: &str,
-        key_derivation_seed: Option<[u8; 32]>,
-        winternitz_seed: Option<[u8; 32]>,
-        keystore: KeyStore,
-        store: Rc<Storage>,
+        mnemonic: Option<Mnemonic>,
+        mnemonic_passphrase: Option<String>,
+        storage_config: StorageConfig,
     ) -> Result<Self, KeyManagerError> {
-        if keystore.load_winternitz_seed().is_err() {
-            match winternitz_seed {
-                Some(seed) => keystore.store_winternitz_seed(seed)?,
-                None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_winternitz_seed(seed)?;
+        let key_store = Rc::new(Storage::new(&storage_config)?);
+        let keystore = KeyStore::new(key_store);
+
+        // Store or load mnemonic
+        match keystore.load_mnemonic() {
+            Ok(stored_mnemonic) => {
+                // Mnemonic found in storage
+                if let Some(provided_mnemonic) = &mnemonic {
+                    // Both stored and provided mnemonics exist - they must match
+                    if stored_mnemonic != *provided_mnemonic {
+                        return Err(KeyManagerError::MnemonicMismatch(
+                            "Stored mnemonic does not match the provided mnemonic".to_string(),
+                        ));
+                    }
+                }
+                // If no mnemonic was provided or they match, continue with stored mnemonic
+            }
+            Err(_) => {
+                // No mnemonic in storage, store the provided one or generate a new one
+                match mnemonic {
+                    Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
+                    None => {
+                        let mut entropy = [0u8; 32]; // 256 bits for 24 words
+                        secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
+                        let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+                        keystore.store_mnemonic(&random_mnemonic)?;
+                        tracing::warn!(
+                            "Random mnemonic generated, make sure to back it up securely!"
+                        );
+                    }
                 }
             }
         }
 
-        if keystore.load_key_derivation_seed().is_err() {
-            match key_derivation_seed {
-                Some(seed) => keystore.store_key_derivation_seed(seed)?,
-                None => {
-                    let mut seed = [0u8; 32];
-                    secp256k1::rand::thread_rng().fill_bytes(&mut seed);
-                    keystore.store_key_derivation_seed(seed)?;
+        // Store or load mnemonic passphrase
+        let mnemonic_passphrase = match keystore.load_mnemonic_passphrase() {
+            Ok(stored_passphrase) => {
+                // Passphrase found in storage
+                if let Some(provided_passphrase) = &mnemonic_passphrase {
+                    // Both stored and provided passphrases exist - they must match
+                    if stored_passphrase != *provided_passphrase {
+                        return Err(KeyManagerError::MnemonicPassphraseMismatch(
+                            "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
+                        ));
+                    }
                 }
+                // If no passphrase was provided or they match, continue with stored passphrase
+                stored_passphrase
+            }
+            Err(_) => {
+                // No passphrase in storage, store the provided one or use empty string as default
+                let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
+                keystore.store_mnemonic_passphrase(&passphrase)?;
+                passphrase
+            }
+        };
+
+        // Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them
+        // so we don't have to recalculate them each time for performance reasons, similar to storing non-imported (derived) keys.
+        // Since these values can be regenerated from the mnemonic and passphrase, we validate the stored seed matches
+        // the expected value to detect potential corruption.
+
+        let expected_key_derivation_seed = keystore.load_mnemonic()?.to_seed(&mnemonic_passphrase);
+
+        match keystore.load_key_derivation_seed() {
+            Ok(stored_seed) => {
+                // Validate that the stored seed matches what would be generated from mnemonic + passphrase
+                if stored_seed != expected_key_derivation_seed {
+                    return Err(KeyManagerError::CorruptedKeyDerivationSeed);
+                }
+            }
+            Err(_) => {
+                // No seed stored, generate and store it
+                keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
         }
 
-        let musig2 = MuSig2Signer::new(store.clone());
         let secp = secp256k1::Secp256k1::new();
+
+        // Validate or generate Winternitz seed - similar to key derivation seed validation
+        // The Winternitz seed is derived from the key derivation seed, so we validate it to detect corruption.
+        let expected_winternitz_seed = Self::derive_winternitz_master_seed(
+            secp.clone(),
+            &keystore.load_key_derivation_seed()?,
+            network,
+            Self::ACCOUNT_DERIVATION_INDEX,
+        )?;
+
+        match keystore.load_winternitz_seed() {
+            Ok(stored_winternitz_seed) => {
+                // Validate that the stored Winternitz seed matches what would be derived from key derivation seed
+                if stored_winternitz_seed != expected_winternitz_seed {
+                    return Err(KeyManagerError::CorruptedWinternitzSeed);
+                }
+            }
+            Err(_) => {
+                // No Winternitz seed stored, generate and store it
+                keystore.store_winternitz_seed(expected_winternitz_seed)?;
+            }
+        }
+
+        let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {
             secp,
             network,
-            key_derivation_path: key_derivation_path.to_string(),
             musig2,
             keystore,
         })
     }
 
+    pub fn musig2(&self) -> &MuSig2Signer {
+        &self.musig2
+    }
+
+    /*********************************/
+    /******     Imports     **********/
+    /*********************************/
     pub fn import_private_key(&self, private_key: &str) -> Result<PublicKey, KeyManagerError> {
+        self.import_private_key_typed(private_key, None)
+    }
+
+    pub fn import_private_key_typed(
+        &self,
+        private_key: &str,
+        key_type: Option<BitcoinKeyType>,
+    ) -> Result<PublicKey, KeyManagerError> {
         let private_key = PrivateKey::from_str(private_key)?;
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
-        self.keystore.store_keypair(private_key, public_key)?;
+        self.keystore
+            .store_keypair(private_key, public_key, key_type)?;
 
         Ok(public_key)
     }
@@ -101,11 +214,21 @@ impl KeyManager {
         secret_key: &str,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
+        self.import_secret_key_typed(secret_key, network, None)
+    }
+
+    pub fn import_secret_key_typed(
+        &self,
+        secret_key: &str,
+        network: Network,
+        key_type: Option<BitcoinKeyType>,
+    ) -> Result<PublicKey, KeyManagerError> {
         let secret_key = SecretKey::from_str(secret_key)?;
         let private_key = PrivateKey::new(secret_key, network);
         let public_key = PublicKey::from_private_key(&self.secp, &private_key);
 
-        self.keystore.store_keypair(private_key, public_key)?;
+        self.keystore
+            .store_keypair(private_key, public_key, key_type)?;
         Ok(public_key)
     }
 
@@ -127,7 +250,8 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        self.keystore.store_keypair(private_key, public_key)?;
+        // should we assume p2tr? always to use them with musig2 and schnorr
+        self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
 
@@ -149,58 +273,348 @@ impl KeyManager {
         let (private_key, public_key) = self
             .musig2
             .aggregate_private_key(partial_keys_bytes, network)?;
-        self.keystore.store_keypair(private_key, public_key)?;
+        // Dev note: here we should be able to assume taproot keys..
+        self.keystore.store_keypair(private_key, public_key, None)?;
         Ok(public_key)
     }
 
     pub fn import_rsa_private_key(
         &self,
         private_key: &str, // PEM format
-        index: usize,
     ) -> Result<String, KeyManagerError> {
         let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
-        self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)
     }
 
     /*********************************/
+    /****** Derivation path **********/
+    /*********************************/
+    // DERIVATION PATH (BIP-44):
+    //
+    // m / purpose' / coin_type' / account' / change / address_index
+    //
+    // Purpose:
+    // 44' = BIP44 - Legacy (P2PKH)
+    // 49' = BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+    // 84' = BIP84 - Native SegWit (P2WPKH)
+    // 86' = BIP86 - Taproot (P2TR)
+    //
+    // Coins:
+    // 0 = Bitcoin mainnet
+    // 1 = Bitcoin testnet/regtest
+    //
+    fn build_bip44_derivation_path(
+        purpose: u32,
+        coin_type: u32,
+        account: u32,
+        change: u32,
+        index: u32,
+    ) -> DerivationPath {
+        DerivationPath::from(vec![
+            ChildNumber::from_hardened_idx(purpose).unwrap(),
+            ChildNumber::from_hardened_idx(coin_type).unwrap(),
+            ChildNumber::from_hardened_idx(account).unwrap(),
+            ChildNumber::from_normal_idx(change).unwrap(),
+            ChildNumber::from_normal_idx(index).unwrap(),
+        ])
+    }
+
+    fn build_derivation_path(
+        key_type: BitcoinKeyType,
+        network: Network,
+        index: u32,
+    ) -> DerivationPath {
+        Self::build_bip44_derivation_path(
+            key_type.purpose_index(),
+            Self::get_bitcoin_coin_type_by_network(network),
+            Self::ACCOUNT_DERIVATION_INDEX,
+            Self::CHANGE_DERIVATION_INDEX,
+            index,
+        )
+    }
+
+    fn extract_account_level_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: m/purpose'/coin_type'/account' - first 3 components
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .take(3) // purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn extract_chain_path(full_path: &DerivationPath) -> DerivationPath {
+        // BIP-44: change/address_index - the chain derivation part
+        DerivationPath::from(
+            full_path
+                .into_iter()
+                .skip(3) // skip purpose, coin_type, account
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
+        match network {
+            Network::Bitcoin => 0,  // Bitcoin mainnet
+            Network::Testnet => 1,  // Bitcoin testnet
+            Network::Testnet4 => 1, // Bitcoin testnet4
+            Network::Regtest => 1,  // Bitcoin regtest (same as testnet)
+            _ => panic!("Unsupported network"),
+        }
+    }
+
+    /// Get the version bytes for extended private keys based on the key type and network
+    fn get_xpriv_version_bytes(key_type: BitcoinKeyType, network: Network) -> [u8; 4] {
+        match (key_type, network) {
+            // Mainnet
+            (BitcoinKeyType::P2pkh, Network::Bitcoin) => [0x04, 0x88, 0xAD, 0xE4], // xprv
+            (BitcoinKeyType::P2shP2wpkh, Network::Bitcoin) => [0x04, 0x9D, 0x78, 0x78], // yprv
+            (BitcoinKeyType::P2wpkh, Network::Bitcoin) => [0x04, 0xB2, 0x43, 0x0C], // zprv
+            (BitcoinKeyType::P2tr, Network::Bitcoin) => [0x04, 0x88, 0xAD, 0xE4], // xprv (no specific version for taproot)
+
+            // Testnet/Testnet4/Regtest/Signet (all use the same version bytes)
+            (BitcoinKeyType::P2pkh, _) => [0x04, 0x35, 0x83, 0x94], // tprv
+            (BitcoinKeyType::P2shP2wpkh, _) => [0x04, 0x4A, 0x4E, 0x28], // uprv
+            (BitcoinKeyType::P2wpkh, _) => [0x04, 0x5F, 0x18, 0xBC], // vprv
+            (BitcoinKeyType::P2tr, _) => [0x04, 0x35, 0x83, 0x94], // tprv (no specific version for taproot)
+        }
+    }
+
+    /// Get the version bytes for extended public keys based on the key type and network
+    fn get_xpub_version_bytes(key_type: BitcoinKeyType, network: Network) -> [u8; 4] {
+        match (key_type, network) {
+            // Mainnet
+            (BitcoinKeyType::P2pkh, Network::Bitcoin) => [0x04, 0x88, 0xB2, 0x1E], // xpub
+            (BitcoinKeyType::P2shP2wpkh, Network::Bitcoin) => [0x04, 0x9D, 0x7C, 0xB2], // ypub
+            (BitcoinKeyType::P2wpkh, Network::Bitcoin) => [0x04, 0xB2, 0x47, 0x46], // zpub
+            (BitcoinKeyType::P2tr, Network::Bitcoin) => [0x04, 0x88, 0xB2, 0x1E], // xpub (no specific version for taproot)
+
+            // Testnet/Testnet4/Regtest/Signet (all use the same version bytes)
+            (BitcoinKeyType::P2pkh, _) => [0x04, 0x35, 0x87, 0xCF], // tpub
+            (BitcoinKeyType::P2shP2wpkh, _) => [0x04, 0x4A, 0x52, 0x62], // upub
+            (BitcoinKeyType::P2wpkh, _) => [0x04, 0x5F, 0x1C, 0xF6], // vpub
+            (BitcoinKeyType::P2tr, _) => [0x04, 0x35, 0x87, 0xCF], // tpub (no specific version for taproot)
+        }
+    }
+
+    /// Convert an extended key string from one version to another by replacing version bytes
+    fn convert_extended_key_version(extended_key: &str, target_version: [u8; 4]) -> Result<String, KeyManagerError> {
+        // Decode the base58check encoded extended key
+        let decoded = base58::decode_check(extended_key)
+            .map_err(|_| KeyManagerError::CorruptedData)?;
+
+        if decoded.len() != 78 {
+            return Err(KeyManagerError::CorruptedData);
+        }
+
+        let mut new_data = decoded;
+        // Replace the first 4 bytes (version) with the target version
+        new_data[0..4].copy_from_slice(&target_version);
+
+        // Re-encode with checksum
+        Ok(base58::encode_check(&new_data))
+    }
+
+    // Winternitz uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for winternitz:
+    fn derive_winternitz_master_seed(
+        secp: secp256k1::Secp256k1<All>,
+        key_derivation_seed: &[u8],
+        network: Network,
+        account: u32,
+    ) -> Result<[u8; 32], KeyManagerError> {
+        // Dev note: Using coin type as its nice to differentiate by network, winternitz are OT,
+        // so they should not be repeated across different networks, to avoid a kind of take from testnet and use in mainnet attack
+        let wots_full_derivation_path = Self::build_bip44_derivation_path(
+            Self::WINTERNITZ_PURPOSE_INDEX,
+            Self::get_bitcoin_coin_type_by_network(network),
+            account,
+            Self::CHANGE_DERIVATION_INDEX,
+            0, // index does not matter here
+        );
+
+        let hardened_wots_account_derivation_path =
+            Self::extract_account_level_path(&wots_full_derivation_path);
+
+        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let account_xpriv =
+            master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
+
+        let secret_32_bytes = account_xpriv.private_key.secret_bytes();
+
+        // Return the private key bytes as master seed for Winternitz
+        Ok(secret_32_bytes)
+    }
+
+    /*********************************/
     /******* Key Generation **********/
     /*********************************/
-    pub fn generate_keypair<R: Rng + ?Sized>(
+
+    // Generate account-level xpub (hardened up to account)
+    pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+
+        // Build the full derivation path and extract only up to account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
+        let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+
+        let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+        let account_xpub = Xpub::from_priv(&self.secp, &account_xpriv);
+
+        // Dev note: do not touch parity here
+        // Parity normalization (even-Y) is a Taproot/Schnorr (BIP-340/341/86) concern and should be applied
+        // only when you form the Taproot internal key for each address when using the full derivation path
+        Ok(account_xpub)
+    }
+
+    /// Generate account-level extended public key with the correct BIP-specific version prefix
+    /// Returns: xpub for BIP-44, ypub for BIP-49, zpub for BIP-84, etc.
+    pub fn get_account_xpub_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+        let account_xpub = self.get_account_xpub(key_type)?;
+        let standard_xpub_string = account_xpub.to_string();
+
+        // Convert to the appropriate version based on key type
+        let target_version = Self::get_xpub_version_bytes(key_type, self.network);
+        Self::convert_extended_key_version(&standard_xpub_string, target_version)
+    }
+
+    /// Generate account-level extended private key with the correct BIP-specific version prefix
+    /// Returns: xprv for BIP-44, yprv for BIP-49, zprv for BIP-84, etc.
+    #[allow(dead_code)] // we want this method for tests and might be useful in a future xpriv export
+    fn get_account_xpriv_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+
+        // Build the full derivation path and extract only up to account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
+        let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
+        let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
+
+        let standard_xpriv_string = account_xpriv.to_string();
+
+        // Convert to the appropriate version based on key type
+        let target_version = Self::get_xpriv_version_bytes(key_type, self.network);
+        Self::convert_extended_key_version(&standard_xpriv_string, target_version)
+    }
+
+    /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_keypair`](Self::next_keypair).**
+    ///
+    /// The `next_keypair` function provides better index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    pub fn derive_keypair(
         &self,
-        rng: &mut R,
+        key_type: BitcoinKeyType,
+        index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
-        let private_key = self.generate_private_key(self.network, rng);
-        let public_key = PublicKey::from_private_key(&self.secp, &private_key);
-
-        self.keystore.store_keypair(private_key, public_key)?;
-
-        Ok(public_key)
-    }
-
-    pub fn generate_master_xpub(&self) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let master_xpub = Xpub::from_priv(&self.secp, &master_xpriv);
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
-        Ok(master_xpub)
-    }
-
-    pub fn derive_keypair(&self, index: u32) -> Result<PublicKey, KeyManagerError> {
-        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
-
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
-        // For taproot keys
-        let (public_key, private_key) = self.adjust_parity(internal_keypair);
+        // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
+        // the standars the parity should not be modified here at derivation time.
 
-        self.keystore.store_keypair(private_key, public_key)?;
+        let public_key = PublicKey::new(internal_keypair.public_key());
+        let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
+
+        self.keystore
+            .store_keypair(private_key, public_key, Some(key_type))?;
         Ok(public_key)
+    }
+
+    /// Derives a Bitcoin keypair, in the case of taproot keys, adjusts the parity to be even-Y.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_keypair_adjusted`](Self::next_keypair_adjusted).**
+    ///
+    /// The `next_keypair_adjusted` function provides better index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    pub fn derive_keypair_adjust_parity(
+        &self,
+        key_type: BitcoinKeyType,
+        index: u32,
+    ) -> Result<PublicKey, KeyManagerError> {
+        let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
+        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+
+        let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
+        let internal_keypair = xpriv.to_keypair(&self.secp);
+
+        // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
+        // the standars the parity should not be modified here at derivation time.
+        // but in the case of this function, we adjust parity here just to facilitate that the user
+        // in case he want the parity adjusted key to use it a some low lvl taproot/musig construction
+
+        let (public_key, private_key) = if key_type == BitcoinKeyType::P2tr {
+            self.adjust_parity(internal_keypair)
+        } else {
+            (
+                PublicKey::new(internal_keypair.public_key()),
+                PrivateKey::new(internal_keypair.secret_key(), self.network),
+            )
+        };
+
+        self.keystore
+            .store_keypair(private_key, public_key, Some(key_type))?;
+        Ok(public_key)
+    }
+
+    /// Generates the next Bitcoin keypair in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    /// in the case of taproot keys, adjusts the parity to be even-Y.
+    ///
+    /// This is the **recommended** function for keypair generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_keypair_adjust_parity`](Self::derive_keypair_adjust_parity).
+    ///
+    /// The function automatically tracks and increments the derivation index for each key type, ensuring that:
+    /// - Each call generates a unique keypair
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    ///
+    pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
+        let index = self.next_keypair_index(key_type)?;
+        let pubkey = self.derive_keypair(key_type, index)?;
+        // if derivation was successful, store the next index
+        self.keystore
+            .store_next_keypair_index(key_type, index + 1)?;
+        Ok(pubkey)
+    }
+
+    /// Generates the next Bitcoin keypair in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for keypair generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_keypair`](Self::derive_keypair).
+    ///
+    /// The function automatically tracks and increments the derivation index for each key type, ensuring that:
+    /// - Each call generates a unique keypair
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    ///
+    pub fn next_keypair_adjusted(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
+        let index = self.next_keypair_index(key_type)?;
+        let pubkey = self.derive_keypair_adjust_parity(key_type, index)?;
+        // if derivation was successful, store the next index
+        self.keystore
+            .store_next_keypair_index(key_type, index + 1)?;
+        Ok(pubkey)
+    }
+
+    fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
+        match self.keystore.load_next_keypair_index(key_type) {
+            Ok(stored_index) => Ok(stored_index),
+            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+        }
     }
 
     // This method changes the parity of a keypair to be even, this is needed for Taproot.
@@ -231,19 +645,46 @@ impl KeyManager {
         }
     }
 
-    pub fn derive_public_key(
+    /// Derives the public key at a specific derivation index from an account-level extended public key (xpub).
+    ///
+    // Security: Only exposes account-level xpub, not master xpub
+    // BIP-44 Compliance: Follows the standard hardened derivation up to account level
+    // Privacy: Different accounts remain isolated
+    // Flexibility: Can still derive all keys within an account from the account xpub
+    pub fn derive_public_key_from_account_xpub(
         &self,
-        master_xpub: Xpub,
+        account_xpub: Xpub,
+        key_type: BitcoinKeyType,
         index: u32,
+        adjust_parity_for_taproot: bool,
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
-        let derivation_path =
-            DerivationPath::from_str(&format!("{}{}", self.key_derivation_path, index))?;
-        let xpub = master_xpub.derive_pub(&secp, &derivation_path)?;
 
-        Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        // key type seems irrelevant here, as we will start from account xpub that alrady has its key_type (purpose) specified,
+        // and we will add just the chain path, but we need it in order to know if we need to adjust parity or not for the final key
+
+        // Build the full derivation path and extract only the chain part after account level
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
+        let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
+
+        let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
+
+        if adjust_parity_for_taproot && key_type == BitcoinKeyType::P2tr {
+            Ok(self.adjust_public_key_only_parity(xpub.to_pub().into()))
+        } else {
+            Ok(xpub.to_pub().into())
+        }
     }
 
+    /// Derives a Winternitz OT key at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_winternitz`](Self::next_winternitz) instead. **
+    ///
+    /// The `next_winternitz` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    // TODO make this func private in the future to force the usage of next_winternitz
     pub fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -267,6 +708,45 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    /// Generates the next Winternitz OT key in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Winternitz key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_winternitz`](Self::derive_winternitz).
+    ///
+    /// The function automatically tracks and increments the derivation index for each Winternitz type and message size combination, ensuring that:
+    /// - Each call generates a unique Winternitz key
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    /// - Different message sizes for the same Winternitz type have separate index counters
+    ///
+    pub fn next_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+    ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
+        let index = self.next_winternitz_index()?;
+        let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
+        // if derivation was successful, store the next index
+        self.keystore.store_next_winternitz_index(index + 1)?;
+        Ok(pubkey)
+    }
+
+    fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
+        match self.keystore.load_next_winternitz_index() {
+            Ok(stored_index) => Ok(stored_index),
+            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+        }
+    }
+
+    /// Derives n Winternitz OT key starting at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_multiple_winternitz`](Self::next_multiple_winternitz) instead. **
+    ///
+    /// The `next_multiple_winternitz` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    // TODO make this func private in the future to force the usage of next_multiple_winternitz
     pub fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
@@ -296,18 +776,57 @@ impl KeyManager {
         Ok(public_keys)
     }
 
-    fn generate_private_key<R: Rng + ?Sized>(&self, network: Network, rng: &mut R) -> PrivateKey {
-        let secret_key = SecretKey::new(rng);
-        PrivateKey::new(secret_key, network)
+    /// Generates the next n Winternitz OT keys in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Winternitz key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_multiple_winternitz`](Self::derive_multiple_winternitz).
+    ///
+    pub fn next_multiple_winternitz(
+        &self,
+        message_size_in_bytes: usize,
+        key_type: WinternitzType,
+        number_of_keys: u32,
+    ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
+        let initial_index = self.next_winternitz_index()?;
+        let pubkeys = self.derive_multiple_winternitz(
+            message_size_in_bytes,
+            key_type,
+            initial_index,
+            number_of_keys,
+        )?;
+        // if derivation was successful, store the next index
+        self.keystore
+            .store_next_winternitz_index(initial_index + number_of_keys)?;
+        Ok(pubkeys)
     }
 
+    // Dev note: this key is not related to the key derivation seed used for HD wallets
+    // In the future we can find a way to securely derive it from a mnemonic too
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
         &self,
         rng: &mut R,
-        index: usize,
     ) -> Result<String, KeyManagerError> {
-        let rsa_keypair = RSAKeyPair::new(rng, RSA_BITS)?;
-        self.keystore.store_rsa_key(rsa_keypair.clone(), index)?;
+        let rsa_keypair = RSAKeyPair::new(rng, DEFAULT_RSA_BITS)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
+        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
+        Ok(rsa_pubkey_pem)
+    }
+
+    // Dev note: this key is not related to the key derivation seed used for HD wallets
+    // In the future we can find a way to securely derive it from a mnemonic too
+    pub fn generate_rsa_keypair_custom<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+        bits: usize,
+    ) -> Result<String, KeyManagerError> {
+        if bits > MAX_RSA_BITS {
+            return Err(KeyManagerError::InvalidRSAKeySize(format!(
+                "RSA key size too large, maximum is {} bits",
+                MAX_RSA_BITS
+            )));
+        }
+        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)
     }
@@ -315,12 +834,15 @@ impl KeyManager {
     /*********************************/
     /*********** Signing *************/
     /*********************************/
+
+    // Dev note: added key type checks for signing, we were using any key for ecdsa or schnorr
+
     pub fn sign_ecdsa_message(
         &self,
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -331,6 +853,13 @@ impl KeyManager {
             }
         };
 
+        // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
+        if let Some(key_type) = key_type {
+            if key_type == BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::EcdsaWithTaprootKey);
+            }
+        }
+
         Ok(self.secp.sign_ecdsa(message, &sk.inner))
     }
 
@@ -339,7 +868,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::RecoverableSignature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -349,6 +878,13 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
+        if let Some(key_type) = key_type {
+            if key_type == BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::EcdsaWithTaprootKey);
+            }
+        }
 
         Ok(self.secp.sign_ecdsa_recoverable(message, &sk.inner))
     }
@@ -389,7 +925,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -399,6 +935,14 @@ impl KeyManager {
                 )));
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
@@ -412,7 +956,7 @@ impl KeyManager {
         public_key: &PublicKey,
         merkle_root: Option<TapNodeHash>,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -422,6 +966,14 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
 
@@ -440,7 +992,7 @@ impl KeyManager {
         public_key: &PublicKey,
         tweak: &Scalar,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(public_key)? {
+        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -450,6 +1002,14 @@ impl KeyManager {
                 )))
             }
         };
+
+        // Check if this key type is appropriate for Schnorr signatures
+        // Allow None (imported keys) or P2TR keys, reject others
+        if let Some(key_type) = key_type {
+            if key_type != BitcoinKeyType::P2tr {
+                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+            }
+        }
 
         let keypair = Keypair::from_secret_key(&self.secp, &sk.inner);
         let tweaked_keypair = keypair.add_xonly_tweak(&self.secp, tweak)?;
@@ -506,9 +1066,28 @@ impl KeyManager {
         Ok(signature)
     }
 
+    // For one-time winternitz keys
+    pub fn sign_winternitz_message_by_pubkey(
+        &self,
+        message_bytes: &[u8],
+        public_key: &WinternitzPublicKey,
+    ) -> Result<WinternitzSignature, KeyManagerError> {
+        self.sign_winternitz_message(
+            message_bytes,
+            public_key.key_type(),
+            public_key.derivation_index()?,
+        )
+    }
+
+    /// Exports the private key for a given public key.
+    ///
+    /// Note: Each public key uniquely maps to exactly one private key in the keystore.
+    /// The caller must know the KeyType used during key derivation, as this will be
+    /// needed later when deriving addresses from the exported private key.
+    /// The KeyType is not required here since the keystore is a simple pubkey -> privkey mapping.
     pub fn export_secret(&self, pubkey: &PublicKey) -> Result<PrivateKey, KeyManagerError> {
         match self.keystore.load_keypair(pubkey)? {
-            Some(entry) => Ok(entry.0),
+            Some((private_key, _, _)) => Ok(private_key),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "export_secret compressed {} public key: {:?}",
                 pubkey.to_string(),
@@ -520,19 +1099,20 @@ impl KeyManager {
     pub fn sign_rsa_message(
         &self,
         message: &[u8],
-        index: usize,
+        pub_key: &str, // PEM format
     ) -> Result<Signature, KeyManagerError> {
-        let rsa_key = self.keystore.load_rsa_key(index)?;
+        let pubk = RSAKeyPair::pubkey_from_public_key_pem(&pub_key)?;
+        let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
             Some(rsa_key) => Ok(rsa_key.sign(message)),
-            None => return Err(KeyManagerError::RsaKeyIndexNotFound(index)),
+            None => return Err(KeyManagerError::RsaKeyNotFound),
         }
     }
 
     pub fn encrypt_rsa_message(
         &self,
         message: &[u8],
-        pub_key: String, // PEM format
+        pub_key: &str, // PEM format
     ) -> Result<Vec<u8>, KeyManagerError> {
         Ok(RSAKeyPair::encrypt(message, &pub_key, &mut OsRng)?)
     }
@@ -540,12 +1120,13 @@ impl KeyManager {
     pub fn decrypt_rsa_message(
         &self,
         encrypted_message: &[u8],
-        index: usize,
+        pub_key: &str, // PEM format
     ) -> Result<Vec<u8>, KeyManagerError> {
-        let rsa_key = self.keystore.load_rsa_key(index)?;
+        let pubk = RSAKeyPair::pubkey_from_public_key_pem(&pub_key)?;
+        let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
             Some(rsa_key) => Ok(rsa_key.decrypt(encrypted_message)?),
-            None => return Err(KeyManagerError::RsaKeyIndexNotFound(index)),
+            None => return Err(KeyManagerError::RsaKeyNotFound),
         }
     }
 
@@ -553,7 +1134,7 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protoocl.
+    //TODO: Revisit this decision. The private key is used for the TOO protocol.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -561,7 +1142,7 @@ impl KeyManager {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey).unwrap();
 
         match self.keystore.load_keypair(&my_pub_key)? {
-            Some(entry) => Ok(entry),
+            Some((private_key, public_key, _)) => Ok((private_key, public_key)),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "get_key_pair_for_too_insecure compressed {} public key: {:?}",
                 my_pub_key.to_string(),
@@ -581,7 +1162,7 @@ impl KeyManager {
     ) -> Result<PartialSignature, KeyManagerError> {
         let key_aggregation_context = self.musig2.get_key_agg_context(aggregated_pubkey, tweak)?;
 
-        let (private_key, _) = match self.keystore.load_keypair(&my_public_key)? {
+        let (private_key, _, _) = match self.keystore.load_keypair(&my_public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -617,7 +1198,7 @@ impl KeyManager {
         index: u32,
         public_key: PublicKey,
     ) -> Result<[u8; 32], KeyManagerError> {
-        let (sk, _) = match self.keystore.load_keypair(&public_key)? {
+        let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -628,11 +1209,23 @@ impl KeyManager {
             }
         };
 
-        let mut data = Vec::new();
-        data.extend_from_slice(&sk.to_bytes());
-        data.extend_from_slice(&index.to_le_bytes());
+        // Use HKDF for secure key derivation with salt and context info
+        // Salt: derived from public key to ensure different salts for different keys
+        let salt = hashes::sha256::Hash::hash(&public_key.to_bytes()).to_byte_array();
 
-        let nonce_seed = hashes::sha256::Hash::hash(data.as_slice()).to_byte_array();
+        // Input key material: secret key bytes
+        let ikm = sk.to_bytes();
+
+        // Context info: includes index and a domain separator
+        let mut info = Vec::new();
+        info.extend_from_slice(MUSIG2_NONCE_HKDF_INFO);
+        info.extend_from_slice(&index.to_le_bytes());
+
+        // Derive the nonce seed using HKDF-SHA256
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
+        let mut nonce_seed = [0u8; 32];
+        hkdf.expand(&info, &mut nonce_seed)
+            .map_err(|_| KeyManagerError::FailedToGenerateNonceSeed)?;
 
         Ok(nonce_seed)
     }
@@ -790,70 +1383,73 @@ impl KeyManager {
 
 #[cfg(test)]
 mod tests {
+    use bip39::Mnemonic;
     use bitcoin::{
-        Network, PrivateKey, PublicKey, hex::DisplayHex, key::{Secp256k1, rand::{self, RngCore, rngs::mock::StepRng}}, secp256k1::{self, Message, SecretKey}
+        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey, bip32::Xpriv, hex::DisplayHex, key::{CompressedPublicKey, Parity, rand::{self, RngCore}}, secp256k1::{self, Message, SecretKey}
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        config::KeyManagerConfig, create_key_manager_from_config, errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, verifier::SignatureVerifier, winternitz::{to_checksummed_message, WinternitzType}
+        errors::{KeyManagerError, WinternitzError},
+        key_store::KeyStore,
+        key_type::BitcoinKeyType,
+        rsa::RSAKeyPair,
+        verifier::SignatureVerifier,
+        winternitz::{to_checksummed_message, WinternitzType},
     };
 
     use super::KeyManager;
 
-    const DERIVATION_PATH: &str = "m/101/1/0/0/";
     const REGTEST: Network = Network::Regtest;
 
     #[test]
     fn test_generate_nonce_seed() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager = test_key_manager(keystore, store)?;
-        let mut rng = StepRng::new(1, 0);
-        let pub_key: PublicKey = key_manager.generate_keypair(&mut rng)?;
+        let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
+        let pub_key: PublicKey = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
 
-        let mut rng = StepRng::new(2, 0);
-        let pub_key2: PublicKey = key_manager.generate_keypair(&mut rng)?;
+        let pub_key2: PublicKey = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 1)?;
 
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+            "018365b1811bbf730dbcda2fc621e79470057679a13239bcbb5719b418ac9fa0"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
+        let nonce_seed_repeat = key_manager.generate_nonce_seed(0, pub_key)?;
         assert_eq!(
             nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+            nonce_seed_repeat.to_lower_hex_string()
         );
 
         // Test that the nonce is different for different index
-        let nonce_seed = key_manager.generate_nonce_seed(1, pub_key)?;
+        let nonce_seed_1 = key_manager.generate_nonce_seed(1, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "30364fcd5b5dc41f5261219ed4db2c8b57e2a6b025852cda02e8718256661339"
+            nonce_seed_1.to_lower_hex_string(),
+            "bdd5ee7734d2edda684c1e52ff8db1244bba20f992437c58e816ec3e1af915d5"
         );
-        let nonce_seed = key_manager.generate_nonce_seed(4, pub_key)?;
+        let nonce_seed_4 = key_manager.generate_nonce_seed(4, pub_key)?;
         assert_eq!(
-            nonce_seed.to_lower_hex_string(),
-            "335884b6a1febb486b546cd7fd64f262dab8f0577892a7dd2fe96b501c1e5139"
+            nonce_seed_4.to_lower_hex_string(),
+            "09d494894e401d604e88874bc54b18a71168d29190697f1d213746613b83f84f"
         );
 
         // Test that the nonce is different for different public key
-        let nonce_seed = key_manager.generate_nonce_seed(0, pub_key2)?;
+        let nonce_seed_2 = key_manager.generate_nonce_seed(0, pub_key2)?;
+        assert_eq!(
+            nonce_seed_2.to_lower_hex_string(),
+            "5e501a86513dc9940d45ec1818799fd666718ba0dc819f162249ddaa842c2633"
+        );
         assert_ne!(
             nonce_seed.to_lower_hex_string(),
-            "bb4f914ef003427e2eb5dd2547da171c130dfb09362e56033eaad94d81fe45a6"
+            nonce_seed_2.to_lower_hex_string()
         );
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -903,17 +1499,12 @@ mod tests {
     #[test]
     fn test_sign_schnorr_message_with_tap_tweak() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
-        let mut rng = secp256k1::rand::thread_rng();
-        let pk = key_manager.generate_keypair(&mut rng)?;
+        let pk = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
 
         let message = random_message();
         let (signature, tweaked_key) =
@@ -923,20 +1514,15 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_winternitz_message_sha256() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let message = random_message();
@@ -950,20 +1536,15 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
     #[test]
     fn test_sign_winternitz_message_ripemd160() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
 
         let digest: [u8; 32] = [0xFE; 32];
@@ -977,53 +1558,52 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
     #[test]
     fn test_derive_key() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
         let signature_verifier = SignatureVerifier::new();
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+        ];
 
-        let pk_1 = key_manager.derive_keypair(0)?;
-        let pk_2 = key_manager.derive_keypair(1)?;
+        for key_type in key_types {
+            let pk_1 = key_manager.derive_keypair(key_type, 0)?;
+            let pk_2 = key_manager.derive_keypair(key_type, 1)?;
 
-        assert_ne!(pk_1.to_string(), pk_2.to_string());
+            // Different indices should produce different public keys
+            assert_ne!(pk_1.to_string(), pk_2.to_string());
 
-        let message = random_message();
-        let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
-        let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
+            let message = random_message();
+            let signature_1 = key_manager.sign_ecdsa_message(&message, &pk_1)?;
+            let signature_2 = key_manager.sign_ecdsa_message(&message, &pk_2)?;
 
-        assert_ne!(signature_1.to_string(), signature_2.to_string());
+            // Different keys should produce different signatures for the same message
+            assert_ne!(signature_1.to_string(), signature_2.to_string());
 
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
-        assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+            // Both signatures should be valid
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_1, &message, pk_1));
+            assert!(signature_verifier.verify_ecdsa_signature(&signature_2, &message, pk_2));
+        }
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
     #[test]
     fn test_key_generation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.to_string(), None);
-        let store = Rc::new(Storage::new(&config)?);
-
-        let key_manager = test_key_manager(keystore, store)?;
-        let mut rng = secp256k1::rand::thread_rng();
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         let message = random_message();
         let checksummed = to_checksummed_message(&message[..]);
@@ -1032,8 +1612,8 @@ mod tests {
         let pk2 = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 8)?;
         let pk3 = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 8)?;
         let pk4 = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 8)?;
-        let pk5 = key_manager.generate_keypair(&mut rng)?;
-        let pk6 = key_manager.generate_keypair(&mut rng)?;
+        let pk5 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let pk6 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 1)?;
 
         assert!(pk1.total_len() == checksummed.len());
         assert!(pk2.total_len() == checksummed.len());
@@ -1048,7 +1628,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         Ok(())
     }
 
@@ -1057,23 +1636,25 @@ mod tests {
         let path = temp_storage();
         let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
-        let winternitz_seed = random_bytes();
-        let key_derivation_seed = random_bytes();
+        let winternitz_seed = random_32bytes();
+        let key_derivation_seed = random_64bytes();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
 
         let config = StorageConfig::new(path.clone(), Some(password));
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
         keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_mnemonic(&random_mnemonic)?;
 
         for _ in 0..10 {
             let secret_key = SecretKey::new(&mut secp256k1::rand::thread_rng());
             let private_key = PrivateKey::new(secret_key, Network::Regtest);
             let public_key = PublicKey::from_private_key(&secp, &private_key);
 
-            keystore.store_keypair(private_key, public_key)?;
+            keystore.store_keypair(private_key, public_key, None)?;
 
-            let (restored_sk, restored_pk) = match keystore.load_keypair(&public_key)? {
+            let (restored_sk, restored_pk, _) = match keystore.load_keypair(&public_key)? {
                 Some(entry) => entry,
                 None => {
                     panic!("Failed to find key");
@@ -1090,6 +1671,9 @@ mod tests {
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
         assert!(loaded_key_derivation_seed == key_derivation_seed);
 
+        let loaded_mnemonic = keystore.load_mnemonic()?;
+        assert!(loaded_mnemonic == random_mnemonic);
+
         drop(keystore);
         cleanup_storage(&path);
         Ok(())
@@ -1100,8 +1684,8 @@ mod tests {
         let path = temp_storage();
         let password = "secret password".to_string();
         let secp = secp256k1::Secp256k1::new();
-        let winternitz_seed = random_bytes();
-        let key_derivation_seed = random_bytes();
+        let winternitz_seed = random_32bytes();
+        let key_derivation_seed = random_64bytes();
 
         let config = StorageConfig::new(path.clone(), Some(password.clone()));
         let store = Rc::new(Storage::new(&config)?);
@@ -1113,9 +1697,9 @@ mod tests {
         let private_key = PrivateKey::new(secret_key, Network::Regtest);
         let public_key = PublicKey::from_private_key(&secp, &private_key);
 
-        keystore.store_keypair(private_key, public_key)?;
+        keystore.store_keypair(private_key, public_key, None)?;
 
-        let (_, recovered_public_key) = match keystore.load_keypair(&public_key)? {
+        let (_, recovered_public_key, _) = match keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => panic!("Failed to find key"),
         };
@@ -1128,15 +1712,240 @@ mod tests {
     }
 
     #[test]
+    fn test_next_keypair_auto_indexing() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // Create a fresh KeyManager
+        let key_manager = KeyManager::new(
+            Network::Regtest,
+            None, // No mnemonic provided, will generate one
+            None,
+            keystore_storage_config,
+        )?;
+
+        // 1. Verify that with a fresh keymanager, there is no stored index for P2tr
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)
+            .is_err());
+
+        // 2. Verify that there is also no stored index for other key types
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
+
+        // 3. Get next_keypair for P2tr type - should return a public key and store index 1
+        let first_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
+
+        // 4. Verify that index 1 is now stored for P2tr (next index after using index 0)
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(
+            stored_index, 1,
+            "Expected next index to be 1 after first keypair generation"
+        );
+
+        // 5. Verify that there is still no index stored for other types
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
+
+        // 6. Get next_keypair again - should return a different pubkey and store index 2
+        let second_pubkey = key_manager.next_keypair(BitcoinKeyType::P2tr)?;
+
+        // 7. Verify that index 2 is now stored for P2tr
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(
+            stored_index, 2,
+            "Expected next index to be 2 after second keypair generation"
+        );
+
+        // 8. Verify that the two pubkeys are different
+        assert_ne!(
+            first_pubkey, second_pubkey,
+            "Expected different public keys from successive next_keypair calls"
+        );
+
+        // 9. Use derive_keypair with index 0 - should give the same as the 1st pubkey
+        let derived_first_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        assert_eq!(
+            first_pubkey, derived_first_pubkey,
+            "Expected derive_keypair(0) to match first next_keypair result"
+        );
+
+        // 10. Use derive_keypair with index 1 - should give the same as the 2nd pubkey
+        let derived_second_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2tr, 1)?;
+        assert_eq!(
+            second_pubkey, derived_second_pubkey,
+            "Expected derive_keypair(1) to match second next_keypair result"
+        );
+
+        // 11. Verify that calling next_keypair for a different key type starts fresh indexing
+        let first_p2wpkh_pubkey = key_manager.next_keypair(BitcoinKeyType::P2wpkh)?;
+        let stored_p2wpkh_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
+        assert_eq!(
+            stored_p2wpkh_index, 1,
+            "Expected P2wpkh next index to start at 1"
+        );
+
+        // 12. Verify that P2tr index is still at 2 and other types are still not set
+        let p2tr_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2tr)?;
+        assert_eq!(p2tr_index, 2, "P2tr index should remain unchanged");
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2pkh)
+            .is_err());
+        assert!(key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2shP2wpkh)
+            .is_err());
+
+        // 13. Verify that derive_keypair for P2wpkh with index 0 gives the same as next_keypair
+        let derived_p2wpkh_pubkey = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        assert_eq!(
+            first_p2wpkh_pubkey, derived_p2wpkh_pubkey,
+            "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result"
+        );
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_next_winternitz_auto_indexing() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // Create a fresh KeyManager
+        let key_manager = KeyManager::new(
+            Network::Regtest,
+            None, // No mnemonic provided, will generate one
+            None,
+            keystore_storage_config,
+        )?;
+
+        let message_size_32_bytes = 32;
+        let message_size_20_bytes = 20;
+
+        // 1. Get next_winternitz for SHA256 with 32 bytes - should use index 0 and increment global counter
+        let first_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+
+        // 2. Verify that derive_winternitz with index 0 gives the same as the 1st pubkey
+        let derived_first_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 0)?;
+        assert_eq!(
+            first_pubkey, derived_first_pubkey,
+            "Expected derive_winternitz(0) to match first next_winternitz result"
+        );
+
+        // 3. Get next_winternitz again - should use index 1 and increment global counter
+        let second_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::SHA256)?;
+
+        // 4. Verify that the two pubkeys are different
+        assert_ne!(
+            first_pubkey, second_pubkey,
+            "Expected different public keys from successive next_winternitz calls"
+        );
+
+        // 5. Verify that derive_winternitz with index 1 gives the same as the 2nd pubkey
+        let derived_second_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::SHA256, 1)?;
+        assert_eq!(
+            second_pubkey, derived_second_pubkey,
+            "Expected derive_winternitz(1) to match second next_winternitz result"
+        );
+
+        // 6. Get next_winternitz for a different type - should use index 2 (global counter continues)
+        let third_pubkey =
+            key_manager.next_winternitz(message_size_32_bytes, WinternitzType::HASH160)?;
+
+        // 7. Verify that derive_winternitz for HASH160 with index 2 gives the same result
+        let derived_third_pubkey =
+            key_manager.derive_winternitz(message_size_32_bytes, WinternitzType::HASH160, 2)?;
+        assert_eq!(
+            third_pubkey, derived_third_pubkey,
+            "Expected derive_winternitz(HASH160, 32, 2) to match third next_winternitz result"
+        );
+
+        // 8. Get next_winternitz for different message size - should use index 3 (global counter continues)
+        let fourth_pubkey =
+            key_manager.next_winternitz(message_size_20_bytes, WinternitzType::SHA256)?;
+
+        // 9. Verify that derive_winternitz for SHA256:20 with index 3 gives the same result
+        let derived_fourth_pubkey =
+            key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::SHA256, 3)?;
+        assert_eq!(
+            fourth_pubkey, derived_fourth_pubkey,
+            "Expected derive_winternitz(SHA256, 20, 3) to match fourth next_winternitz result"
+        );
+
+        // 10. Get next_winternitz for yet another combination - should use index 4
+        let fifth_pubkey =
+            key_manager.next_winternitz(message_size_20_bytes, WinternitzType::HASH160)?;
+
+        // 11. Verify that derive_winternitz for HASH160:20 with index 4 gives the same result
+        let derived_fifth_pubkey =
+            key_manager.derive_winternitz(message_size_20_bytes, WinternitzType::HASH160, 4)?;
+        assert_eq!(
+            fifth_pubkey, derived_fifth_pubkey,
+            "Expected derive_winternitz(HASH160, 20, 4) to match fifth next_winternitz result"
+        );
+
+        // 12. Verify all keys are different (security requirement - no reuse)
+        let all_pubkeys = vec![
+            &first_pubkey,
+            &second_pubkey,
+            &third_pubkey,
+            &fourth_pubkey,
+            &fifth_pubkey,
+        ];
+        for (i, key1) in all_pubkeys.iter().enumerate() {
+            for (j, key2) in all_pubkeys.iter().enumerate() {
+                if i != j {
+                    assert_ne!(key1, key2, "Expected all Winternitz keys to be different - found duplicate at indices {} and {}", i, j);
+                }
+            }
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
     fn test_error_handling() -> Result<(), KeyManagerError> {
         let message = random_message();
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path)?;
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config)?);
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let mut key_manager = test_key_manager(keystore, store)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         // Case 1: Invalid private key string
         let result = key_manager.import_private_key("invalid_key");
@@ -1145,11 +1954,7 @@ mod tests {
             Err(KeyManagerError::FailedToParsePrivateKey(_))
         ));
 
-        // Case 2: Invalid derivation path
-        let invalid_derivation_path = "m/44'/invalid'";
-        key_manager.key_derivation_path = invalid_derivation_path.to_string();
-        let result = key_manager.derive_keypair(0);
-        assert!(matches!(result, Err(KeyManagerError::Bip32Error(_))));
+        // Case 2: Invalid derivation path (not possible)
 
         // Case 3 b: Write error when creating database keystore (invalid path)
         //TODO: FIX THIS TEST is not working in windows envs
@@ -1175,64 +1980,128 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_key_type_signature_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test P2TR key validation
+        let p2tr_public_key = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+
+        // Attempt to sign with ECDSA using P2TR key - should fail
+        let result = key_manager.sign_ecdsa_message(&message, &p2tr_public_key);
+        assert!(matches!(result, Err(KeyManagerError::EcdsaWithTaprootKey)));
+
+        // Attempt to sign with ECDSA recoverable using P2TR key - should also fail
+        let result = key_manager.sign_ecdsa_recoverable_message(&message, &p2tr_public_key);
+        assert!(matches!(result, Err(KeyManagerError::EcdsaWithTaprootKey)));
+
+        // Schnorr signing should work fine with P2TR keys
+        let schnorr_result = key_manager.sign_schnorr_message(&message, &p2tr_public_key);
+        assert!(schnorr_result.is_ok());
+
+        // Test non-Taproot key validation
+        let p2wpkh_public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+
+        // ECDSA should work fine with non-Taproot keys
+        let ecdsa_result = key_manager.sign_ecdsa_message(&message, &p2wpkh_public_key);
+        assert!(ecdsa_result.is_ok());
+
+        // Schnorr signing with non-Taproot keys should fail
+        let result = key_manager.sign_schnorr_message(&message, &p2wpkh_public_key);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::SchnorrWithNonTaprootKey)
+        ));
+
+        // Test imported key (key_type = None) - should allow both ECDSA and Schnorr
+        let imported_key = key_manager
+            .import_private_key("L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ")?;
+
+        // Both ECDSA and Schnorr should work with imported keys (no specific type)
+        let ecdsa_result = key_manager.sign_ecdsa_message(&message, &imported_key);
+        assert!(ecdsa_result.is_ok());
+
+        let schnorr_result = key_manager.sign_schnorr_message(&message, &imported_key);
+        assert!(schnorr_result.is_ok());
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
         Ok(())
     }
 
     #[test]
     fn test_signature_with_bip32_derivation() {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let key_manager = test_key_manager(keystore, store).unwrap();
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+        ];
 
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        for key_type in key_types {
+            let account_xpub = key_manager.get_account_xpub(key_type).unwrap();
 
-        for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            for i in 0..5 {
+                let pk1 = key_manager.derive_keypair(key_type, i).unwrap();
+                let pk2 = key_manager
+                    .derive_public_key_from_account_xpub(account_xpub, key_type, i, false)
+                    .unwrap();
+
+                let signature_verifier = SignatureVerifier::new();
+                let message = random_message();
+                let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
+
+                // Both keys should be equivalent for the same index
+                assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            }
+
+            // Test that different indices produce different keys (negative test)
+            let pk1 = key_manager.derive_keypair(key_type, 10).unwrap();
+            let pk2 = key_manager
+                .derive_public_key_from_account_xpub(account_xpub, key_type, 11, false)
+                .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
             let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
 
-            assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
+            // Different indices should not verify with each other
+            assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
         }
-
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
-
-        let signature_verifier = SignatureVerifier::new();
-        let message = random_message();
-        let signature = key_manager.sign_ecdsa_message(&message, &pk1).unwrap();
-
-        assert!(!signature_verifier.verify_ecdsa_signature(&signature, &message, pk2));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
     #[test]
     fn test_schnorr_signature_with_bip32_derivation() {
+        // Note: Schnorr signatures are primarily used with Taproot (P2TR)
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
 
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let key_manager = test_key_manager(keystore, store).unwrap();
-
-        let master_xpub = key_manager.generate_master_xpub().unwrap();
+        let account_xpub = key_manager
+            .get_account_xpub(BitcoinKeyType::P2tr)
+            .unwrap();
 
         for i in 0..5 {
-            let pk1 = key_manager.derive_keypair(i).unwrap();
-            let pk2 = key_manager.derive_public_key(master_xpub, i).unwrap();
+            let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, i).unwrap();
+            let pk2 = key_manager
+                .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, i, false)
+                .unwrap();
 
             let signature_verifier = SignatureVerifier::new();
             let message = random_message();
@@ -1241,8 +2110,12 @@ mod tests {
             assert!(signature_verifier.verify_schnorr_signature(&signature, &message, pk2));
         }
 
-        let pk1 = key_manager.derive_keypair(10).unwrap();
-        let pk2 = key_manager.derive_public_key(master_xpub, 11).unwrap();
+        let pk1 = key_manager
+            .derive_keypair(BitcoinKeyType::P2tr, 10)
+            .unwrap();
+        let pk2 = key_manager
+            .derive_public_key_from_account_xpub(account_xpub, BitcoinKeyType::P2tr, 11, false)
+            .unwrap();
 
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
@@ -1252,7 +2125,6 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
     #[test]
@@ -1280,11 +2152,8 @@ mod tests {
     #[test]
     fn test_derive_multiple_winternitz_gives_same_result_as_doing_one_by_one() {
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).unwrap();
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).unwrap());
-        let key_manager = test_key_manager(keystore, store).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
+        let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
         let message_size_in_bytes = 32;
         let key_type = WinternitzType::SHA256;
@@ -1309,33 +2178,147 @@ mod tests {
         }
         drop(key_manager);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
     }
 
-    fn test_key_manager(
-        keystore: KeyStore,
-        store: Rc<Storage>,
+    #[test]
+    fn test_imported_key_type_storage_and_retrieval() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        // Test importing keys with each possible key type
+        let test_cases = vec![
+            (
+                "L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ",
+                Some(BitcoinKeyType::P2pkh),
+                "P2PKH key import",
+            ),
+            (
+                "KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617",
+                Some(BitcoinKeyType::P2shP2wpkh),
+                "P2SH-P2WPKH key import",
+            ),
+            (
+                "L5oLkpV3aqBjhki6LmvChTCV6odsp4SXM6FfU2Gppt5kFLaHLuZ9",
+                Some(BitcoinKeyType::P2wpkh),
+                "P2WPKH key import",
+            ),
+            (
+                "KyBsPXxTuVD82av65KZkrGrWi5qLMah5SdNq6uftawDbgKa2wv6S",
+                Some(BitcoinKeyType::P2tr),
+                "P2TR key import",
+            ),
+            (
+                "L3Hq7a8FEQwJkW1M2GNKDW28546Vp5miewcCzSqUD9kCAXrJdS3g",
+                None,
+                "Untyped key import",
+            ),
+        ];
+
+        for (private_key_wif, expected_key_type, description) in test_cases {
+            // Import the key with specific type
+            let public_key =
+                key_manager.import_private_key_typed(private_key_wif, expected_key_type)?;
+
+            // Retrieve the key and verify the type is preserved
+            let (_, _, stored_key_type) = match key_manager.keystore.load_keypair(&public_key)? {
+                Some(entry) => entry,
+                None => panic!("Failed to retrieve imported key for {}", description),
+            };
+
+            // Verify the key type matches what was set during import
+            assert_eq!(
+                stored_key_type, expected_key_type,
+                "Key type mismatch for {}: expected {:?}, got {:?}",
+                description, expected_key_type, stored_key_type
+            );
+
+            println!(
+                "✓ {}: Key type correctly stored as {:?}",
+                description, stored_key_type
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_derived_key_type_storage_and_retrieval() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
+
+        // Test deriving keys for each possible key type
+        let key_types = vec![
+            BitcoinKeyType::P2pkh,
+            BitcoinKeyType::P2shP2wpkh,
+            BitcoinKeyType::P2wpkh,
+            BitcoinKeyType::P2tr,
+        ];
+
+        for (index, expected_key_type) in key_types.iter().enumerate() {
+            // Derive a key of the specific type
+            let public_key = key_manager.derive_keypair(*expected_key_type, index as u32)?;
+
+            // Retrieve the key and verify the type is preserved
+            let (_, _, stored_key_type) = match key_manager.keystore.load_keypair(&public_key)? {
+                Some(entry) => entry,
+                None => panic!("Failed to retrieve derived key for {:?}", expected_key_type),
+            };
+
+            // Verify the key type matches what was used during derivation
+            let expected_option = Some(*expected_key_type);
+            assert_eq!(
+                stored_key_type, expected_option,
+                "Key type mismatch for derived {:?}: expected {:?}, got {:?}",
+                expected_key_type, expected_option, stored_key_type
+            );
+
+            println!(
+                "✓ Derived {:?} key: Key type correctly stored as {:?}",
+                expected_key_type, stored_key_type
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    fn test_random_key_manager(
+        storage_config: StorageConfig,
     ) -> Result<KeyManager, KeyManagerError> {
-        let key_derivation_seed = random_bytes();
-        let winternitz_seed = random_bytes();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic_passphrase = generate_random_passphrase();
 
         let key_manager = KeyManager::new(
             REGTEST,
-            DERIVATION_PATH,
-            Some(key_derivation_seed),
-            Some(winternitz_seed),
-            keystore,
-            store,
+            Some(random_mnemonic),
+            Some(random_mnemonic_passphrase),
+            storage_config,
         )?;
 
         Ok(key_manager)
     }
 
-    fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
+    fn test_deterministic_key_manager(
+        storage_config: StorageConfig,
+    ) -> Result<KeyManager, KeyManagerError> {
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+
+        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, storage_config)?;
+
+        Ok(key_manager)
+    }
+
+    fn database_keystore_config(storage_path: &str) -> Result<StorageConfig, KeyManagerError> {
         let password = "secret password".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
-        let store = Rc::new(Storage::new(&config)?);
-        Ok(KeyStore::new(store))
+        Ok(config)
     }
 
     fn random_message() -> Message {
@@ -1344,8 +2327,14 @@ mod tests {
         Message::from_digest(digest)
     }
 
-    fn random_bytes() -> [u8; 32] {
+    fn random_32bytes() -> [u8; 32] {
         let mut seed = [0u8; 32];
+        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+        seed
+    }
+
+    fn random_64bytes() -> [u8; 64] {
+        let mut seed = [0u8; 64];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
     }
@@ -3404,5 +4393,789 @@ mod tests {
 
             Ok(())
         })
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_rsa_deterministic_key_gen() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let mut rng_1 = secp256k1::rand::thread_rng();
+        let pubkey_1 = key_manager.generate_rsa_keypair(&mut rng_1)?;
+        let mut rng_2 = secp256k1::rand::thread_rng();
+        let pubkey_2 = key_manager.generate_rsa_keypair(&mut rng_2)?;
+
+        let pubk_1 = RSAKeyPair::pubkey_from_public_key_pem(&pubkey_1)?;
+        let keypair_1 = key_manager
+            .keystore
+            .load_rsa_key(pubk_1)?
+            .expect("Failed to load RSA private key");
+
+        let pubkey_from_keypair_1 = keypair_1.export_public_pem()?;
+        assert_eq!(pubkey_1, pubkey_from_keypair_1);
+
+        let pubk_2 = RSAKeyPair::pubkey_from_public_key_pem(&pubkey_2)?;
+        let keypair_2 = key_manager
+            .keystore
+            .load_rsa_key(pubk_2)?
+            .expect("Failed to load RSA private key");
+
+        let pubkey_from_keypair_2 = keypair_2.export_public_pem()?;
+        assert_eq!(pubkey_2, pubkey_from_keypair_2);
+
+        // Both should be stored, loaded and different
+        assert_ne!(pubkey_from_keypair_1, pubkey_from_keypair_2);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_constructor() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Create the 2nd KeyManager with different Mnemonic but using the same keystore_storage_config
+        // This should fail with MnemonicMismatch error
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence =
+            "legal winner thank year wave sausage worth useful legal winner thank yellow";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone(),
+        );
+
+        // Expect MnemonicMismatch error
+        assert!(matches!(
+            key_manager2,
+            Err(KeyManagerError::MnemonicMismatch(_))
+        ));
+
+        // --- Create the 3rd KeyManager with the same stored mnemonic
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager3 =
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+
+        drop(key_manager3);
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mnemonic_passphrase_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic and passphrase
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let passphrase1 = "test_passphrase_123".to_string();
+
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(passphrase1.clone()),
+            keystore_storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Test 1: Create KeyManager with same mnemonic and same passphrase (should succeed)
+        let key_manager2 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(passphrase1.clone()),
+            keystore_storage_config.clone(),
+        )?;
+
+        drop(key_manager2);
+
+        // --- Test 2: Create KeyManager with same mnemonic but different passphrase (should fail)
+        let different_passphrase = "different_passphrase_456".to_string();
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            Some(different_passphrase),
+            keystore_storage_config.clone(),
+        );
+
+        // Expect MnemonicPassphraseMismatch error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::MnemonicPassphraseMismatch(_))
+        ));
+
+        // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
+        let key_manager3 =
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+
+        drop(key_manager3);
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_key_derivation_seed_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seed
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Manually corrupt the stored key derivation seed to test validation
+        {
+            use std::rc::Rc;
+            let key_store = Rc::new(Storage::new(&keystore_storage_config)?);
+            let keystore = KeyStore::new(key_store);
+
+            // Store a corrupted seed (different from what the mnemonic would generate)
+            let corrupted_seed = [0u8; 64]; // All zeros - definitely wrong
+            keystore.store_key_derivation_seed(corrupted_seed)?;
+        }
+
+        // --- Try to create KeyManager with the same mnemonic (should fail due to seed validation)
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone(),
+        );
+
+        // Expect CorruptedKeyDerivationSeed error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::CorruptedKeyDerivationSeed)
+        ));
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_seed_validation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Manually corrupt the stored Winternitz seed to test validation
+        {
+            use std::rc::Rc;
+            let key_store = Rc::new(Storage::new(&keystore_storage_config)?);
+            let keystore = KeyStore::new(key_store);
+
+            // Store a corrupted Winternitz seed (different from what would be derived)
+            let corrupted_winternitz_seed = [0u8; 32]; // All zeros - definitely wrong
+            keystore.store_winternitz_seed(corrupted_winternitz_seed)?;
+        }
+
+        // --- Try to create KeyManager with the same mnemonic (should fail due to Winternitz seed validation)
+        let result = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            keystore_storage_config.clone(),
+        );
+
+        // Expect CorruptedWinternitzSeed error
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::CorruptedWinternitzSeed)
+        ));
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bitcoin_regtest_keys_derivation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        // hardcoded values from https://iancoleman.io/bip39/
+
+        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed()?;
+        let key_derivation_seed_hex = key_derivation_seed.to_hex_string(bitcoin::hex::Case::Lower);
+        let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
+        assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
+
+        let master_xpriv = Xpriv::new_master(REGTEST, &key_derivation_seed)?;
+        let master_xpriv_hex = master_xpriv.to_string();
+        let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
+        assert_eq!(master_xpriv_hex, expected_master_xpriv);
+
+        // BIP44 - Legacy (P2PKH)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
+        let expected_p2pkh_0 =
+            PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
+        assert_eq!(p2pkh_0, expected_p2pkh_0);
+
+        let p2pkh_0_address = Address::p2pkh(&p2pkh_0, REGTEST);
+        let expected_p2pkh_0_address = "mkpZhYtJu2r87Js3pDiWJDmPte2NRZ8bJV";
+        assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
+
+        let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
+        let expected_p2pkh_15 =
+            PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
+        assert_eq!(p2pkh_15, expected_p2pkh_15);
+
+        let p2pkh_15_address = Address::p2pkh(&p2pkh_15, REGTEST);
+        let expected_p2pkh_15_address = "n1MsayUmxjiUyrbQs6F2megEA8azR1nYc1";
+        assert_eq!(p2pkh_15_address.to_string(), expected_p2pkh_15_address);
+
+        // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 =
+            PublicKey::from_str("03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f")?;
+        assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, REGTEST);
+        let expected_p2shp2wpkh_0_address = "2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2";
+        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+
+        let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
+        let expected_p2shp2wpkh_15 =
+            PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
+        assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, REGTEST);
+        let expected_p2shp2wpkh_15_address = "2NBRjDXAbHXNpMpo7uKwKyF5hyU8BkzpsM1";
+        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+
+        // BIP84 - Native SegWit (P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let expected_p2wpkh_0 =
+            PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
+        assert_eq!(p2wpkh_0, expected_p2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, REGTEST);
+        let expected_p2wpkh_0_address = "bcrt1q6rz28mcfaxtmd6v789l9rrlrusdprr9pz3cppk";
+        assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
+
+        let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
+        let expected_p2wpkh_15 =
+            PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
+        assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, REGTEST);
+        let expected_p2wpkh_15_address = "bcrt1qhtwqm3x7wn0zteznkkzpamzrm345js9k0v2twy";
+        assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
+
+        // BIP86 - Taproot (P2TR)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX"; // missing value
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let expected_p2tr_0 =
+            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        assert_eq!(p2tr_0, expected_p2tr_0);
+        let p2tr_0_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
+        let expected_p2tr_0_address = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
+        assert_eq!(p2tr_0_regtest_address.to_string(), expected_p2tr_0_address);
+
+        let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
+        let p2tr_0_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
+        let expected_p2tr_0_address_with_parity = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
+        assert_eq!(p2tr_0_regtest_address.to_string(), expected_p2tr_0_address_with_parity);
+
+        // Dev note: parity is already even for index 0
+        let expected_p2tr_0 =
+            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        assert_eq!(p2tr_0, expected_p2tr_0);
+        let (_, parity) = expected_p2tr_0.inner.x_only_public_key();
+        assert_eq!(parity, Parity::Even);
+
+        // using index 14 to force odd parity key
+        let p2tr_14 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 14)?;
+        let p2tr_14_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
+        let expected_p2tr_14_address = "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
+        assert_eq!(p2tr_14_regtest_address.to_string(), expected_p2tr_14_address);
+        let expected_p2tr_14 =
+            PublicKey::from_str("034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6")?;
+        assert_eq!(p2tr_14, expected_p2tr_14);
+
+        let p2tr_14 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 14)?;
+        let p2tr_14_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
+        let expected_p2tr_14_address_with_parity = "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
+        assert_eq!(p2tr_14_regtest_address.to_string(), expected_p2tr_14_address_with_parity);
+        let not_expected_p2tr_14 =
+            PublicKey::from_str("034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6")?;
+        assert_ne!(p2tr_14, not_expected_p2tr_14);
+        let negated_not_expected_p2tr_14 = PublicKey::new(not_expected_p2tr_14.inner.negate(&secp));
+        assert_eq!(p2tr_14, negated_not_expected_p2tr_14);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bitcoin_testnet_keys_derivation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager = KeyManager::new(
+            Network::Testnet,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
+
+        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed()?;
+        let key_derivation_seed_hex = key_derivation_seed.to_hex_string(bitcoin::hex::Case::Lower);
+        let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
+        assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
+
+        let master_xpriv = Xpriv::new_master(Network::Testnet, &key_derivation_seed)?;
+        let master_xpriv_hex = master_xpriv.to_string();
+        let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
+        assert_eq!(master_xpriv_hex, expected_master_xpriv);
+
+        // BIP44 - Legacy (P2PKH)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
+        let expected_p2pkh_0 =
+            PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
+        assert_eq!(p2pkh_0, expected_p2pkh_0);
+
+        let p2pkh_0_address = Address::p2pkh(&p2pkh_0, Network::Testnet);
+        let expected_p2pkh_0_address = "mkpZhYtJu2r87Js3pDiWJDmPte2NRZ8bJV";
+        assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
+
+        let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
+        let expected_p2pkh_15 =
+            PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
+        assert_eq!(p2pkh_15, expected_p2pkh_15);
+
+        let p2pkh_15_address = Address::p2pkh(&p2pkh_15, Network::Testnet);
+        let expected_p2pkh_15_address = "n1MsayUmxjiUyrbQs6F2megEA8azR1nYc1";
+        assert_eq!(p2pkh_15_address.to_string(), expected_p2pkh_15_address);
+
+        // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 =
+            PublicKey::from_str("03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f")?;
+        assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, Network::Testnet);
+        let expected_p2shp2wpkh_0_address = "2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2";
+        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+
+        let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
+        let expected_p2shp2wpkh_15 =
+            PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
+        assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, Network::Testnet);
+        let expected_p2shp2wpkh_15_address = "2NBRjDXAbHXNpMpo7uKwKyF5hyU8BkzpsM1";
+        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+
+        // BIP84 - Native SegWit (P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let expected_p2wpkh_0 =
+            PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
+        assert_eq!(p2wpkh_0, expected_p2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, Network::Testnet);
+        let expected_p2wpkh_0_address = "tb1q6rz28mcfaxtmd6v789l9rrlrusdprr9pqcpvkl";
+        assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
+
+        let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
+        let expected_p2wpkh_15 =
+            PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
+        assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, Network::Testnet);
+        let expected_p2wpkh_15_address = "tb1qhtwqm3x7wn0zteznkkzpamzrm345js9kd9nxed";
+        assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
+
+        // BIP86 - Taproot (P2TR)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let expected_p2tr_0 =
+            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        assert_eq!(p2tr_0, expected_p2tr_0);
+        let p2tr_0_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
+        let expected_p2tr_0_address = "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
+        assert_eq!(p2tr_0_testnet_address.to_string(), expected_p2tr_0_address);
+
+        let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let p2tr_0_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
+        // Dev note: address is the same for odd or even key, as address generation parity adjustment is done in the lib
+        let expected_p2tr_0_address = "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
+        assert_eq!(p2tr_0_testnet_address.to_string(), expected_p2tr_0_address);
+
+        // Dev note: for this particular case coindicentally the parity is even
+        let expected_p2tr_0 =
+            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        assert_eq!(p2tr_0, expected_p2tr_0);
+
+        let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
+        let expected_p2tr_15 =
+            PublicKey::from_str("022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611")?;
+        assert_eq!(p2tr_15, expected_p2tr_15);
+        let p2tr_15_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
+        let expected_p2tr_15_address = "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
+        assert_eq!(p2tr_15_testnet_address.to_string(), expected_p2tr_15_address);
+
+        // Dev note: for this particular case coindicentally the parity adjustment does not change the pubkey, as the original is already even
+        let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
+        let p2tr_15_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
+        let expected_p2tr_15_address = "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
+        assert_eq!(p2tr_15_testnet_address.to_string(), expected_p2tr_15_address);
+        let (_, parity) = p2tr_15.inner.x_only_public_key();
+        assert_eq!(parity, Parity::Even);
+
+        let expected_p2tr_15 =
+            PublicKey::from_str("022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611")?;
+        assert_eq!(p2tr_15, expected_p2tr_15);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_bitcoin_mainnet_keys_derivation() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // --- Create the 1st KeyManager with a fixed mnemonic to store the correct seeds
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager = KeyManager::new(
+            Network::Bitcoin,
+            Some(fixed_mnemonic.clone()),
+            None,
+            keystore_storage_config.clone(),
+        )?;
+
+        // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
+
+        let key_derivation_seed = key_manager.keystore.load_key_derivation_seed()?;
+        let key_derivation_seed_hex = key_derivation_seed.to_hex_string(bitcoin::hex::Case::Lower);
+        let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
+        assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
+
+        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &key_derivation_seed)?;
+        let master_xpriv_hex = master_xpriv.to_string();
+        let expected_master_xpriv = "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu";
+        assert_eq!(master_xpriv_hex, expected_master_xpriv);
+
+        // BIP44 - Legacy (P2PKH)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let expected_account_extended_privkey = "xprv9xpXFhFpqdQK3TmytPBqXtGSwS3DLjojFhTGht8gwAAii8py5X6pxeBnQ6ehJiyJ6nDjWGJfZ95WxByFXVkDxHXrqu53WCRGypk2ttuqncb";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
+        let expected_p2pkh_0 =
+            PublicKey::from_str("03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e")?;
+        assert_eq!(p2pkh_0, expected_p2pkh_0);
+
+        let p2pkh_0_address = Address::p2pkh(&p2pkh_0, Network::Bitcoin);
+        let expected_p2pkh_0_address = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA";
+        assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
+
+        let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
+        let expected_p2pkh_15 =
+            PublicKey::from_str("028d6cd1027a8e2c01a08ddc7eca9399e00e83380d9b1553446b10c5e80e4e03ab")?;
+        assert_eq!(p2pkh_15, expected_p2pkh_15);
+
+        let p2pkh_15_address = Address::p2pkh(&p2pkh_15, Network::Bitcoin);
+        let expected_p2pkh_15_address = "1NtocLbFFPYPNGeEsDn2CYY4GbfLGLpTFr";
+        assert_eq!(p2pkh_15_address.to_string(), expected_p2pkh_15_address);
+
+        // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let expected_account_extended_privkey = "yprvAHwhK6RbpuS3dgCYHM5jc2ZvEKd7Bi61u9FVhYMpgMSuZS613T1xxQeKTffhrHY79hZ5PsskBjcc6C2V7DrnsMsNaGDaWev3GLRQRgV7hxF";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 =
+            PublicKey::from_str("039b3b694b8fc5b5e07fb069c783cac754f5d38c3e08bed1960e31fdb1dda35c24")?;
+        assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, Network::Bitcoin);
+        let expected_p2shp2wpkh_0_address = "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf";
+        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+
+        let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
+        let expected_p2shp2wpkh_15 =
+            PublicKey::from_str("0213a9cf215d46ee5327a679231f0fd555ba3a67f7721a15e655aa48e69f795149")?;
+        assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, Network::Bitcoin);
+        let expected_p2shp2wpkh_15_address = "3MLaBHZRQBz6h2ADe6DfChSaZmfMYWBfJP";
+        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+
+        // BIP84 - Native SegWit (P2WPKH)
+
+        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_pubkey = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let expected_account_extended_privkey = "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
+        let expected_p2wpkh_0 =
+            PublicKey::from_str("0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c")?;
+        assert_eq!(p2wpkh_0, expected_p2wpkh_0);
+
+        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, Network::Bitcoin);
+        let expected_p2wpkh_0_address = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
+        assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
+
+        let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
+        let expected_p2wpkh_15 =
+            PublicKey::from_str("02b05e67ab098575526f23a7c4f3b69449125604c34a9b34909def7432a792fbf6")?;
+        assert_eq!(p2wpkh_15, expected_p2wpkh_15);
+
+        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
+            .expect("PublicKey should be compressed");
+        let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, Network::Bitcoin);
+        let expected_p2wpkh_15_address = "bc1qgtus5u58avcs5ehpqvcllv5f66dneznw3upy2v";
+        assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
+
+        // BIP86 - Taproot (P2TR)
+
+        let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
+        let account_extended_pubkey_hex = account_extended_pubkey.to_string();
+        let expected_account_extended_pubkey = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ"; // missing value
+        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+
+        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
+        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+
+        let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let expected_p2tr_0 =
+            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        assert_eq!(p2tr_0, expected_p2tr_0);
+        let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+        assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
+
+        let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        // Dev note: address is the same for odd or even key, as address generation parity adjustment is done in the lib
+        let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+        assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
+
+        // Dev note: for this particular case coindicentally the parity adjustment changes the pubkey, as the original is odd
+        let not_expected_p2tr_0 =
+            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        assert_ne!(p2tr_0, not_expected_p2tr_0);
+        let expected_p2tr_0 = PublicKey::new(not_expected_p2tr_0.inner.negate(&secp));
+        assert_eq!(p2tr_0, expected_p2tr_0);
+
+        let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
+        let expected_p2tr_15 =
+            PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
+        assert_eq!(p2tr_15, expected_p2tr_15);
+        let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
+        let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
+        assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);
+
+        // Dev note: for this particular case coindicentally the parity adjustment does not change the pubkey, as the original is already even
+        let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
+        let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
+        let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
+        assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);
+        let (_, parity) = p2tr_15.inner.x_only_public_key();
+        assert_eq!(parity, Parity::Even);
+
+        let expected_p2tr_15 =
+            PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
+        assert_eq!(p2tr_15, expected_p2tr_15);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
     }
 }

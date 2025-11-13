@@ -1,8 +1,7 @@
 key_manager:
   network: "regtest"
-  key_derivation_path: "m/101/1/0/0/"
-  key_derivation_seed: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-  winternitz_seed: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  mnemonic_sentence: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+  mnemonic_passphrase: ""
 
 storage:
   password: "secret_password"

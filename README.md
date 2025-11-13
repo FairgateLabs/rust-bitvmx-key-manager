@@ -78,7 +78,7 @@ The `KeyManager` supports MuSig2 multi-signature schemes, allowing multiple part
 
 ```rust
 // Step 1: Initialize MuSig2 session
-let participant_pubkeys = vec![pubkey1, pubkey2, pubkey3]; // Sorted public keys
+let participant_pubkeys = vec![pubkey1, pubkey2, pubkey3]; // Public keys must be in the same order for all participants
 let aggregated_pubkey = key_manager.new_musig2_session(participant_pubkeys.clone(), my_pubkey)?;
 
 // Step 2: Generate nonces for each message

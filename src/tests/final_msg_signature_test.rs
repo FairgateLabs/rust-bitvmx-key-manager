@@ -127,7 +127,7 @@ mod tests {
         let private_keys_hexes = [
             "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-            //"5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+            // "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
             // "7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
             // "47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
             // "8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
@@ -143,8 +143,6 @@ mod tests {
             key_managers.push(key_manager);
         }
 
-        println!("key managers set up: {:?}", key_managers.len());
-
         let mut pub_key_parts = Vec::new();
         for i in 0..key_managers.len() {
             let private_key = PrivateKey::from_slice(
@@ -153,13 +151,6 @@ mod tests {
             )?;
             pub_key_parts.push(key_managers[i].import_private_key(&private_key.to_wif())?);
         }
-        println!(
-            "pub_key_parts: {:?}",
-            pub_key_parts
-                .iter()
-                .map(|pk| pk.inner.serialize_uncompressed().as_hex().to_string())
-                .collect::<Vec<_>>()
-        );
 
         let message = "message_1";
         let id = "test_id";
@@ -180,10 +171,6 @@ mod tests {
             }
         }
         let aggregated_pub_key = aggregated_pub_key.unwrap();
-        println!(
-            "aggregated_pub_key: {:?}",
-            aggregated_pub_key.inner.serialize_uncompressed().as_hex()
-        );
 
         // Generate nonces for each participant
         for i in 0..key_managers.len() {
@@ -201,11 +188,6 @@ mod tests {
         for i in 0..key_managers.len() {
             let nonces_part = key_managers[i].get_my_pub_nonces(&aggregated_pub_key, id)?;
             nonces.push(nonces_part.clone());
-            println!(
-                "nonces {i}: R1: {:?} R2:{:?}",
-                nonces_part[0].1.R1.serialize_uncompressed().as_hex(),
-                nonces_part[0].1.R2.serialize_uncompressed().as_hex()
-            );
         }
 
         // Save other participants nonces for each participant
@@ -225,7 +207,6 @@ mod tests {
         for i in 0..key_managers.len() {
             let my_partial_sigs =
                 key_managers[i].get_my_partial_signatures(&aggregated_pub_key, id)?;
-            println!("my_partial_sigs {i}: {:?}", my_partial_sigs.clone());
             partial_sigs_map.insert(pub_key_parts[i].clone(), my_partial_sigs.clone());
         }
 
@@ -250,12 +231,11 @@ mod tests {
                 assert_eq!(signature.as_ref().unwrap(), &signature_new);
             }
         }
-        println!("signature: {:?}", signature.unwrap());
 
         // ------------------- Manual verification of the aggregated nonce -------------------
         // Print the Musig2 Aggregated context to compare with manual calculation
-        let key_agg_context = key_managers[0].get_key_agg_context(&aggregated_pub_key)?;
-        println!("key_agg_context: {:?}", key_agg_context);
+        // let key_agg_context = key_managers[0].get_key_agg_context(&aggregated_pub_key)?;
+        // println!("key_agg_context: {:?}", key_agg_context);
 
         // ------------------- Session Creation Step -------------------
         // Sort participants by public key
@@ -269,10 +249,6 @@ mod tests {
         let pk2: Option<&PublicKey> = sorted_pubkeys[1..]
             .iter()
             .find(|pubkey| pubkey != &&sorted_pubkeys[0]);
-        println!(
-            "manual pk2: {:?}",
-            pk2.map(|pk| pk.inner.serialize().as_hex().to_string())
-        );
 
         // Compute the hash of the public keys
         let keyagg_list_tag_hasher = Sha256::digest("KeyAgg list");
@@ -284,10 +260,7 @@ mod tests {
             h = h.chain_update(ordered_pubkeys[i].inner.serialize());
         }
         let pk_list_hash: [u8; 32] = h.finalize().into();
-        println!(
-            "manual pk_list_hash: {:?}",
-            pk_list_hash.as_hex().to_string()
-        );
+
         // Compute the effective pubkeys and key coefficients
         let mut effective_pubkeys_map = HashMap::new();
         let mut effective_pubkeys = Vec::new();
@@ -314,10 +287,6 @@ mod tests {
             // store a map with the pubkey and the effective pubkey to easily obtain it for verification
             effective_pubkeys_map.insert(ordered_pubkeys[i].clone(), effective_pubkey.clone());
         }
-        println!(
-            "manual effective_pubkeys: {:?}",
-            effective_pubkeys.iter().map(|pk| pk).collect::<Vec<_>>()
-        );
 
         // Compute the aggregated pubkey
         let aggregated_pubkey_manual = MaybePoint::sum(&effective_pubkeys).not_inf()?;
@@ -330,11 +299,6 @@ mod tests {
         // Get the aggregated nonce to check manual calculation
         let aggregated_nonce =
             AggNonce::sum(nonces.iter().flat_map(|v| v.iter().map(|(_, pn)| pn)));
-        println!(
-            "aggregated_nonce: R1: {:?} R2: {:?}",
-            aggregated_nonce.R1.serialize_uncompressed().as_hex(),
-            aggregated_nonce.R2.serialize_uncompressed().as_hex()
-        );
 
         // Manual calculation of the aggregated nonce (as its a sum no need to be ordered by pubkey)
         let adaptor_point = MaybePoint::Infinity;
@@ -344,14 +308,6 @@ mod tests {
             aggregated_nonce_r1 = aggregated_nonce_r1 + nonce.R1;
             aggregated_nonce_r2 = aggregated_nonce_r2 + nonce.R2;
         }
-        println!(
-            "aggregated_nonce_r1: {:?}",
-            aggregated_nonce_r1.serialize_uncompressed().as_hex()
-        );
-        println!(
-            "aggregated_nonce_r2: {:?}",
-            aggregated_nonce_r2.serialize_uncompressed().as_hex()
-        );
         assert_eq!(aggregated_nonce_r1, aggregated_nonce.R1);
         assert_eq!(aggregated_nonce_r2, aggregated_nonce.R2);
 
@@ -374,16 +330,11 @@ mod tests {
         let b = MaybeScalar::reduce_from(&hash);
         let final_nonce = aggregated_nonce_r1 + (b * aggregated_nonce_r2);
         let adapted_nonce = final_nonce + adaptor_point;
-        println!(
-            "adapted_nonce: {:?}",
-            adapted_nonce.serialize_uncompressed().as_hex()
-        );
 
         // get inidividual pubkey and pubnonce
         let individual_pubkey = pub_key_parts[0].clone();
         let individual_pubnonce = nonces[0].get(0).unwrap().1.clone();
         let mut effective_nonce = individual_pubnonce.R1 + b * individual_pubnonce.R2;
-        println!("effective_nonce: {:?}", effective_nonce.clone());
 
         // if has odd y use the negative point to get even y
         if adapted_nonce.has_odd_y() {
@@ -417,14 +368,6 @@ mod tests {
         if challenge_parity == bitcoin::secp256k1::Parity::Odd {
             challenge_point = -challenge_point;
         }
-        println!(
-            "challenge_point: {:?}",
-            challenge_point.serialize().as_hex().to_string()
-        );
-        println!(
-            "effective_nonce: {:?}",
-            effective_nonce.serialize().as_hex().to_string()
-        );
 
         // ------------------- Verification Step -------------------
         let partial_signature = partial_sigs_map
@@ -433,24 +376,7 @@ mod tests {
             .get(0)
             .unwrap()
             .1;
-        println!(
-            "partial_signature: {:?}",
-            partial_signature.serialize().as_hex().to_string()
-        );
-        println!(
-            "partial_signature * musig2::secp::G: {:?}",
-            (partial_signature * musig2::secp::G)
-                .serialize()
-                .as_hex()
-                .to_string()
-        );
-        println!(
-            "effective_nonce + challenge_point: {:?}",
-            (effective_nonce + challenge_point)
-                .serialize()
-                .as_hex()
-                .to_string()
-        );
+
         assert_eq!(
             partial_signature * musig2::secp::G,
             effective_nonce + challenge_point,

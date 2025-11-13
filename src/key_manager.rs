@@ -89,10 +89,13 @@ impl KeyManager {
                             "Stored mnemonic does not match the provided mnemonic".to_string(),
                         ));
                     }
+                } else {
+                    // No mnemonic was provided, using the stored one
+                    tracing::info!("Using stored mnemonic from storage");
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicNotFound) => {
                 // No mnemonic in storage, store the provided one or generate a new one
                 match mnemonic {
                     Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
@@ -107,6 +110,7 @@ impl KeyManager {
                     }
                 }
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         // Store or load mnemonic passphrase
@@ -120,16 +124,20 @@ impl KeyManager {
                             "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
                         ));
                     }
+                } else {
+                    // No passphrase was provided, using the stored one
+                    tracing::info!("Using stored mnemonic passphrase from storage");
                 }
                 // If no passphrase was provided or they match, continue with stored passphrase
                 stored_passphrase
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicPassphraseNotFound) => {
                 // No passphrase in storage, store the provided one or use empty string as default
                 let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
                 keystore.store_mnemonic_passphrase(&passphrase)?;
                 passphrase
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         };
 
         // Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them
@@ -146,10 +154,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::KeyDerivationSeedNotFound) => {
                 // No seed stored, generate and store it
                 keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let secp = secp256k1::Secp256k1::new();
@@ -170,10 +179,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::WinternitzSeedNotFound) => {
                 // No Winternitz seed stored, generate and store it
                 keystore.store_winternitz_seed(expected_winternitz_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let musig2 = MuSig2Signer::new(keystore.store_clone());
@@ -616,7 +626,8 @@ impl KeyManager {
     fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_keypair_index(key_type) {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextKeypairIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 
@@ -737,7 +748,10 @@ impl KeyManager {
     fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_winternitz_index() {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextWinternitzIndexNotFound) => {
+                Ok(Self::STARTING_DERIVATION_INDEX)
+            }
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 
@@ -2712,6 +2726,51 @@ mod tests {
             result,
             Err(KeyManagerError::CorruptedWinternitzSeed)
         ));
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_wrong_password_propagates_decryption_error() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let password = "correct password".to_string();
+        let storage_config = StorageConfig::new(keystore_path.clone(), Some(password));
+
+        // --- Create the 1st KeyManager with a mnemonic and correct password
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Try to create a new KeyManager with same path but wrong password
+
+        let wrong_password = "wrong password".to_string();
+        let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
+
+        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, wrong_storage_config);
+
+        // Expect StorageError which should contain the decryption error
+        match result {
+            Err(KeyManagerError::StorageError(_)) => {
+                // Success - decryption error was properly propagated as StorageError
+            }
+            Err(e) => panic!(
+                "Expected StorageError (containing decryption error), got different error: {:?}",
+                e
+            ),
+            Ok(_) => panic!(
+                "Expected StorageError (containing decryption error), but KeyManager was created successfully"
+            ),
+        }
 
         cleanup_storage(&keystore_path);
         Ok(())

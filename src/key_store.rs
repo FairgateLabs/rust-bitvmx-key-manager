@@ -102,11 +102,10 @@ impl KeyStore {
         let key_type_str = format!("{:?}", key_type);
         let typed_next_keypair_index_key =
             format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        let next_index: u32 = self
-            .store
-            .get(typed_next_keypair_index_key)?
-            .ok_or(KeyManagerError::NextKeypairIndexNotFound)?;
-        Ok(next_index)
+        match self.store.get(typed_next_keypair_index_key)? {
+            Some(next_index) => Ok(next_index),
+            None => Err(KeyManagerError::NextKeypairIndexNotFound),
+        }
     }
 
     pub fn store_next_winternitz_index(&self, index: u32) -> Result<(), KeyManagerError> {
@@ -118,11 +117,10 @@ impl KeyStore {
     }
 
     pub fn load_next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
-        let next_index: u32 = self
-            .store
-            .get(Self::NEXT_WINTERNITZ_INDEX_KEY)?
-            .ok_or(KeyManagerError::NextWinternitzIndexNotFound)?;
-        Ok(next_index)
+        match self.store.get(Self::NEXT_WINTERNITZ_INDEX_KEY)? {
+            Some(next_index) => Ok(next_index),
+            None => Err(KeyManagerError::NextWinternitzIndexNotFound),
+        }
     }
 
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
@@ -132,10 +130,10 @@ impl KeyStore {
     }
 
     pub fn load_mnemonic(&self) -> Result<Mnemonic, KeyManagerError> {
-        let phrase: String = self
-            .store
-            .get(Self::MNEMONIC_KEY)?
-            .ok_or(KeyManagerError::MnemonicNotFound)?;
+        let phrase: String = match self.store.get(Self::MNEMONIC_KEY)? {
+            Some(phrase) => phrase,
+            None => return Err(KeyManagerError::MnemonicNotFound),
+        };
         let m = Mnemonic::parse(&phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
         Ok(m)
     }
@@ -147,11 +145,10 @@ impl KeyStore {
     }
 
     pub fn load_mnemonic_passphrase(&self) -> Result<String, KeyManagerError> {
-        let passphrase: String = self
-            .store
-            .get(Self::MNEMONIC_PASSPHRASE_KEY)?
-            .ok_or(KeyManagerError::MnemonicPassphraseNotFound)?;
-        Ok(passphrase)
+        match self.store.get(Self::MNEMONIC_PASSPHRASE_KEY)? {
+            Some(passphrase) => Ok(passphrase),
+            None => Err(KeyManagerError::MnemonicPassphraseNotFound),
+        }
     }
 
     pub fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyManagerError> {
@@ -160,11 +157,10 @@ impl KeyStore {
     }
 
     pub fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyManagerError> {
-        let entry = self
-            .store
-            .get(Self::WINTERNITZ_KEY)?
-            .ok_or(KeyManagerError::WinternitzSeedNotFound)?;
-        Ok(entry)
+        match self.store.get(Self::WINTERNITZ_KEY)? {
+            Some(entry) => Ok(entry),
+            None => Err(KeyManagerError::WinternitzSeedNotFound),
+        }
     }
 
     pub fn store_key_derivation_seed(&self, seed: [u8; 64]) -> Result<(), KeyManagerError> {
@@ -177,10 +173,10 @@ impl KeyStore {
 
     pub fn load_key_derivation_seed(&self) -> Result<[u8; 64], KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let encoded: String = self
-            .store
-            .get(Self::KEY_DERIVATION_SEED_KEY)?
-            .ok_or(KeyManagerError::KeyDerivationSeedNotFound)?;
+        let encoded: String = match self.store.get(Self::KEY_DERIVATION_SEED_KEY)? {
+            Some(encoded) => encoded,
+            None => return Err(KeyManagerError::KeyDerivationSeedNotFound),
+        };
 
         let decoded = general_purpose::STANDARD
             .decode(&encoded)

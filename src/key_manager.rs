@@ -89,6 +89,9 @@ impl KeyManager {
                             "Stored mnemonic does not match the provided mnemonic".to_string(),
                         ));
                     }
+                } else {
+                    // No mnemonic was provided, using the stored one
+                    tracing::info!("Using stored mnemonic from storage");
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
             }
@@ -121,6 +124,9 @@ impl KeyManager {
                             "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
                         ));
                     }
+                } else {
+                    // No passphrase was provided, using the stored one
+                    tracing::info!("Using stored mnemonic passphrase from storage");
                 }
                 // If no passphrase was provided or they match, continue with stored passphrase
                 stored_passphrase

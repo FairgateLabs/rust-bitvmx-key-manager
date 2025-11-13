@@ -1,6 +1,6 @@
 key_manager:
   network: "regtest"
-  mnemonic_sentence: ""
+  mnemonic_sentence: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
   mnemonic_passphrase: ""
 
 storage:

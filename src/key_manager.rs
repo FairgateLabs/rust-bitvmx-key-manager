@@ -2732,6 +2732,51 @@ mod tests {
     }
 
     #[test]
+    fn test_wrong_password_propagates_decryption_error() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let password = "correct password".to_string();
+        let storage_config = StorageConfig::new(keystore_path.clone(), Some(password));
+
+        // --- Create the 1st KeyManager with a mnemonic and correct password
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Try to create a new KeyManager with same path but wrong password
+
+        let wrong_password = "wrong password".to_string();
+        let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
+
+        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, wrong_storage_config);
+
+        // Expect StorageError which should contain the decryption error
+        match result {
+            Err(KeyManagerError::StorageError(_)) => {
+                // Success - decryption error was properly propagated as StorageError
+            }
+            Err(e) => panic!(
+                "Expected StorageError (containing decryption error), got different error: {:?}",
+                e
+            ),
+            Ok(_) => panic!(
+                "Expected StorageError (containing decryption error), but KeyManager was created successfully"
+            ),
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
     fn test_bitcoin_regtest_keys_derivation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;

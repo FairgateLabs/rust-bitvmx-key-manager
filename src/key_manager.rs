@@ -92,7 +92,7 @@ impl KeyManager {
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicNotFound) => {
                 // No mnemonic in storage, store the provided one or generate a new one
                 match mnemonic {
                     Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
@@ -107,6 +107,7 @@ impl KeyManager {
                     }
                 }
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         // Store or load mnemonic passphrase
@@ -124,12 +125,13 @@ impl KeyManager {
                 // If no passphrase was provided or they match, continue with stored passphrase
                 stored_passphrase
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicPassphraseNotFound) => {
                 // No passphrase in storage, store the provided one or use empty string as default
                 let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
                 keystore.store_mnemonic_passphrase(&passphrase)?;
                 passphrase
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         };
 
         // Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them
@@ -146,10 +148,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::KeyDerivationSeedNotFound) => {
                 // No seed stored, generate and store it
                 keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let secp = secp256k1::Secp256k1::new();
@@ -170,10 +173,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::WinternitzSeedNotFound) => {
                 // No Winternitz seed stored, generate and store it
                 keystore.store_winternitz_seed(expected_winternitz_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let musig2 = MuSig2Signer::new(keystore.store_clone());
@@ -616,7 +620,8 @@ impl KeyManager {
     fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_keypair_index(key_type) {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextKeypairIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 
@@ -737,7 +742,10 @@ impl KeyManager {
     fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_winternitz_index() {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextWinternitzIndexNotFound) => {
+                Ok(Self::STARTING_DERIVATION_INDEX)
+            }
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 

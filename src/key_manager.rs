@@ -1424,6 +1424,36 @@ impl KeyManager {
         )?)
     }
 
+    pub fn verify_partial_signatures(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        pubkey: PublicKey,
+        partial_signatures: Vec<(String, PartialSignature)>,
+    ) -> Result<bool, KeyManagerError> {
+        Ok(self.musig2.verify_partial_signatures(
+            aggregated_pubkey,
+            id,
+            pubkey,
+            partial_signatures,
+        )?)
+    }
+
+    pub fn verify_final_signature(
+        &self,
+        message_id: &str,
+        final_signature: secp256k1::schnorr::Signature,
+        aggregated_pubkey: PublicKey,
+        id: &str,
+    ) -> Result<bool, KeyManagerError> {
+        Ok(self.musig2.verify_final_signature(
+            message_id,
+            final_signature,
+            aggregated_pubkey,
+            id,
+        )?)
+    }
+
     /*pub fn get_aggregated_pubkey(&self, id: &str) -> Result<PublicKey, Musig2SignerError> {
         self.musig2.get_aggregated_pubkey(id)
     }*/

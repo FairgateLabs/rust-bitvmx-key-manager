@@ -139,7 +139,7 @@ mod tests {
 
         let mut key_managers = Vec::new();
         for _ in 0..private_keys_hexes.len() {
-            let (key_manager, _, _) = mock_data()?;
+            let (key_manager, _) = mock_data()?;
             key_managers.push(key_manager);
         }
 

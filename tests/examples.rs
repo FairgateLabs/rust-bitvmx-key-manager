@@ -57,6 +57,13 @@ mod rsa_example {
     }
 }
 
+mod sign_verify_musig2_example {
+    include!("../examples/sign_verify_musig2.rs");
+    pub fn run_example() {
+        main();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -97,5 +104,10 @@ mod tests {
     #[test]
     fn test_rsa_example() {
         super::rsa_example::run_example();
+    }
+
+    #[test]
+    fn test_sign_verify_musig2_example() {
+        super::sign_verify_musig2_example::run_example();
     }
 }

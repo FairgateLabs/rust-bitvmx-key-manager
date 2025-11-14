@@ -34,3 +34,7 @@ pub fn random_bytes() -> [u8; 32] {
     secp256k1::rand::thread_rng().fill_bytes(&mut seed);
     seed
 }
+
+pub fn clear_storage() {
+    let _ = std::fs::remove_dir_all("./examples/storage");
+}

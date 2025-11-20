@@ -3469,7 +3469,6 @@ mod tests {
         cleanup_test_environment(&keystore_path, &store_path);
     }
 
-    // TODO: Rewrite to use generate_rsa_keypair(&mut rng) which takes 1 param and returns PEM
     #[test]
     pub fn test_rsa_key_index_mapping() -> Result<(), KeyManagerError> {
         /*

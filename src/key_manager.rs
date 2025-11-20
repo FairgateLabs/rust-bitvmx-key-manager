@@ -3058,160 +3058,155 @@ mod tests {
         cleanup_storage(&store_path);
     }
 
-    // TODO: This test needs to be rewritten to match the current KeyManager API
-    // which uses BIP39 mnemonics instead of raw seeds and a different constructor signature
     #[test]
-    #[ignore = "Test uses obsolete KeyManager::new() signature - needs rewrite"]
-    pub fn test_keystore_seed_bootstraping_provided_seeds() -> Result<(), KeyManagerError> {
+    pub fn test_keystore_seed_bootstraping_provided_mnemonic() -> Result<(), KeyManagerError> {
         /*
-         * Objective: Ensure provided seeds are persisted and retrievable.
-         * Preconditions: Fresh storage; both seeds in config.
-         * Input / Test Data: Two 32-byte hex seeds.
-         * Steps / Procedure: Initialize KeyManager; call KeyStore::load_winternitz_seed and load_key_derivation_seed.
-         * Expected Result: Loaded seeds exactly match provided values.
+         * Objective: Ensure provided mnemonic generates deterministic seeds that are persisted and retrievable.
+         * Preconditions: Fresh storage; known mnemonic phrase.
+         * Input / Test Data: Fixed BIP39 mnemonic phrase.
+         * Steps / Procedure: Initialize KeyManager with mnemonic; call KeyStore::load_winternitz_seed and load_key_derivation_seed.
+         * Expected Result: Seeds are generated from mnemonic and persist across KeyManager instances.
          */
         
-        // Set up temporary storage using helper function
-        let (keystore, store, keystore_path, store_path) = setup_test_environment()
-            .expect("Failed to setup test environment");
+        // Use a deterministic mnemonic for testing
+        // WARNING: NEVER USE THIS MNEMONIC TO STORE REAL FUNDS
+        let test_mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let test_mnemonic = Mnemonic::parse(test_mnemonic_sentence)
+            .expect("Failed to parse test mnemonic");
         
-        // Define specific 32-byte seeds to provide
-        let provided_winternitz_seed = [
-            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
-            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
-            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
-            0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef,
-        ];
+        // Optional passphrase for additional entropy
+        let test_passphrase = "test_passphrase_123";
         
-        let provided_key_derivation_seed = [
-            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
-            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
-            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
-            0xfe, 0xdc, 0xba, 0x09, 0x87, 0x65, 0x43, 0x21,
-        ];
-        
-        // Step: Initialize KeyManager with provided seeds
-        // Note: The current API uses BIP39 mnemonics, not raw seeds
-        // We need to create a mnemonic from the seed for testing
-        let mnemonic = Mnemonic::from_entropy(&provided_key_derivation_seed[..32]).unwrap();
+        // Set up temporary storage
         let keystore_path = temp_storage();
-        let keystore_storage_config = database_keystore_config(&keystore_path).unwrap();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
         
+        // Step 1: Initialize KeyManager with provided mnemonic and passphrase
         let key_manager = KeyManager::new(
             REGTEST,
-            Some(mnemonic),
-            None, // No passphrase
+            Some(test_mnemonic.clone()),
+            Some(test_passphrase.to_string()),
             keystore_storage_config,
-        ).expect("Failed to create KeyManager with provided seeds");
+        ).expect("Failed to create KeyManager with provided mnemonic");
         
-        // Step: Load seeds from keystore and verify they match provided values
+        // Step 2: Load seeds from keystore to verify they were generated and stored
         let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
             .expect("Failed to load winternitz seed from keystore");
         
         let loaded_key_derivation_seed = key_manager.keystore.load_key_derivation_seed()
             .expect("Failed to load key derivation seed from keystore");
         
-        // Expected Result: Loaded seeds exactly match provided values
-        assert_eq!(loaded_winternitz_seed, provided_winternitz_seed,
-            "Loaded winternitz seed should exactly match the provided seed");
+        // Step 3: Verify seeds are valid (non-zero and correct length)
+        assert_eq!(loaded_winternitz_seed.len(), 32, 
+            "Winternitz seed should be 32 bytes");
+        assert_eq!(loaded_key_derivation_seed.len(), 64, 
+            "Key derivation seed should be 64 bytes (BIP39 format)");
         
-        assert_eq!(&loaded_key_derivation_seed[..32], &provided_key_derivation_seed[..],
-            "Loaded key derivation seed should exactly match the provided seed");
+        // Verify seeds are not all zeros
+        let winternitz_all_zeros = loaded_winternitz_seed.iter().all(|&x| x == 0);
+        let key_derivation_all_zeros = loaded_key_derivation_seed.iter().all(|&x| x == 0);
+        assert!(!winternitz_all_zeros, "Winternitz seed should not be all zeros");
+        assert!(!key_derivation_all_zeros, "Key derivation seed should not be all zeros");
         
-        // Additional verification: Test that the seeds are actually being used for key derivation
+        // Step 4: Test that the seeds work for cryptographic operations
         let public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)
-            .expect("Failed to derive keypair using stored seeds");
-        
-        // Verify the public key is valid
+            .expect("Failed to derive keypair using mnemonic-generated seeds");
         assert_eq!(public_key.to_bytes().len(), 33, "Generated public key should be 33 bytes");
         
-        // Test winternitz key generation as well
+        // Test winternitz key generation
         let winternitz_public_key = key_manager.derive_winternitz(32, WinternitzType::SHA256, 0)
-            .expect("Failed to derive winternitz key using stored seed");
-        
-        // Verify winternitz key was generated
+            .expect("Failed to derive winternitz key using mnemonic-generated seed");
         assert!(winternitz_public_key.total_len() > 0, "Winternitz public key should have non-zero length");
         
-        // Test that we can create another KeyManager instance with same storage and seeds persist
+        // Step 5: Test seed persistence - create second KeyManager with same mnemonic
         drop(key_manager);
         
-        let keystore2 = database_keystore(&keystore_path).expect("Failed to create second keystore");
-        let config2 = StorageConfig::new(store_path.clone(), None);
-        let store2 = Rc::new(Storage::new(&config2).expect("Failed to create second storage"));
-        
-        // Create KeyManager without providing seeds - should load existing ones
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
         let key_manager2 = KeyManager::new(
             REGTEST,
-            None, // No mnemonic provided
-            None, // No seeds provided - should use existing ones
+            Some(test_mnemonic.clone()),
+            Some(test_passphrase.to_string()),
             keystore_storage_config2,
-        ).expect("Failed to create second KeyManager");
+        ).expect("Failed to create second KeyManager with same mnemonic");
         
-        // Verify the seeds are still the same
+        // Verify the seeds are deterministic (same mnemonic produces same seeds)
         let loaded_winternitz_seed2 = key_manager2.keystore.load_winternitz_seed()
             .expect("Failed to load winternitz seed from second keystore");
-        
         let loaded_key_derivation_seed2 = key_manager2.keystore.load_key_derivation_seed()
             .expect("Failed to load key derivation seed from second keystore");
         
-        assert_eq!(loaded_winternitz_seed2, provided_winternitz_seed,
-            "Seeds should persist across KeyManager instances");
+        assert_eq!(loaded_winternitz_seed2, loaded_winternitz_seed,
+            "Same mnemonic should generate same winternitz seed");
+        assert_eq!(loaded_key_derivation_seed2, loaded_key_derivation_seed,
+            "Same mnemonic should generate same key derivation seed");
         
-        assert_eq!(&loaded_key_derivation_seed2[..32], &provided_key_derivation_seed[..],
-            "Seeds should persist across KeyManager instances");
+        // Step 6: Test that derived keys are also deterministic
+        let public_key2 = key_manager2.derive_keypair(BitcoinKeyType::P2wpkh, 0)
+            .expect("Failed to derive keypair from second KeyManager");
+        assert_eq!(public_key2, public_key,
+            "Same mnemonic should generate same derived keys");
+        
+        // Step 7: Test with different passphrase produces different seeds
+        drop(key_manager2);
+        let keystore_path3 = temp_storage();
+        let keystore_storage_config3 = database_keystore_config(&keystore_path3)?;
+        
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            Some(test_mnemonic),
+            Some("different_passphrase".to_string()),
+            keystore_storage_config3,
+        ).expect("Failed to create KeyManager with different passphrase");
+        
+        let loaded_key_derivation_seed3 = key_manager3.keystore.load_key_derivation_seed()
+            .expect("Failed to load seed with different passphrase");
+        
+        assert_ne!(loaded_key_derivation_seed3, loaded_key_derivation_seed,
+            "Different passphrase should generate different key derivation seed");
         
         // Cleanup
-        drop(key_manager2);
-        cleanup_test_environment(&keystore_path, &store_path);
+        drop(key_manager3);
+        cleanup_storage(&keystore_path);
+        cleanup_storage(&keystore_path3);
         Ok(())
     }
 
-    // TODO: This test needs to be rewritten to match the current KeyManager API
-    // which uses BIP39 mnemonics instead of raw seeds and a different constructor signature
     #[test]
-    #[ignore = "Test uses obsolete KeyManager::new() signature - needs rewrite"]
-    pub fn test_keystore_seed_bootstraping_generated_seeds() -> Result<(), KeyManagerError> {
+    pub fn test_keystore_seed_bootstraping_auto_generated_seeds() -> Result<(), KeyManagerError> {
         /*
-         * Objective: Ensure seeds are generated and stored if not provided.
-         * Preconditions: Fresh storage; seeds omitted in config.
-         * Input / Test Data: None beyond config.
-         * Steps / Procedure: Initialize KeyManager; load seeds via KeyStore::load_*.
-         * Expected Result: Both seeds load successfully as 32-byte arrays (non-zero, values unspecified).
+         * Objective: Ensure seeds are auto-generated and stored when no mnemonic is provided.
+         * Preconditions: Fresh storage; no mnemonic provided.
+         * Input / Test Data: None (auto-generation).
+         * Steps / Procedure: Initialize KeyManager without mnemonic; load seeds via KeyStore::load_*.
+         * Expected Result: Both seeds load successfully, are non-zero, and persist across instances.
          */
         
-        // Set up temporary storage
+        // Step 1: Set up temporary storage and create KeyManager without providing mnemonic
         let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        // Step: Initialize KeyManager without providing any seeds (should auto-generate)
-        // Step: Initialize KeyManager without providing any seeds (should auto-generate)
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
+        
         let key_manager = KeyManager::new(
             REGTEST,
-            None, // No mnemonic provided
+            None, // No mnemonic provided - should auto-generate
             None, // No passphrase
             keystore_storage_config
         ).expect("Failed to create KeyManager with auto-generated seeds");
         
-        // Step: Load seeds from keystore to verify they were generated and stored
+        // Step 2: Load seeds from keystore to verify they were generated and stored
         let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
             .expect("Failed to load auto-generated winternitz seed from keystore");
         
         let loaded_key_derivation_seed = key_manager.keystore.load_key_derivation_seed()
             .expect("Failed to load auto-generated key derivation seed from keystore");
         
-        // Expected Result: Both seeds load successfully as 32-byte arrays
+        // Step 3: Verify seeds are valid (correct length and non-zero)
         assert_eq!(loaded_winternitz_seed.len(), 32, 
             "Generated winternitz seed should be exactly 32 bytes");
         
-        assert_eq!(loaded_key_derivation_seed.len(), 32, 
-            "Generated key derivation seed should be exactly 32 bytes");
+        assert_eq!(loaded_key_derivation_seed.len(), 64, 
+            "Generated key derivation seed should be 64 bytes (BIP39 format)");
         
-        // Verify seeds are non-zero (extremely unlikely to be all zeros by chance)
+        // Verify seeds are not all zeros (extremely unlikely to be all zeros by chance)
         let winternitz_all_zeros = loaded_winternitz_seed.iter().all(|&x| x == 0);
         let key_derivation_all_zeros = loaded_key_derivation_seed.iter().all(|&x| x == 0);
         
@@ -3220,7 +3215,7 @@ mod tests {
         assert!(!key_derivation_all_zeros, 
             "Generated key derivation seed should not be all zeros");
         
-        // Additional verification: Test that the generated seeds work for cryptographic operations
+        // Step 4: Test that the auto-generated seeds work for cryptographic operations
         let public_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)
             .expect("Failed to derive keypair using auto-generated seeds");
         
@@ -3234,7 +3229,7 @@ mod tests {
         // Verify winternitz key was generated successfully
         assert!(winternitz_public_key.total_len() > 0, "Winternitz public key should have non-zero length");
         
-        // Test signing with auto-generated keys to prove they work
+        // Step 5: Test signing with auto-generated keys to prove they work
         let signature_verifier = SignatureVerifier::new();
         let message = random_message();
         let signature = key_manager.sign_ecdsa_message(&message, &public_key)
@@ -3243,18 +3238,14 @@ mod tests {
         assert!(signature_verifier.verify_ecdsa_signature(&signature, &message, public_key),
             "Signature verification should succeed for key derived from auto-generated seed");
         
-        // Test persistence: Create second KeyManager instance and verify seeds persist
+        // Step 6: Test persistence - create second KeyManager without mnemonic
+        // Should load existing seeds from storage instead of generating new ones
         drop(key_manager);
         
-        let keystore2 = database_keystore(&keystore_path).expect("Failed to create second keystore");
-        let config2 = StorageConfig::new(store_path.clone(), None);
-        let store2 = Rc::new(Storage::new(&config2).expect("Failed to create second storage"));
-        
-        // Create KeyManager without providing seeds - should load existing generated ones
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
         let key_manager2 = KeyManager::new(
             REGTEST,
-            None, // No mnemonic provided
+            None, // No mnemonic provided - should load existing seeds
             None, // No passphrase
             keystore_storage_config2,
         ).expect("Failed to create second KeyManager");
@@ -3272,18 +3263,22 @@ mod tests {
         assert_eq!(loaded_key_derivation_seed2, loaded_key_derivation_seed,
             "Auto-generated seeds should persist across KeyManager instances");
         
-        // Test uniqueness: Create a third KeyManager with fresh storage to verify different seeds are generated
-        let keystore_path3 = temp_storage();
-        let keystore3 = database_keystore(&keystore_path3).expect("Failed to create third keystore");
-        let store_path3 = temp_storage();
-        let config3 = StorageConfig::new(store_path3.clone(), None);
-        let store3 = Rc::new(Storage::new(&config3).expect("Failed to create third storage"));
+        // Step 7: Verify derived keys are also the same (deterministic from persisted seeds)
+        let public_key2 = key_manager2.derive_keypair(BitcoinKeyType::P2wpkh, 0)
+            .expect("Failed to derive keypair from second KeyManager");
+        assert_eq!(public_key2, public_key,
+            "Keys derived from persisted seeds should match");
         
+        // Step 8: Test uniqueness - create third KeyManager with fresh storage
+        // Should generate different seeds than the first instance
+        drop(key_manager2);
+        let keystore_path3 = temp_storage();
         let keystore_storage_config3 = database_keystore_config(&keystore_path3)?;
+        
         let key_manager3 = KeyManager::new(
             REGTEST,
-            None, // No mnemonic provided
-            None, // Should generate new different seeds
+            None, // No mnemonic - should generate new different seeds
+            None,
             keystore_storage_config3,
         ).expect("Failed to create third KeyManager");
         
@@ -3293,7 +3288,7 @@ mod tests {
         let loaded_key_derivation_seed3 = key_manager3.keystore.load_key_derivation_seed()
             .expect("Failed to load key derivation seed from third keystore");
         
-        // Verify that different KeyManager instances generate different seeds
+        // Verify that different KeyManager instances with fresh storage generate different seeds
         assert_ne!(loaded_winternitz_seed3, loaded_winternitz_seed,
             "Different KeyManager instances should generate different winternitz seeds");
         
@@ -3301,18 +3296,13 @@ mod tests {
             "Different KeyManager instances should generate different key derivation seeds");
         
         // Cleanup
-        drop(key_manager2);
         drop(key_manager3);
         cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
         cleanup_storage(&keystore_path3);
-        cleanup_storage(&store_path3);
         Ok(())
     }
 
-    // TODO: Rewrite to use keystore.store_keypair(sk, pk, Option<BitcoinKeyType>)
     #[test]
-    #[ignore = "Test uses obsolete keystore.store_keypair API (2 params instead of 3) - needs rewrite"]
     pub fn test_store_load_ecdsa_keypairs(){
         /*
          * Objective: Validate keypair persistence and retrieval symmetry.
@@ -3400,9 +3390,7 @@ mod tests {
         cleanup_test_environment(&keystore_path, &store_path);
     }
 
-    // TODO: Rewrite to use keystore.store_keypair(sk, pk, Option<BitcoinKeyType>)
     #[test]
-    #[ignore = "Test uses obsolete keystore.store_keypair API (2 params instead of 3) - needs rewrite"]
     pub fn test_non_existent_keypair_lookout(){
         /*
          * Objective: Ensure missing keys return Ok(None).
@@ -3569,9 +3557,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to use current keystore API (3-param store_keypair and 1-param generate_rsa_keypair)
     #[test]
-    #[ignore = "Test uses obsolete keystore API - needs rewrite"]
     pub fn test_overwrite_semantics() -> Result<(), KeyManagerError> {
         /*
          * Objective: Verify safe re-store behavior and RSA index overwrite semantics.
@@ -3698,9 +3684,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current keystore.load_keypair API (returns 3-tuple with Option<BitcoinKeyType>)
     #[test]
-    #[ignore = "Test uses obsolete keystore API - needs rewrite"]
     pub fn test_generate_keypair_in_keystore() -> Result<(), KeyManagerError> {
         /*
          * Objective: Ensure generate_keypair persists the generated pair.
@@ -3794,9 +3778,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current keystore.store_keypair API (requires 3 parameters)
     #[test]
-    #[ignore = "Test uses obsolete keystore API - needs rewrite"]
     pub fn test_import_private_key_wif_success() -> Result<(), KeyManagerError> {
         /* 
          * Objective: Validate WIF import stores a keypair.
@@ -3902,9 +3884,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current API
     #[test]
-    #[ignore = "Test uses obsolete API - needs rewrite"]
     pub fn test_import_private_key_wif_failure() -> Result<(), KeyManagerError> {
         /*
          * Objective: Ensure invalid WIF returns the right error.
@@ -4056,9 +4036,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current keystore API
     #[test]
-    #[ignore = "Test uses obsolete keystore.load_keypair API - needs rewrite"]
     pub fn test_import_secret_key_hex_success() -> Result<(), KeyManagerError> {
         /*
          * Objective: Validate raw secret hex import stores keypair.
@@ -4164,9 +4142,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current API
     #[test]
-    #[ignore = "Test uses obsolete API - needs rewrite"]
     pub fn test_import_secret_key_hex_failure() -> Result<(), KeyManagerError> {
         /*
          * Objective: Ensure invalid hex parses fail.
@@ -4249,9 +4225,7 @@ mod tests {
     )
 }
 
-    // TODO: Rewrite to match current API
     #[test]
-    #[ignore = "Test uses obsolete API - needs rewrite"]
     pub fn test_import_partial_keys_aggregation_success() -> Result<(), KeyManagerError> {
         /*
          * Objective: Aggregate partial keys into an aggregated (sk, pk) and store.
@@ -4390,9 +4364,7 @@ mod tests {
         })
     }
 
-    // TODO: Rewrite to match current API
     #[test]
-    #[ignore = "Test uses obsolete API - needs rewrite"]
     pub fn test_import_partial_keys_aggregation_failure() -> Result<(), KeyManagerError> {
         /*
          * Objective: Ensure invalid partial keys or aggregation fails.

@@ -27,10 +27,15 @@ pub fn create_key_manager_from_config(
         None => None,
     };
 
+    let passphrase = match &key_manager_config.mnemonic_passphrase {
+        Some(pass) => Some(pass.clone()),
+        None => None,
+    };
+
     let network =
         Network::from_str(&key_manager_config.network).map_err(|_| ConfigError::InvalidNetwork)?;
 
-    let key_manager = KeyManager::new(network, mnemonic, None, storage_config)?;
+    let key_manager = KeyManager::new(network, mnemonic, passphrase, storage_config)?;
 
     Ok(key_manager)
 }

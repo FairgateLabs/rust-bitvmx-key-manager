@@ -2,11 +2,12 @@ use std::{collections::HashMap, rc::Rc, str::FromStr};
 
 use bip39::Mnemonic;
 use bitcoin::{
+    base58,
     bip32::{ChildNumber, DerivationPath, Xpriv, Xpub},
     hashes::{self, Hash},
     key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    base58, Network, PrivateKey, PublicKey, TapNodeHash,
+    Network, PrivateKey, PublicKey, TapNodeHash,
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -88,10 +89,13 @@ impl KeyManager {
                             "Stored mnemonic does not match the provided mnemonic".to_string(),
                         ));
                     }
+                } else {
+                    // No mnemonic was provided, using the stored one
+                    tracing::info!("Using stored mnemonic from storage");
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicNotFound) => {
                 // No mnemonic in storage, store the provided one or generate a new one
                 match mnemonic {
                     Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
@@ -106,6 +110,7 @@ impl KeyManager {
                     }
                 }
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         // Store or load mnemonic passphrase
@@ -119,16 +124,20 @@ impl KeyManager {
                             "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
                         ));
                     }
+                } else {
+                    // No passphrase was provided, using the stored one
+                    tracing::info!("Using stored mnemonic passphrase from storage");
                 }
                 // If no passphrase was provided or they match, continue with stored passphrase
                 stored_passphrase
             }
-            Err(_) => {
+            Err(KeyManagerError::MnemonicPassphraseNotFound) => {
                 // No passphrase in storage, store the provided one or use empty string as default
                 let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
                 keystore.store_mnemonic_passphrase(&passphrase)?;
                 passphrase
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         };
 
         // Dev note: key derivation seed and winternitz seed are deduced from the mnemonic, but we are storing them
@@ -145,10 +154,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::KeyDerivationSeedNotFound) => {
                 // No seed stored, generate and store it
                 keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let secp = secp256k1::Secp256k1::new();
@@ -169,10 +179,11 @@ impl KeyManager {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
-            Err(_) => {
+            Err(KeyManagerError::WinternitzSeedNotFound) => {
                 // No Winternitz seed stored, generate and store it
                 keystore.store_winternitz_seed(expected_winternitz_seed)?;
             }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
         let musig2 = MuSig2Signer::new(keystore.store_clone());
@@ -402,10 +413,13 @@ impl KeyManager {
     }
 
     /// Convert an extended key string from one version to another by replacing version bytes
-    fn convert_extended_key_version(extended_key: &str, target_version: [u8; 4]) -> Result<String, KeyManagerError> {
+    fn convert_extended_key_version(
+        extended_key: &str,
+        target_version: [u8; 4],
+    ) -> Result<String, KeyManagerError> {
         // Decode the base58check encoded extended key
-        let decoded = base58::decode_check(extended_key)
-            .map_err(|_| KeyManagerError::CorruptedData)?;
+        let decoded =
+            base58::decode_check(extended_key).map_err(|_| KeyManagerError::CorruptedData)?;
 
         if decoded.len() != 78 {
             return Err(KeyManagerError::CorruptedData);
@@ -473,7 +487,10 @@ impl KeyManager {
 
     /// Generate account-level extended public key with the correct BIP-specific version prefix
     /// Returns: xpub for BIP-44, ypub for BIP-49, zpub for BIP-84, etc.
-    pub fn get_account_xpub_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+    pub fn get_account_xpub_string(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<String, KeyManagerError> {
         let account_xpub = self.get_account_xpub(key_type)?;
         let standard_xpub_string = account_xpub.to_string();
 
@@ -485,7 +502,10 @@ impl KeyManager {
     /// Generate account-level extended private key with the correct BIP-specific version prefix
     /// Returns: xprv for BIP-44, yprv for BIP-49, zprv for BIP-84, etc.
     #[allow(dead_code)] // we want this method for tests and might be useful in a future xpriv export
-    fn get_account_xpriv_string(&self, key_type: BitcoinKeyType) -> Result<String, KeyManagerError> {
+    fn get_account_xpriv_string(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<String, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
 
@@ -601,7 +621,10 @@ impl KeyManager {
     /// - No derivation indices are accidentally reused
     /// - The sequence of generated keys is deterministic and recoverable
     ///
-    pub fn next_keypair_adjusted(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
+    pub fn next_keypair_adjusted(
+        &self,
+        key_type: BitcoinKeyType,
+    ) -> Result<PublicKey, KeyManagerError> {
         let index = self.next_keypair_index(key_type)?;
         let pubkey = self.derive_keypair_adjust_parity(key_type, index)?;
         // if derivation was successful, store the next index
@@ -613,7 +636,8 @@ impl KeyManager {
     fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_keypair_index(key_type) {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextKeypairIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 
@@ -734,7 +758,10 @@ impl KeyManager {
     fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
         match self.keystore.load_next_winternitz_index() {
             Ok(stored_index) => Ok(stored_index),
-            Err(_) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(KeyManagerError::NextWinternitzIndexNotFound) => {
+                Ok(Self::STARTING_DERIVATION_INDEX)
+            }
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
         }
     }
 
@@ -1385,7 +1412,14 @@ impl KeyManager {
 mod tests {
     use bip39::Mnemonic;
     use bitcoin::{
-        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey, bip32::Xpriv, hex::DisplayHex, key::{CompressedPublicKey, Parity, Secp256k1, rand::{self, RngCore}}, secp256k1::{self, Message, SecretKey}
+        bip32::Xpriv,
+        hex::DisplayHex,
+        key::{
+            rand::{self, RngCore},
+            CompressedPublicKey, Parity,
+        },
+        secp256k1::{self, Message, SecretKey},
+        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey,
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -1409,9 +1443,11 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
         let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
-        let pub_key: PublicKey = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
+        let pub_key: PublicKey =
+            key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
 
-        let pub_key2: PublicKey = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 1)?;
+        let pub_key2: PublicKey =
+            key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 1)?;
 
         // Small test to check that the nonce is deterministic with the same index and public key
         let nonce_seed = key_manager.generate_nonce_seed(0, pub_key)?;
@@ -2092,9 +2128,7 @@ mod tests {
 
         let key_manager = test_random_key_manager(keystore_storage_config).unwrap();
 
-        let account_xpub = key_manager
-            .get_account_xpub(BitcoinKeyType::P2tr)
-            .unwrap();
+        let account_xpub = key_manager.get_account_xpub(BitcoinKeyType::P2tr).unwrap();
 
         for i in 0..5 {
             let pk1 = key_manager.derive_keypair(BitcoinKeyType::P2tr, i).unwrap();
@@ -4829,6 +4863,51 @@ mod tests {
     }
 
     #[test]
+    fn test_wrong_password_propagates_decryption_error() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let password = "correct password".to_string();
+        let storage_config = StorageConfig::new(keystore_path.clone(), Some(password));
+
+        // --- Create the 1st KeyManager with a mnemonic and correct password
+
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
+        let key_manager1 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic.clone()),
+            None,
+            storage_config.clone(),
+        )?;
+
+        drop(key_manager1);
+
+        // --- Try to create a new KeyManager with same path but wrong password
+
+        let wrong_password = "wrong password".to_string();
+        let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
+
+        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, wrong_storage_config);
+
+        // Expect StorageError which should contain the decryption error
+        match result {
+            Err(KeyManagerError::StorageError(_)) => {
+                // Success - decryption error was properly propagated as StorageError
+            }
+            Err(e) => panic!(
+                "Expected StorageError (containing decryption error), got different error: {:?}",
+                e
+            ),
+            Ok(_) => panic!(
+                "Expected StorageError (containing decryption error), but KeyManager was created successfully"
+            ),
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
     fn test_bitcoin_regtest_keys_derivation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
@@ -4862,15 +4941,23 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
-        let expected_p2pkh_0 =
-            PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
+        let expected_p2pkh_0 = PublicKey::from_str(
+            "02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6",
+        )?;
         assert_eq!(p2pkh_0, expected_p2pkh_0);
 
         let p2pkh_0_address = Address::p2pkh(&p2pkh_0, REGTEST);
@@ -4878,8 +4965,9 @@ mod tests {
         assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
 
         let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
-        let expected_p2pkh_15 =
-            PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
+        let expected_p2pkh_15 = PublicKey::from_str(
+            "03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612",
+        )?;
         assert_eq!(p2pkh_15, expected_p2pkh_15);
 
         let p2pkh_15_address = Address::p2pkh(&p2pkh_15, REGTEST);
@@ -4888,64 +4976,90 @@ mod tests {
 
         // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
-        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
-        let expected_p2shp2wpkh_0 =
-            PublicKey::from_str("03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f")?;
+        let p2shp2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 = PublicKey::from_str(
+            "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f",
+        )?;
         assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2shp2wpkh_0).expect("PublicKey should be compressed");
         let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, REGTEST);
         let expected_p2shp2wpkh_0_address = "2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2";
-        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+        assert_eq!(
+            p2shp2wpkh_0_address.to_string(),
+            expected_p2shp2wpkh_0_address
+        );
 
         let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
-        let expected_p2shp2wpkh_15 =
-            PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
+        let expected_p2shp2wpkh_15 = PublicKey::from_str(
+            "02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d",
+        )?;
         assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2shp2wpkh_15).expect("PublicKey should be compressed");
         let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, REGTEST);
         let expected_p2shp2wpkh_15_address = "2NBRjDXAbHXNpMpo7uKwKyF5hyU8BkzpsM1";
-        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+        assert_eq!(
+            p2shp2wpkh_15_address.to_string(),
+            expected_p2shp2wpkh_15_address
+        );
 
         // BIP84 - Native SegWit (P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
-        let expected_p2wpkh_0 =
-            PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
+        let expected_p2wpkh_0 = PublicKey::from_str(
+            "02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319",
+        )?;
         assert_eq!(p2wpkh_0, expected_p2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2wpkh_0).expect("PublicKey should be compressed");
         let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, REGTEST);
         let expected_p2wpkh_0_address = "bcrt1q6rz28mcfaxtmd6v789l9rrlrusdprr9pz3cppk";
         assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
 
         let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
-        let expected_p2wpkh_15 =
-            PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
+        let expected_p2wpkh_15 = PublicKey::from_str(
+            "022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c",
+        )?;
         assert_eq!(p2wpkh_15, expected_p2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2wpkh_15).expect("PublicKey should be compressed");
         let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, REGTEST);
         let expected_p2wpkh_15_address = "bcrt1qhtwqm3x7wn0zteznkkzpamzrm345js9k0v2twy";
         assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
@@ -4955,48 +5069,76 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX"; // missing value
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
-        let expected_p2tr_0 =
-            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        let expected_p2tr_0 = PublicKey::from_str(
+            "0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116",
+        )?;
         assert_eq!(p2tr_0, expected_p2tr_0);
-        let p2tr_0_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
-        let expected_p2tr_0_address = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
+        let p2tr_0_regtest_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
+        let expected_p2tr_0_address =
+            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
         assert_eq!(p2tr_0_regtest_address.to_string(), expected_p2tr_0_address);
 
         let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
-        let p2tr_0_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
-        let expected_p2tr_0_address_with_parity = "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
-        assert_eq!(p2tr_0_regtest_address.to_string(), expected_p2tr_0_address_with_parity);
+        let p2tr_0_regtest_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, REGTEST);
+        let expected_p2tr_0_address_with_parity =
+            "bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg";
+        assert_eq!(
+            p2tr_0_regtest_address.to_string(),
+            expected_p2tr_0_address_with_parity
+        );
 
         // Dev note: parity is already even for index 0
-        let expected_p2tr_0 =
-            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        let expected_p2tr_0 = PublicKey::from_str(
+            "0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116",
+        )?;
         assert_eq!(p2tr_0, expected_p2tr_0);
         let (_, parity) = expected_p2tr_0.inner.x_only_public_key();
         assert_eq!(parity, Parity::Even);
 
         // using index 14 to force odd parity key
         let p2tr_14 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 14)?;
-        let p2tr_14_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
-        let expected_p2tr_14_address = "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
-        assert_eq!(p2tr_14_regtest_address.to_string(), expected_p2tr_14_address);
-        let expected_p2tr_14 =
-            PublicKey::from_str("034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6")?;
+        let p2tr_14_regtest_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
+        let expected_p2tr_14_address =
+            "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
+        assert_eq!(
+            p2tr_14_regtest_address.to_string(),
+            expected_p2tr_14_address
+        );
+        let expected_p2tr_14 = PublicKey::from_str(
+            "034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6",
+        )?;
         assert_eq!(p2tr_14, expected_p2tr_14);
 
         let p2tr_14 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 14)?;
-        let p2tr_14_regtest_address = Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
-        let expected_p2tr_14_address_with_parity = "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
-        assert_eq!(p2tr_14_regtest_address.to_string(), expected_p2tr_14_address_with_parity);
-        let not_expected_p2tr_14 =
-            PublicKey::from_str("034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6")?;
+        let p2tr_14_regtest_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_14), None, REGTEST);
+        let expected_p2tr_14_address_with_parity =
+            "bcrt1pq553836cpkcrsy2mpeqvlywvr7rjwwf9y4dh7ea22l4ax92xaqyqqzcckz";
+        assert_eq!(
+            p2tr_14_regtest_address.to_string(),
+            expected_p2tr_14_address_with_parity
+        );
+        let not_expected_p2tr_14 = PublicKey::from_str(
+            "034b7dce637a803b4a14b972add6750ee240f9b692769257c6647ddd423b1fc9e6",
+        )?;
         assert_ne!(p2tr_14, not_expected_p2tr_14);
         let negated_not_expected_p2tr_14 = PublicKey::new(not_expected_p2tr_14.inner.negate(&secp));
         assert_eq!(p2tr_14, negated_not_expected_p2tr_14);
@@ -5040,15 +5182,23 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
-        let expected_p2pkh_0 =
-            PublicKey::from_str("02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6")?;
+        let expected_p2pkh_0 = PublicKey::from_str(
+            "02a7451395735369f2ecdfc829c0f774e88ef1303dfe5b2f04dbaab30a535dfdd6",
+        )?;
         assert_eq!(p2pkh_0, expected_p2pkh_0);
 
         let p2pkh_0_address = Address::p2pkh(&p2pkh_0, Network::Testnet);
@@ -5056,8 +5206,9 @@ mod tests {
         assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
 
         let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
-        let expected_p2pkh_15 =
-            PublicKey::from_str("03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612")?;
+        let expected_p2pkh_15 = PublicKey::from_str(
+            "03ee6c2e9fcb33d45966775d41990c68d6b4db14bb66044fbb591b3f313781d612",
+        )?;
         assert_eq!(p2pkh_15, expected_p2pkh_15);
 
         let p2pkh_15_address = Address::p2pkh(&p2pkh_15, Network::Testnet);
@@ -5066,64 +5217,90 @@ mod tests {
 
         // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_pubkey = "upub5EFU65HtV5TeiSHmZZm7FUffBGy8UKeqp7vw43jYbvZPpoVsgU93oac7Wk3u6moKegAEWtGNF8DehrnHtv21XXEMYRUocHqguyjknFHYfgY";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
-        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
-        let expected_p2shp2wpkh_0 =
-            PublicKey::from_str("03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f")?;
+        let p2shp2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 = PublicKey::from_str(
+            "03a1af804ac108a8a51782198c2d034b28bf90c8803f5a53f76276fa69a4eae77f",
+        )?;
         assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2shp2wpkh_0).expect("PublicKey should be compressed");
         let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, Network::Testnet);
         let expected_p2shp2wpkh_0_address = "2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2";
-        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+        assert_eq!(
+            p2shp2wpkh_0_address.to_string(),
+            expected_p2shp2wpkh_0_address
+        );
 
         let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
-        let expected_p2shp2wpkh_15 =
-            PublicKey::from_str("02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d")?;
+        let expected_p2shp2wpkh_15 = PublicKey::from_str(
+            "02067d623209475402b700ec03f0889d418ca68964f25f7c2b2c8e6b3fcf0eec1d",
+        )?;
         assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2shp2wpkh_15).expect("PublicKey should be compressed");
         let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, Network::Testnet);
         let expected_p2shp2wpkh_15_address = "2NBRjDXAbHXNpMpo7uKwKyF5hyU8BkzpsM1";
-        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+        assert_eq!(
+            p2shp2wpkh_15_address.to_string(),
+            expected_p2shp2wpkh_15_address
+        );
 
         // BIP84 - Native SegWit (P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_pubkey = "vpub5Y6cjg78GGuNLsaPhmYsiw4gYX3HoQiRBiSwDaBXKUafCt9bNwWQiitDk5VZ5BVxYnQdwoTyXSs2JHRPAgjAvtbBrf8ZhDYe2jWAqvZVnsc";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
-        let expected_p2wpkh_0 =
-            PublicKey::from_str("02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319")?;
+        let expected_p2wpkh_0 = PublicKey::from_str(
+            "02e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c319",
+        )?;
         assert_eq!(p2wpkh_0, expected_p2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2wpkh_0).expect("PublicKey should be compressed");
         let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, Network::Testnet);
         let expected_p2wpkh_0_address = "tb1q6rz28mcfaxtmd6v789l9rrlrusdprr9pqcpvkl";
         assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
 
         let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
-        let expected_p2wpkh_15 =
-            PublicKey::from_str("022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c")?;
+        let expected_p2wpkh_15 = PublicKey::from_str(
+            "022f590a1f42418c86daede01666b0ba1b388096541fdd90899cee35102509dd0c",
+        )?;
         assert_eq!(p2wpkh_15, expected_p2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2wpkh_15).expect("PublicKey should be compressed");
         let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, Network::Testnet);
         let expected_p2wpkh_15_address = "tb1qhtwqm3x7wn0zteznkkzpamzrm345js9kd9nxed";
         assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
@@ -5133,51 +5310,76 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "tpubDDfvzhdVV4unsoKt5aE6dcsNsfeWbTgmLZPi8LQDYU2xixrYemMfWJ3BaVneH3u7DBQePdTwhpybaKRU95pi6PMUtLPBJLVQRpzEnjfjZzX";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
-        let expected_p2tr_0 =
-            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        let expected_p2tr_0 = PublicKey::from_str(
+            "0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116",
+        )?;
         assert_eq!(p2tr_0, expected_p2tr_0);
-        let p2tr_0_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
-        let expected_p2tr_0_address = "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
+        let p2tr_0_testnet_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
+        let expected_p2tr_0_address =
+            "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
         assert_eq!(p2tr_0_testnet_address.to_string(), expected_p2tr_0_address);
 
         let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
-        let p2tr_0_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
+        let p2tr_0_testnet_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Testnet);
         // Dev note: address is the same for odd or even key, as address generation parity adjustment is done in the lib
-        let expected_p2tr_0_address = "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
+        let expected_p2tr_0_address =
+            "tb1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqlqt9zj";
         assert_eq!(p2tr_0_testnet_address.to_string(), expected_p2tr_0_address);
 
         // Dev note: for this particular case coindicentally the parity is even
-        let expected_p2tr_0 =
-            PublicKey::from_str("0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116")?;
+        let expected_p2tr_0 = PublicKey::from_str(
+            "0255355ca83c973f1d97ce0e3843c85d78905af16b4dc531bc488e57212d230116",
+        )?;
         assert_eq!(p2tr_0, expected_p2tr_0);
 
         let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
-        let expected_p2tr_15 =
-            PublicKey::from_str("022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611")?;
+        let expected_p2tr_15 = PublicKey::from_str(
+            "022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611",
+        )?;
         assert_eq!(p2tr_15, expected_p2tr_15);
-        let p2tr_15_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
-        let expected_p2tr_15_address = "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
-        assert_eq!(p2tr_15_testnet_address.to_string(), expected_p2tr_15_address);
+        let p2tr_15_testnet_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
+        let expected_p2tr_15_address =
+            "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
+        assert_eq!(
+            p2tr_15_testnet_address.to_string(),
+            expected_p2tr_15_address
+        );
 
         // Dev note: for this particular case coindicentally the parity adjustment does not change the pubkey, as the original is already even
         let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
-        let p2tr_15_testnet_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
-        let expected_p2tr_15_address = "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
-        assert_eq!(p2tr_15_testnet_address.to_string(), expected_p2tr_15_address);
+        let p2tr_15_testnet_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Testnet);
+        let expected_p2tr_15_address =
+            "tb1pvjhgqlfxfa62c825pl3x6ntvql8a95cwgjqruy0yw9p7ulau292qwttz36";
+        assert_eq!(
+            p2tr_15_testnet_address.to_string(),
+            expected_p2tr_15_address
+        );
         let (_, parity) = p2tr_15.inner.x_only_public_key();
         assert_eq!(parity, Parity::Even);
 
-        let expected_p2tr_15 =
-            PublicKey::from_str("022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611")?;
+        let expected_p2tr_15 = PublicKey::from_str(
+            "022906c8edc2feaa92a94a8e03c26b6284e9a5b44804f7e124e97cf66bef27c611",
+        )?;
         assert_eq!(p2tr_15, expected_p2tr_15);
 
         drop(key_manager);
@@ -5219,15 +5421,23 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2pkh)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "xprv9xpXFhFpqdQK3TmytPBqXtGSwS3DLjojFhTGht8gwAAii8py5X6pxeBnQ6ehJiyJ6nDjWGJfZ95WxByFXVkDxHXrqu53WCRGypk2ttuqncb";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2pkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 0)?;
-        let expected_p2pkh_0 =
-            PublicKey::from_str("03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e")?;
+        let expected_p2pkh_0 = PublicKey::from_str(
+            "03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e",
+        )?;
         assert_eq!(p2pkh_0, expected_p2pkh_0);
 
         let p2pkh_0_address = Address::p2pkh(&p2pkh_0, Network::Bitcoin);
@@ -5235,8 +5445,9 @@ mod tests {
         assert_eq!(p2pkh_0_address.to_string(), expected_p2pkh_0_address);
 
         let p2pkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2pkh, 15)?;
-        let expected_p2pkh_15 =
-            PublicKey::from_str("028d6cd1027a8e2c01a08ddc7eca9399e00e83380d9b1553446b10c5e80e4e03ab")?;
+        let expected_p2pkh_15 = PublicKey::from_str(
+            "028d6cd1027a8e2c01a08ddc7eca9399e00e83380d9b1553446b10c5e80e4e03ab",
+        )?;
         assert_eq!(p2pkh_15, expected_p2pkh_15);
 
         let p2pkh_15_address = Address::p2pkh(&p2pkh_15, Network::Bitcoin);
@@ -5245,64 +5456,90 @@ mod tests {
 
         // BIP49 - Legacy Nested SegWit (P2SH-P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_pubkey = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "yprvAHwhK6RbpuS3dgCYHM5jc2ZvEKd7Bi61u9FVhYMpgMSuZS613T1xxQeKTffhrHY79hZ5PsskBjcc6C2V7DrnsMsNaGDaWev3GLRQRgV7hxF";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
-        let p2shp2wpkh_0     = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
-        let expected_p2shp2wpkh_0 =
-            PublicKey::from_str("039b3b694b8fc5b5e07fb069c783cac754f5d38c3e08bed1960e31fdb1dda35c24")?;
+        let p2shp2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 0)?;
+        let expected_p2shp2wpkh_0 = PublicKey::from_str(
+            "039b3b694b8fc5b5e07fb069c783cac754f5d38c3e08bed1960e31fdb1dda35c24",
+        )?;
         assert_eq!(p2shp2wpkh_0, expected_p2shp2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2shp2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2shp2wpkh_0).expect("PublicKey should be compressed");
         let p2shp2wpkh_0_address = Address::p2shwpkh(&compressed_pk_0, Network::Bitcoin);
         let expected_p2shp2wpkh_0_address = "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf";
-        assert_eq!(p2shp2wpkh_0_address.to_string(), expected_p2shp2wpkh_0_address);
+        assert_eq!(
+            p2shp2wpkh_0_address.to_string(),
+            expected_p2shp2wpkh_0_address
+        );
 
         let p2shp2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2shP2wpkh, 15)?;
-        let expected_p2shp2wpkh_15 =
-            PublicKey::from_str("0213a9cf215d46ee5327a679231f0fd555ba3a67f7721a15e655aa48e69f795149")?;
+        let expected_p2shp2wpkh_15 = PublicKey::from_str(
+            "0213a9cf215d46ee5327a679231f0fd555ba3a67f7721a15e655aa48e69f795149",
+        )?;
         assert_eq!(p2shp2wpkh_15, expected_p2shp2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2shp2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2shp2wpkh_15).expect("PublicKey should be compressed");
         let p2shp2wpkh_15_address = Address::p2shwpkh(&compressed_pk_15, Network::Bitcoin);
         let expected_p2shp2wpkh_15_address = "3MLaBHZRQBz6h2ADe6DfChSaZmfMYWBfJP";
-        assert_eq!(p2shp2wpkh_15_address.to_string(), expected_p2shp2wpkh_15_address);
+        assert_eq!(
+            p2shp2wpkh_15_address.to_string(),
+            expected_p2shp2wpkh_15_address
+        );
 
         // BIP84 - Native SegWit (P2WPKH)
 
-        let account_extended_pubkey_hex = key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_pubkey_hex =
+            key_manager.get_account_xpub_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_pubkey = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2wpkh_0 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
-        let expected_p2wpkh_0 =
-            PublicKey::from_str("0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c")?;
+        let expected_p2wpkh_0 = PublicKey::from_str(
+            "0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c",
+        )?;
         assert_eq!(p2wpkh_0, expected_p2wpkh_0);
 
-        let compressed_pk_0 = CompressedPublicKey::try_from(p2wpkh_0)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_0 =
+            CompressedPublicKey::try_from(p2wpkh_0).expect("PublicKey should be compressed");
         let p2wpkh_0_address = Address::p2wpkh(&compressed_pk_0, Network::Bitcoin);
         let expected_p2wpkh_0_address = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
         assert_eq!(p2wpkh_0_address.to_string(), expected_p2wpkh_0_address);
 
         let p2wpkh_15 = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 15)?;
-        let expected_p2wpkh_15 =
-            PublicKey::from_str("02b05e67ab098575526f23a7c4f3b69449125604c34a9b34909def7432a792fbf6")?;
+        let expected_p2wpkh_15 = PublicKey::from_str(
+            "02b05e67ab098575526f23a7c4f3b69449125604c34a9b34909def7432a792fbf6",
+        )?;
         assert_eq!(p2wpkh_15, expected_p2wpkh_15);
 
-        let compressed_pk_15 = CompressedPublicKey::try_from(p2wpkh_15)
-            .expect("PublicKey should be compressed");
+        let compressed_pk_15 =
+            CompressedPublicKey::try_from(p2wpkh_15).expect("PublicKey should be compressed");
         let p2wpkh_15_address = Address::p2wpkh(&compressed_pk_15, Network::Bitcoin);
         let expected_p2wpkh_15_address = "bc1qgtus5u58avcs5ehpqvcllv5f66dneznw3upy2v";
         assert_eq!(p2wpkh_15_address.to_string(), expected_p2wpkh_15_address);
@@ -5312,53 +5549,78 @@ mod tests {
         let account_extended_pubkey = key_manager.get_account_xpub(BitcoinKeyType::P2tr)?;
         let account_extended_pubkey_hex = account_extended_pubkey.to_string();
         let expected_account_extended_pubkey = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ"; // missing value
-        assert_eq!(account_extended_pubkey_hex, expected_account_extended_pubkey);
+        assert_eq!(
+            account_extended_pubkey_hex,
+            expected_account_extended_pubkey
+        );
 
-        let account_extended_privkey_hex = key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
+        let account_extended_privkey_hex =
+            key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
-        assert_eq!(account_extended_privkey_hex, expected_account_extended_privkey);
+        assert_eq!(
+            account_extended_privkey_hex,
+            expected_account_extended_privkey
+        );
 
         let p2tr_0 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
-        let expected_p2tr_0 =
-            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        let expected_p2tr_0 = PublicKey::from_str(
+            "03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115",
+        )?;
         assert_eq!(p2tr_0, expected_p2tr_0);
-        let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
-        let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+        let p2tr_0_bitcoin_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        let expected_p2tr_0_address =
+            "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
         assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
 
         let p2tr_0 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 0)?;
         let secp = bitcoin::secp256k1::Secp256k1::new();
-        let p2tr_0_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
+        let p2tr_0_bitcoin_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_0), None, Network::Bitcoin);
         // Dev note: address is the same for odd or even key, as address generation parity adjustment is done in the lib
-        let expected_p2tr_0_address = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+        let expected_p2tr_0_address =
+            "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
         assert_eq!(p2tr_0_bitcoin_address.to_string(), expected_p2tr_0_address);
 
         // Dev note: for this particular case coindicentally the parity adjustment changes the pubkey, as the original is odd
-        let not_expected_p2tr_0 =
-            PublicKey::from_str("03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115")?;
+        let not_expected_p2tr_0 = PublicKey::from_str(
+            "03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115",
+        )?;
         assert_ne!(p2tr_0, not_expected_p2tr_0);
         let expected_p2tr_0 = PublicKey::new(not_expected_p2tr_0.inner.negate(&secp));
         assert_eq!(p2tr_0, expected_p2tr_0);
 
         let p2tr_15 = key_manager.derive_keypair(BitcoinKeyType::P2tr, 15)?;
-        let expected_p2tr_15 =
-            PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
+        let expected_p2tr_15 = PublicKey::from_str(
+            "02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc",
+        )?;
         assert_eq!(p2tr_15, expected_p2tr_15);
-        let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
-        let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
-        assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);
+        let p2tr_15_bitcoin_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
+        let expected_p2tr_15_address =
+            "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
+        assert_eq!(
+            p2tr_15_bitcoin_address.to_string(),
+            expected_p2tr_15_address
+        );
 
         // Dev note: for this particular case coindicentally the parity adjustment does not change the pubkey, as the original is already even
         let p2tr_15 = key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, 15)?;
-        let p2tr_15_bitcoin_address =  Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
-        let expected_p2tr_15_address = "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
-        assert_eq!(p2tr_15_bitcoin_address.to_string(), expected_p2tr_15_address);
+        let p2tr_15_bitcoin_address =
+            Address::p2tr(&secp, XOnlyPublicKey::from(p2tr_15), None, Network::Bitcoin);
+        let expected_p2tr_15_address =
+            "bc1p3xkku35m5yf3dn6zmxukkewv289f7xfg74reqhz6k0e3hjscddjq508fff";
+        assert_eq!(
+            p2tr_15_bitcoin_address.to_string(),
+            expected_p2tr_15_address
+        );
         let (_, parity) = p2tr_15.inner.x_only_public_key();
         assert_eq!(parity, Parity::Even);
 
-        let expected_p2tr_15 =
-            PublicKey::from_str("02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc")?;
+        let expected_p2tr_15 = PublicKey::from_str(
+            "02db45b7b3e057681a3fb91aed33031902c5972f41ab7c3db5930f48e5692a43cc",
+        )?;
         assert_eq!(p2tr_15, expected_p2tr_15);
 
         drop(key_manager);

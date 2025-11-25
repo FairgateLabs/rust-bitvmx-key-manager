@@ -1412,14 +1412,9 @@ impl KeyManager {
 mod tests {
     use bip39::Mnemonic;
     use bitcoin::{
-        bip32::Xpriv,
-        hex::DisplayHex,
-        key::{
-            rand::{self, RngCore},
-            CompressedPublicKey, Parity,
-        },
-        secp256k1::{self, Message, SecretKey},
-        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey,
+        Address, Network, PrivateKey, PublicKey, XOnlyPublicKey, bip32::Xpriv, hex::DisplayHex, key::{
+            CompressedPublicKey, Parity, Secp256k1, rand::{self, RngCore}
+        }, secp256k1::{self, Message, SecretKey}
     };
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -4408,6 +4403,7 @@ mod tests {
          */
         run_test_with_key_manager(|mut key_manager| -> Result<(), KeyManagerError> {
             // Test Case 1: Try with empty keys list
+            use crate::key_manager::secp256k1::Secp256k1;
             let empty_keys: Vec<String> = vec![];
             let result1 = key_manager.import_partial_secret_keys(empty_keys, REGTEST);
             match result1 {

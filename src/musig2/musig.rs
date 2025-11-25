@@ -156,6 +156,13 @@ pub trait MuSig2SignerApi {
         id: &str,
     ) -> Result<Vec<(MessageId, PubNonce)>, Musig2SignerError>;
 
+    fn get_my_pub_nonce(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PubNonce, Musig2SignerError>;
+
     /// Aggregates partial signatures from other participants.
     ///
     /// # Arguments
@@ -193,6 +200,21 @@ pub trait MuSig2SignerApi {
         aggregated_pubkey: &PublicKey,
         id: &str,
     ) -> Result<PartialSignatureData, Musig2SignerError>;
+
+    fn get_data_for_partial_signature(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<
+        (
+            Vec<u8>,
+            SecNonce,
+            Option<musig2::secp256k1::Scalar>,
+            AggNonce,
+        ),
+        Musig2SignerError,
+    >;
 
     /// Verifies partial signatures from a participant.
     ///
@@ -308,6 +330,19 @@ impl MuSig2SignerApi for MuSig2Signer {
         Ok(aggregated_pubkey)
     }
 
+    fn get_my_pub_nonce(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PubNonce, Musig2SignerError> {
+        let my_pub_key = self.my_public_key(aggregated_pubkey)?;
+        match self.get_pub_nonce(aggregated_pubkey, id, message_id, &my_pub_key)? {
+            Some(pub_nonce) => Ok(pub_nonce),
+            None => return Err(Musig2SignerError::NoncesNotGenerated),
+        }
+    }
+
     fn get_my_pub_nonces(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -420,7 +455,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             let aggregated_nonce = aggregated_nonces
                 .iter()
                 .find(|(msg_id, _)| msg_id == message_id)
-                .unwrap()
+                .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?
                 .1
                 .clone();
 
@@ -435,6 +470,39 @@ impl MuSig2SignerApi for MuSig2Signer {
         }
 
         Ok(data_to_sign)
+    }
+
+    fn get_data_for_partial_signature(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<
+        (
+            Vec<u8>,
+            SecNonce,
+            Option<musig2::secp256k1::Scalar>,
+            AggNonce,
+        ),
+        Musig2SignerError,
+    > {
+        let participant_pubkeys = self.get_participant_pub_keys(aggregated_pubkey)?;
+
+        self.validate_partial_nonces(participant_pubkeys, aggregated_pubkey, id)?;
+
+        let aggregated_nonces = self.get_aggregated_nonces(aggregated_pubkey, id)?;
+        let aggregated_nonce = aggregated_nonces
+            .iter()
+            .find(|(msg_id, _)| msg_id == message_id)
+            .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?
+            .1
+            .clone();
+
+        let message = self.get_message(aggregated_pubkey, id, message_id)?;
+        let tweak = self.get_tweak(aggregated_pubkey, id, message_id)?;
+        let secret_nonce = self.get_secret_nonce(aggregated_pubkey, id, message_id)?;
+
+        Ok((message, secret_nonce, tweak, aggregated_nonce))
     }
 
     fn save_partial_signatures(

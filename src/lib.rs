@@ -18,6 +18,11 @@ pub mod tests;
 pub mod verifier;
 pub mod winternitz;
 
+// Re-exports
+pub use bitcoin;
+pub use bitvmx_settings;
+pub use storage_backend;
+
 pub fn create_key_manager_from_config(
     key_manager_config: &KeyManagerConfig,
     storage_config: StorageConfig,

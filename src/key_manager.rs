@@ -1745,12 +1745,13 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
         // Create a fresh KeyManager
-        let key_manager = KeyManager::new(
-            Network::Regtest,
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
             None, // No mnemonic provided, will generate one
             None,
-            keystore_storage_config,
-        )?;
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config)?;
 
         // 1. Verify that with a fresh keymanager, there is no stored index for P2tr
         assert!(key_manager
@@ -1872,12 +1873,13 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
         // Create a fresh KeyManager
-        let key_manager = KeyManager::new(
-            Network::Regtest,
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
             None, // No mnemonic provided, will generate one
             None,
-            keystore_storage_config,
-        )?;
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config)?;
 
         let message_size_32_bytes = 32;
         let message_size_20_bytes = 20;
@@ -2329,12 +2331,13 @@ mod tests {
         let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
         let random_mnemonic_passphrase = generate_random_passphrase();
 
-        let key_manager = KeyManager::new(
-            REGTEST,
-            Some(random_mnemonic),
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(random_mnemonic.to_string()),
             Some(random_mnemonic_passphrase),
-            storage_config,
-        )?;
+        );
+
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, storage_config)?;
 
         Ok(key_manager)
     }
@@ -2344,21 +2347,26 @@ mod tests {
     ) -> Result<KeyManager, KeyManagerError> {
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
-        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, storage_config)?;
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
+            None,
+        );
+
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, storage_config)?;
 
         Ok(key_manager)
     }
 
     fn database_keystore_config(storage_path: &str) -> Result<StorageConfig, KeyManagerError> {
-        let password = "secret password".to_string();
+        let password = "secret_password".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
         Ok(config)
     }
 
     fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
-        let password = "secret password".to_string();
+        let password = "secret_password".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
         let store = Rc::new(Storage::new(&config)?);
         Ok(KeyStore::new(store))
@@ -2434,31 +2442,28 @@ mod tests {
             .to_string()
     }
 
-    struct KeyManagerConfig {
+    struct TestKeyManagerConfig {
         network: String,
         key_derivation_seed: Option<String>,
-        derivation_path: Option<String>,
         winternitz_seed: Option<String>,
     }
 
-    impl KeyManagerConfig {
+    impl TestKeyManagerConfig {
         fn new(
             network: String,
             key_derivation_seed: Option<String>,
-            derivation_path: Option<String>,
             winternitz_seed: Option<String>,
         ) -> Self {
             Self {
                 network,
                 key_derivation_seed,
-                derivation_path,
                 winternitz_seed,
             }
         }
     }
 
     fn create_key_manager_from_config(
-        config: &KeyManagerConfig,
+        config: &TestKeyManagerConfig,
         keystore: KeyStore,
         _store: Rc<Storage>,
     ) -> Result<KeyManager, KeyManagerError> {
@@ -2560,19 +2565,17 @@ mod tests {
     fn create_test_config_and_run_with_cleanup<F>(
         network: &str,
         key_derivation_seed: Option<String>,
-        derivation_path: Option<String>,
         winternitz_seed: Option<String>,
         test_fn: F,
     ) -> Result<(), KeyManagerError>
     where
-        F: FnOnce(&KeyManagerConfig, KeyStore, Rc<Storage>) -> Result<(), KeyManagerError>,
+        F: FnOnce(&TestKeyManagerConfig, KeyStore, Rc<Storage>) -> Result<(), KeyManagerError>,
     {
         let (keystore, store, keystore_path, store_path) = setup_test_environment()?;
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             network.to_string(),
             key_derivation_seed,
-            derivation_path,
             winternitz_seed,
         );
         
@@ -2626,11 +2629,10 @@ mod tests {
 
     // Helper macro to reduce boilerplate for error test cases
     macro_rules! assert_config_error {
-        ($network:expr, $key_derivation_seed:expr, $derivation_path:expr, $winternitz_seed:expr, $expected_error:pat) => {
+        ($network:expr, $key_derivation_seed:expr, $winternitz_seed:expr, $expected_error:pat) => {
             create_test_config_and_run_with_cleanup(
                 $network,
                 $key_derivation_seed,
-                $derivation_path,
                 $winternitz_seed,
                 |config, keystore, store| {
                     let result = create_key_manager_from_config(config, keystore, store);
@@ -2704,10 +2706,9 @@ mod tests {
         ]);
         
         // Step 1: Build Config with both seeds
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "regtest".to_string(),
             Some(key_derivation_seed_hex),
-            Some("m/101/1/0/0/".to_string()),
             Some(winternitz_seed_hex),
         );
         
@@ -2755,7 +2756,6 @@ mod tests {
         assert_config_error!(
             "regtest",
             Some(valid_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some("invalid_non_hex_string_here".to_string()), // Non-hex
             KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed)
         );
@@ -2764,7 +2764,6 @@ mod tests {
         assert_config_error!(
             "regtest",
             Some("not_a_hex_string".to_string()), // Non-hex
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
             KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed)
         );
@@ -2774,7 +2773,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some(valid_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(too_long_seed),
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2788,7 +2786,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some(too_long_seed),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2801,7 +2798,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some(valid_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some("".to_string()), // Empty string
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2814,7 +2810,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some("".to_string()), // Empty string
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2828,7 +2823,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some(valid_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(too_short_seed),
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2842,7 +2836,6 @@ mod tests {
         create_test_config_and_run_with_cleanup(
             "regtest",
             Some(too_short_seed),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_seed.clone()),
             |config, keystore, store| {
                 let result = create_key_manager_from_config(config, keystore, store);
@@ -2867,10 +2860,9 @@ mod tests {
             .expect("Failed to setup test environment");
         
         // Create config with key_derivation_path set to None (omitted)
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "regtest".to_string(),
             Some("fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string()),
-            None, // key_derivation_path omitted - should fall back to default
             Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string()),
         );
         
@@ -2935,10 +2927,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "regtest".to_string(), // Valid network
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -2958,10 +2949,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "testnet".to_string(), // Valid network
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -2981,10 +2971,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "bitcoin".to_string(), // Valid network
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -3004,10 +2993,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "signet".to_string(), // Valid network
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -3027,10 +3015,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "invalid_network".to_string(), // Invalid network
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -3048,10 +3035,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "".to_string(), // Empty network string
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -3069,10 +3055,9 @@ mod tests {
         let config = StorageConfig::new(store_path.clone(), None);
         let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
         
-        let key_manager_config = KeyManagerConfig::new(
+        let key_manager_config = TestKeyManagerConfig::new(
             "REGTEST".to_string(), // Uppercase - should work due to case-insensitive parsing
             Some(valid_key_derivation_seed.clone()),
-            Some("m/101/1/0/0/".to_string()),
             Some(valid_winternitz_seed.clone()),
         );
         
@@ -3100,8 +3085,6 @@ mod tests {
         // Use a deterministic mnemonic for testing
         // WARNING: NEVER USE THIS MNEMONIC TO STORE REAL FUNDS
         let test_mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let test_mnemonic = Mnemonic::parse(test_mnemonic_sentence)
-            .expect("Failed to parse test mnemonic");
         
         // Optional passphrase for additional entropy
         let test_passphrase = "test_passphrase_123";
@@ -3111,12 +3094,14 @@ mod tests {
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
         
         // Step 1: Initialize KeyManager with provided mnemonic and passphrase
-        let key_manager = KeyManager::new(
-            REGTEST,
-            Some(test_mnemonic.clone()),
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(test_mnemonic_sentence.to_string()),
             Some(test_passphrase.to_string()),
-            keystore_storage_config,
-        ).expect("Failed to create KeyManager with provided mnemonic");
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config)
+            .expect("Failed to create KeyManager with provided mnemonic");
         
         // Step 2: Load seeds from keystore to verify they were generated and stored
         let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
@@ -3151,12 +3136,14 @@ mod tests {
         drop(key_manager);
         
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
-        let key_manager2 = KeyManager::new(
-            REGTEST,
-            Some(test_mnemonic.clone()),
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(test_mnemonic_sentence.to_string()),
             Some(test_passphrase.to_string()),
-            keystore_storage_config2,
-        ).expect("Failed to create second KeyManager with same mnemonic");
+        );
+        
+        let key_manager2 = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config2)
+            .expect("Failed to create second KeyManager with same mnemonic");
         
         // Verify the seeds are deterministic (same mnemonic produces same seeds)
         let loaded_winternitz_seed2 = key_manager2.keystore.load_winternitz_seed()
@@ -3180,12 +3167,14 @@ mod tests {
         let keystore_path3 = temp_storage();
         let keystore_storage_config3 = database_keystore_config(&keystore_path3)?;
         
-        let key_manager3 = KeyManager::new(
-            REGTEST,
-            Some(test_mnemonic),
+        let key_manager_config3 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(test_mnemonic_sentence.to_string()),
             Some("different_passphrase".to_string()),
-            keystore_storage_config3,
-        ).expect("Failed to create KeyManager with different passphrase");
+        );
+        
+        let key_manager3 = crate::create_key_manager_from_config(&key_manager_config3, keystore_storage_config3)
+            .expect("Failed to create KeyManager with different passphrase");
         
         let loaded_key_derivation_seed3 = key_manager3.keystore.load_key_derivation_seed()
             .expect("Failed to load seed with different passphrase");
@@ -3214,12 +3203,14 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
         
-        let key_manager = KeyManager::new(
-            REGTEST,
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
             None, // No mnemonic provided - should auto-generate
             None, // No passphrase
-            keystore_storage_config
-        ).expect("Failed to create KeyManager with auto-generated seeds");
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config)
+            .expect("Failed to create KeyManager with auto-generated seeds");
         
         // Step 2: Load seeds from keystore to verify they were generated and stored
         let loaded_winternitz_seed = key_manager.keystore.load_winternitz_seed()
@@ -3272,12 +3263,14 @@ mod tests {
         drop(key_manager);
         
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
-        let key_manager2 = KeyManager::new(
-            REGTEST,
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
             None, // No mnemonic provided - should load existing seeds
             None, // No passphrase
-            keystore_storage_config2,
-        ).expect("Failed to create second KeyManager");
+        );
+        
+        let key_manager2 = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config2)
+            .expect("Failed to create second KeyManager");
         
         // Verify the seeds are the same as the first instance (persistence test)
         let loaded_winternitz_seed2 = key_manager2.keystore.load_winternitz_seed()
@@ -3304,12 +3297,14 @@ mod tests {
         let keystore_path3 = temp_storage();
         let keystore_storage_config3 = database_keystore_config(&keystore_path3)?;
         
-        let key_manager3 = KeyManager::new(
-            REGTEST,
+        let key_manager_config3 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
             None, // No mnemonic - should generate new different seeds
             None,
-            keystore_storage_config3,
-        ).expect("Failed to create third KeyManager");
+        );
+        
+        let key_manager3 = crate::create_key_manager_from_config(&key_manager_config3, keystore_storage_config3)
+            .expect("Failed to create third KeyManager");
         
         let loaded_winternitz_seed3 = key_manager3.keystore.load_winternitz_seed()
             .expect("Failed to load winternitz seed from third keystore");
@@ -3643,23 +3638,23 @@ mod tests {
             
             // Test Part (b): RSA key overwrite behavior (last-write-wins)
             
-            let rsa_index: usize = 10;
+            //let rsa_index: usize = 10;
             
             // Generate and store first RSA keypair at index N
             let first_rsa_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng)
                 .expect("Failed to generate first RSA keypair");
             
             // Extract the public key hash from the PEM to use for loading
-            let first_pubkey_hash = RSAKeyPair::pubkey_from_public_key_pem(&first_rsa_pubkey_pem)
-                .expect("Failed to extract first public key hash from PEM");
+            //let first_pubkey_hash = RSAKeyPair::pubkey_from_public_key_pem(&first_rsa_pubkey_pem)
+            //    .expect("Failed to extract first public key hash from PEM");
             
             // Load and verify first RSA key
-            let loaded_first_rsa = key_manager.keystore.load_rsa_key(first_pubkey_hash.clone())
-                .expect("Failed to load first RSA key")
-                .expect("First RSA key should exist");
+            //let loaded_first_rsa = key_manager.keystore.load_rsa_key(first_pubkey_hash.clone())
+            //    .expect("Failed to load first RSA key")
+            //    .expect("First RSA key should exist");
             
-            let first_loaded_pubkey_pem = loaded_first_rsa.export_public_pem()
-                .expect("Failed to export public PEM from first RSA key");
+            //let first_loaded_pubkey_pem = loaded_first_rsa.export_public_pem()
+            //    .expect("Failed to export public PEM from first RSA key");
             // Generate and store second RSA keypair at the SAME index N (overwrite)
             let second_rsa_pubkey_pem = key_manager.generate_rsa_keypair(&mut rng)
                 .expect("Failed to generate second RSA keypair");
@@ -3685,8 +3680,8 @@ mod tests {
                 "Overwrite verification: loaded RSA key should NOT match the first (overwritten) key");
             
             // Also verify we can still load the first key by its hash (if still stored)
-            let first_key_reloaded = key_manager.keystore.load_rsa_key(first_pubkey_hash)
-                .expect("Failed to reload first RSA key");
+            //let first_key_reloaded = key_manager.keystore.load_rsa_key(first_pubkey_hash)
+            //    .expect("Failed to reload first RSA key");
             // Note: Depending on implementation, this might be None if overwrite happened by index
             // or Some if keys are stored by hash (non-overwriting behavior)
             
@@ -3960,7 +3955,6 @@ mod tests {
             
             // Test Case 4: Valid base58 with wrong checksum
             // Start with a valid WIF and corrupt the checksum
-            // let secp = Secp256k1::new();
             let mut rng = secp256k1::rand::thread_rng();
             let secret_key = SecretKey::new(&mut rng);
             let valid_private_key = PrivateKey::new(secret_key, REGTEST);
@@ -4075,7 +4069,6 @@ mod tests {
          */
         run_test_with_key_manager(|key_manager| -> Result<(), KeyManagerError> {
             // Test Case 1: Generate a valid key using secp256k1's native key generation
-            let secp = secp256k1::Secp256k1::new();
             let mut rng = secp256k1::rand::thread_rng();
             let secret_key = secp256k1::SecretKey::new(&mut rng);
             let valid_hex = secret_key.display_secret().to_string();
@@ -4142,7 +4135,7 @@ mod tests {
             
             // Test Case 5: Test different networks
             let mainnet_imported = key_manager.import_secret_key(&valid_hex, bitcoin::Network::Bitcoin)?;
-            let (loaded_mainnet_private, loaded_mainnet_public, _) = key_manager.keystore.load_keypair(&mainnet_imported)?
+            let (loaded_mainnet_private, _loaded_mainnet_public, _) = key_manager.keystore.load_keypair(&mainnet_imported)?
                 .expect("Mainnet imported keypair should exist in keystore");
             
             // The private key inner value should be the same, but network should differ
@@ -4179,7 +4172,7 @@ mod tests {
          * Steps / Procedure: Call import_secret_key(bad, network).
          * Expected Result: Error KeyManagerError::InvalidPrivateKey or parse error.
          */
-        run_test_with_key_manager(|mut key_manager| {
+        run_test_with_key_manager(|key_manager| {
             // Test Case 1: Non-hex characters
             let invalid_hex_1 = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg";
             let result1 = key_manager.import_secret_key(invalid_hex_1, REGTEST);
@@ -4262,9 +4255,8 @@ mod tests {
          * Steps / Procedure: Call import; then load_keypair by returned public key.
          * Expected Result: Aggregated keypair stored; load succeeds.
          */
-        run_test_with_key_manager(|mut key_manager| {
+        run_test_with_key_manager(|key_manager| {
             // Test Case 1: Aggregate 2 partial secret keys
-            let secp = Secp256k1::new();
             let mut rng = secp256k1::rand::thread_rng();
             
             // Create 2 valid secret keys for aggregation
@@ -4287,7 +4279,7 @@ mod tests {
                 "Aggregated public key should not be empty");
             
             // Load the aggregated keypair
-            let (loaded_private_key_1, loaded_public_key_1, _) = key_manager.keystore.load_keypair(&aggregated_public_key_1)?
+            let (_loaded_private_key_1, loaded_public_key_1, _) = key_manager.keystore.load_keypair(&aggregated_public_key_1)?
                 .expect("Aggregated keypair should exist in keystore");
             
             // Verify the loaded keys match the aggregated result
@@ -4310,7 +4302,7 @@ mod tests {
                 REGTEST
             )?;
             
-            let (loaded_private_key_2, loaded_public_key_2, _) = key_manager.keystore.load_keypair(&aggregated_public_key_2)?
+            let (_loaded_private_key_2, _loaded_public_key_2, _) = key_manager.keystore.load_keypair(&aggregated_public_key_2)?
                 .expect("3-key aggregated keypair should exist in keystore");
             
             // Test Case 3: Aggregate partial private keys (WIF format)
@@ -4327,7 +4319,7 @@ mod tests {
                 REGTEST
             )?;
             
-            let (loaded_private_key_3, loaded_public_key_3, _) = key_manager.keystore.load_keypair(&aggregated_public_key_3)?
+            let (_loaded_private_key_3, _loaded_public_key_3, _) = key_manager.keystore.load_keypair(&aggregated_public_key_3)?
                 .expect("WIF-based aggregated keypair should exist in keystore");
             
             // Test Case 4: Test with different networks
@@ -4341,7 +4333,7 @@ mod tests {
                 bitcoin::Network::Bitcoin
             )?;
             
-            let (mainnet_private, mainnet_public, _) = key_manager.keystore.load_keypair(&mainnet_aggregated)?
+            let (_mainnet_private, _mainnet_public, _) = key_manager.keystore.load_keypair(&mainnet_aggregated)?
                 .expect("Mainnet aggregated keypair should exist in keystore");
             
             // Test Case 5: Verify cryptographic operations work with aggregated keys
@@ -4384,6 +4376,10 @@ mod tests {
                 REGTEST
             )?;
             
+            // Verify the aggregated key can be loaded
+            let _duplicate_loaded = key_manager.keystore.load_keypair(&duplicate_aggregated)?
+                .expect("Duplicate aggregated key should exist");
+            
             // Note: Depending on implementation, this might be the same or different
             // The behavior depends on whether the aggregation algorithm is deterministic
             // and whether duplicate detection is implemented
@@ -4401,9 +4397,8 @@ mod tests {
          * Steps / Procedure: Call import_partial_secret_keys/import_partial_private_keys with bad data.
          * Expected Result: Error KeyManagerError::FailedToAggregatePartialKeys or parse error.
          */
-        run_test_with_key_manager(|mut key_manager| -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| -> Result<(), KeyManagerError> {
             // Test Case 1: Try with empty keys list
-            use crate::key_manager::secp256k1::Secp256k1;
             let empty_keys: Vec<String> = vec![];
             let result1 = key_manager.import_partial_secret_keys(empty_keys, REGTEST);
             match result1 {
@@ -4412,7 +4407,6 @@ mod tests {
             }
             
             // Test Case 2: Try to aggregate a single key (musig2 accepts single-key aggregation)
-            let secp = secp256k1::Secp256k1::new();
             let mut rng = secp256k1::rand::thread_rng();
             let secret_key = secp256k1::SecretKey::new(&mut rng);
             let single_key = vec![secret_key.display_secret().to_string()];
@@ -4492,7 +4486,6 @@ mod tests {
             
             // Test Case 11: Too many partial keys (test system limits)
             let mut too_many_keys = Vec::new();
-            let secp = Secp256k1::new();
             let mut rng = secp256k1::rand::thread_rng();
             
             for _ in 0..100 {  // Create 100 keys to test limits
@@ -4500,7 +4493,7 @@ mod tests {
                 too_many_keys.push(secret_key.display_secret().to_string());
             }
             
-            let result11 = key_manager.import_partial_secret_keys(too_many_keys, REGTEST);
+            let _result11 = key_manager.import_partial_secret_keys(too_many_keys, REGTEST);
             // This might succeed or fail depending on implementation limits
             // We're just testing that the system handles large inputs gracefully
             
@@ -4662,13 +4655,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
+        
+        let key_manager_config1 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, keystore_storage_config.clone())?;
 
         drop(key_manager1);
 
@@ -4676,15 +4670,16 @@ mod tests {
         // This should fail with MnemonicMismatch error
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
-        let mnemonic_sentence =
+        let mnemonic_sentence2 =
             "legal winner thank year wave sausage worth useful legal winner thank yellow";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager2 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
+        
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence2.to_string()),
             None,
-            keystore_storage_config.clone(),
         );
+        
+        let key_manager2 = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config.clone());
 
         // Expect MnemonicMismatch error
         assert!(matches!(
@@ -4695,10 +4690,15 @@ mod tests {
         // --- Create the 3rd KeyManager with the same stored mnemonic
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
-        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+        let mnemonic_sentence3 = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        
+        let key_manager_config3 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence3.to_string()),
+            None,
+        );
+        
+        let key_manager3 = crate::create_key_manager_from_config(&key_manager_config3, keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -4715,36 +4715,39 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
         let passphrase1 = "test_passphrase_123".to_string();
 
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        let key_manager_config1 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, keystore_storage_config.clone())?;
 
         drop(key_manager1);
 
         // --- Test 1: Create KeyManager with same mnemonic and same passphrase (should succeed)
-        let key_manager2 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager2 = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config.clone())?;
 
         drop(key_manager2);
 
         // --- Test 2: Create KeyManager with same mnemonic but different passphrase (should fail)
         let different_passphrase = "different_passphrase_456".to_string();
-        let result = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config3 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             Some(different_passphrase),
-            keystore_storage_config.clone(),
         );
+        
+        let result = crate::create_key_manager_from_config(&key_manager_config3, keystore_storage_config.clone());
 
         // Expect MnemonicPassphraseMismatch error
         assert!(matches!(
@@ -4753,8 +4756,13 @@ mod tests {
         ));
 
         // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
-        let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+        let key_manager_config4 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
+            None,
+        );
+        
+        let key_manager3 = crate::create_key_manager_from_config(&key_manager_config4, keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -4771,13 +4779,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config1 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, keystore_storage_config.clone())?;
 
         drop(key_manager1);
 
@@ -4793,12 +4802,13 @@ mod tests {
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to seed validation)
-        let result = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
         );
+        
+        let result = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config.clone());
 
         // Expect CorruptedKeyDerivationSeed error
         assert!(matches!(
@@ -4819,13 +4829,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config1 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, keystore_storage_config.clone())?;
 
         drop(key_manager1);
 
@@ -4841,12 +4852,13 @@ mod tests {
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to Winternitz seed validation)
-        let result = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic),
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
         );
+        
+        let result = crate::create_key_manager_from_config(&key_manager_config2, keystore_storage_config.clone());
 
         // Expect CorruptedWinternitzSeed error
         assert!(matches!(
@@ -4868,13 +4880,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config1 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, storage_config.clone())?;
 
         drop(key_manager1);
 
@@ -4883,7 +4896,13 @@ mod tests {
         let wrong_password = "wrong password".to_string();
         let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
 
-        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, wrong_storage_config);
+        let key_manager_config2 = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
+            None,
+        );
+        
+        let result = crate::create_key_manager_from_config(&key_manager_config2, wrong_storage_config);
 
         // Expect StorageError which should contain the decryption error
         match result {
@@ -4912,13 +4931,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config.clone())?;
 
         // hardcoded values from https://iancoleman.io/bip39/
 
@@ -5153,13 +5173,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager = KeyManager::new(
-            Network::Testnet,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "testnet".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config.clone())?;
 
         // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
 
@@ -5392,13 +5413,14 @@ mod tests {
 
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager = KeyManager::new(
-            Network::Bitcoin,
-            Some(fixed_mnemonic.clone()),
+        
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "bitcoin".to_string(),
+            Some(mnemonic_sentence.to_string()),
             None,
-            keystore_storage_config.clone(),
-        )?;
+        );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, keystore_storage_config.clone())?;
 
         // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
 

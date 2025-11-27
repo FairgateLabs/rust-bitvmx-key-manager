@@ -27,7 +27,7 @@ pub fn create_key_manager(
     let winternitz_seed = random_bytes();
 
     let derivation_path = format!("m/101/1/0/0/{}", generate_random_string());
-    let password = "secret password".to_string();
+    let password = "secret password_123__ABC".to_string();
     let config = StorageConfig::new(store_keystore_path.to_string(), Some(password));
     let key_store = Rc::new(Storage::new(&config)?);
     let keystore = KeyStore::new(key_store);

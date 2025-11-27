@@ -24,16 +24,19 @@ A random mnemonic will be auto generated and stored, is no one is provided by co
 The BitVMX Key Manager implements different strategies for key derivation and storage based on the cryptographic algorithm and practical considerations:
 
 #### Bitcoin Keys (ECDSA/Schnorr)
+
 - **HD Derivation**: Bitcoin keys are derived using hierarchical deterministic (HD) derivation following BIP39/BIP44 standards from a master seed/mnemonic
 - **Storage**: Both private and public keys are stored in the encrypted keystore for persistent access
 - **Rationale**: Standard Bitcoin practice enabling deterministic key generation and wallet recovery
 
 #### Winternitz One-Time Signature Keys
+
 - **HD Derivation**: Winternitz keys are HD derived from the same master seed for consistency
 - **Storage**: Keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed
 - **Rationale**: Storage scalability - Winternitz signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency
 
 #### RSA Keys
+
 - **Fresh Entropy**: RSA keys are generated using fresh entropy provided by the user, with **no correlation** to the HD mnemonic
 - **Storage**: Private and public keys are stored in the encrypted keystore
 - **Rationale**: While HD derivation of RSA keys is theoretically possible (as explored in [research](https://ethresear.ch/t/an-rsa-deterministic-key-generation-scheme-algorithm-and-security-analysis/19745)), we deliberately choose fresh entropy generation to:
@@ -42,6 +45,7 @@ The BitVMX Key Manager implements different strategies for key derivation and st
   - Acknowledge that users must backup the keystore anyway due to key importing features
 
 #### Imported Keys
+
 - **No HD Correlation**: Imported keys have no relationship to the master HD mnemonic by design
 - **Storage**: Stored in the encrypted keystore alongside generated keys
 - **Rationale**: Preserves the original entropy and properties of externally generated keys
@@ -55,6 +59,7 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 ### [Key Importing](examples/key_import.rs)
 
 ### [Key Generation & Derivation](examples/key_gen.rs)
+
 *Internally the key manager generates a key pair, stores the private key and the corresponding public key in the encrypted keystore. The public key is later used to select the corresponding private key for signing.*
 
 *`next_keypair` is always the preferred way to get a new keypair, as it manages the derivation index automatically.*
@@ -62,15 +67,20 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 ### [Signing and verifying a message using ECDSA](examples/sign_verify_ecdsa.rs)
 
 ### [Signing and verifying a message using Schnorr & Taproot Signatures](examples/sign_verify_schnorr_taproot.rs)
+
 *The `KeyManager` supports both Taproot **script path spends** and **key path spends** (with or without tweaking). These methods use Schnorr signatures and are compatible with BIP-340/341 Taproot usage in Bitcoin.*
 
 ### [Deriving Winternitz OTS keys](examples/deriving_winternitz.rs)
+
 *The key manager supports Winternitz one-time keys. Winternitz keys can be generated using SHA-256 or RIPEMD-160 hash functions. As with the ECDSA keys, a key pair is generated and only the public key is returned. The public key can later be used to select the corresponding private key for signing.*
 
 ### [Signing and verifying a message using Winternitz](examples/sign_verify_winternitz.rs)
 
 ### [Generating keys, Signing and verifying a message using RSA](examples/rsa.rs)
 
+### [Signing and verifying Multi-Signatures with MuSig2](examples/sign_verify_musig2.rs)
+
+The `KeyManager` supports MuSig2 multi-signature schemes, allowing multiple parties to jointly produce a single Schnorr signature. See more details on [MuSig2 for Rust](https://docs.rs/musig2/latest/musig2/).
 
 ## Development Setup
 
@@ -79,6 +89,7 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 3. Run tests: `cargo test -- --test-threads=1`
 
 ## Examples
+
 - **[create:](examples/create.rs)**
 run with `cargo run --example create`
 - **[key_gen:](examples/key_gen.rs)**
@@ -109,7 +120,7 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 ## 🧩 Part of the BitVMX Ecosystem
 
-This repository is a component of the **BitVMX Ecosystem**, an open platform for disputable computation secured by Bitcoin.  
+This repository is a component of the **BitVMX Ecosystem**, an open platform for disputable computation secured by Bitcoin.
 You can find the index of all BitVMX open-source components at [**FairgateLabs/BitVMX**](https://github.com/FairgateLabs/BitVMX).
 
 ---

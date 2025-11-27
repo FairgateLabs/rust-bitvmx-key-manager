@@ -20,6 +20,9 @@ pub enum Musig2SignerError {
     #[error("Invalid number of participant nonces")]
     InvalidParticipantNonces,
 
+    #[error("Missing nonce for message id: {0}")]
+    MissingNonce(String),
+
     #[error("Invalid public key")]
     InvalidPublicKey,
 

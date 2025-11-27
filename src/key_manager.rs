@@ -1276,6 +1276,13 @@ impl KeyManager {
         Ok(self.musig2.my_public_key(aggregated_pubkey)?)
     }
 
+    pub fn get_key_agg_context(
+        &self,
+        aggregated_pubkey: &PublicKey,
+    ) -> Result<musig2::KeyAggContext, KeyManagerError> {
+        Ok(self.musig2.get_key_agg_context(aggregated_pubkey, None)?)
+    }
+
     pub fn aggregate_nonces(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -1295,6 +1302,17 @@ impl KeyManager {
         Ok(self.musig2.get_my_pub_nonces(aggregated_pubkey, id)?)
     }
 
+    pub fn get_my_pub_nonce(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PubNonce, KeyManagerError> {
+        Ok(self
+            .musig2
+            .get_my_pub_nonce(aggregated_pubkey, id, message_id)?)
+    }
+
     pub fn save_partial_signatures_multi(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -1305,36 +1323,25 @@ impl KeyManager {
         //this is a workaround bacause the as leader I got all the partial before sending mine
         //and therefore have it computed.
         //this should change in program
+
         let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey, id)?;
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self.musig2.save_partial_signatures(
-            aggregated_pubkey,
-            id,
-            partial_signatures_mapping,
-        )?)
+        Ok(self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)?)
     }
 
     pub fn save_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,
         id: &str,
-        other_public_key: PublicKey,
-        other_partial_signatures: Vec<(MessageId, PartialSignature)>,
-    ) -> Result<Vec<(MessageId, PartialSignature)>, KeyManagerError> {
-        let mut partial_signatures = HashMap::new();
-        partial_signatures.insert(other_public_key, other_partial_signatures);
-
-        let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey, id)?;
-        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
-
-        partial_signatures.insert(my_pub_key, my_partial_signatures.clone());
-
-        self.musig2
-            .save_partial_signatures(aggregated_pubkey, id, partial_signatures)?;
-
-        Ok(my_partial_signatures)
+        partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    ) -> Result<(), KeyManagerError> {
+        Ok(self.musig2.save_partial_signatures(
+            aggregated_pubkey,
+            id,
+            partial_signatures_mapping,
+        )?)
     }
 
     pub fn get_my_partial_signatures(
@@ -1365,6 +1372,30 @@ impl KeyManager {
         }
 
         Ok(my_partial_signatures)
+    }
+
+    pub fn get_my_partial_signature(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PartialSignature, KeyManagerError> {
+        let (message, sec_nonce, tweak, aggregated_nonce) = self
+            .musig2
+            .get_data_for_partial_signature(aggregated_pubkey, id, message_id)?;
+
+        let sig = self
+            .sign_partial_message(
+                aggregated_pubkey,
+                self.musig2.my_public_key(aggregated_pubkey)?,
+                sec_nonce.clone(),
+                aggregated_nonce.clone(),
+                tweak,
+                message.clone(),
+            )
+            .map_err(|_| Musig2SignerError::InvalidSignature)?;
+
+        Ok(sig)
     }
 
     pub fn get_aggregated_signature(
@@ -1400,6 +1431,36 @@ impl KeyManager {
             id,
             tweak,
             nonce_seed,
+        )?)
+    }
+
+    pub fn verify_partial_signatures(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        pubkey: PublicKey,
+        partial_signatures: Vec<(String, PartialSignature)>,
+    ) -> Result<bool, KeyManagerError> {
+        Ok(self.musig2.verify_partial_signatures(
+            aggregated_pubkey,
+            id,
+            pubkey,
+            partial_signatures,
+        )?)
+    }
+
+    pub fn verify_final_signature(
+        &self,
+        message_id: &str,
+        final_signature: secp256k1::schnorr::Signature,
+        aggregated_pubkey: PublicKey,
+        id: &str,
+    ) -> Result<bool, KeyManagerError> {
+        Ok(self.musig2.verify_final_signature(
+            message_id,
+            final_signature,
+            aggregated_pubkey,
+            id,
         )?)
     }
 

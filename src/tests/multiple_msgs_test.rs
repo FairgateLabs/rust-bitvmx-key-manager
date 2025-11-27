@@ -109,18 +109,20 @@ mod tests {
         assert_eq!(my_partial_sigs_1.len(), messages.len());
         assert_eq!(my_partial_sigs_2.len(), messages.len());
 
+        let mut partial_signatures_mapping = HashMap::new();
+        partial_signatures_mapping.insert(pub_key_part_1, my_partial_sigs_1.clone());
+        partial_signatures_mapping.insert(pub_key_part_2, my_partial_sigs_2.clone());
+
         key_manager.save_partial_signatures(
             &aggregated_pub_key,
             id,
-            pub_key_part_2,
-            my_partial_sigs_2,
+            partial_signatures_mapping.clone(),
         )?;
 
         key_manager2.save_partial_signatures(
             &aggregated_pub_key_2,
             id,
-            pub_key_part_1,
-            my_partial_sigs_1,
+            partial_signatures_mapping.clone(),
         )?;
 
         let signature_1 =

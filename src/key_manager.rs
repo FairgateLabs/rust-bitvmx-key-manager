@@ -1739,7 +1739,7 @@ mod tests {
     #[test]
     fn test_keystore() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_32bytes();
         let key_derivation_seed = random_64bytes();
@@ -1787,7 +1787,7 @@ mod tests {
     #[test]
     fn test_keystore_index() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_32bytes();
         let key_derivation_seed = random_64bytes();
@@ -2443,7 +2443,7 @@ mod tests {
     }
 
     fn database_keystore_config(storage_path: &str) -> Result<StorageConfig, KeyManagerError> {
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
         Ok(config)
     }

@@ -588,7 +588,7 @@ impl Cli {
     fn key_manager(&self) -> Result<KeyManager> {
         Ok(create_key_manager_from_config(
             &self.config.key_manager,
-            self.config.storage.clone(),
+            &self.config.storage.clone(),
         )?)
     }
 

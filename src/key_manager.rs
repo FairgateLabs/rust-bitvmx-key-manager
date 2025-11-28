@@ -73,9 +73,9 @@ impl KeyManager {
         network: Network,
         mnemonic: Option<Mnemonic>,
         mnemonic_passphrase: Option<String>,
-        storage_config: StorageConfig,
+        storage_config: &StorageConfig,
     ) -> Result<Self, KeyManagerError> {
-        let key_store = Rc::new(Storage::new(&storage_config)?);
+        let key_store = Rc::new(Storage::new(storage_config)?);
         let keystore = KeyStore::new(key_store);
 
         // Store or load mnemonic
@@ -1826,7 +1826,7 @@ mod tests {
             Network::Regtest,
             None, // No mnemonic provided, will generate one
             None,
-            keystore_storage_config,
+            &keystore_storage_config,
         )?;
 
         // 1. Verify that with a fresh keymanager, there is no stored index for P2tr
@@ -1952,7 +1952,7 @@ mod tests {
             Network::Regtest,
             None, // No mnemonic provided, will generate one
             None,
-            keystore_storage_config,
+            &keystore_storage_config,
         )?;
 
         let message_size_32_bytes = 32;
@@ -2424,7 +2424,7 @@ mod tests {
             REGTEST,
             Some(random_mnemonic),
             Some(random_mnemonic_passphrase),
-            storage_config,
+            &storage_config,
         )?;
 
         Ok(key_manager)
@@ -2437,7 +2437,7 @@ mod tests {
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
 
-        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, storage_config)?;
+        let key_manager = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &storage_config)?;
 
         Ok(key_manager)
     }
@@ -2601,7 +2601,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         drop(key_manager1);
@@ -2617,7 +2617,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         );
 
         // Expect MnemonicMismatch error
@@ -2632,7 +2632,7 @@ mod tests {
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
         let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -2656,7 +2656,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         drop(key_manager1);
@@ -2666,7 +2666,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(passphrase1.clone()),
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         drop(key_manager2);
@@ -2677,7 +2677,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             Some(different_passphrase),
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         );
 
         // Expect MnemonicPassphraseMismatch error
@@ -2688,7 +2688,7 @@ mod tests {
 
         // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
         let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, keystore_storage_config)?;
+            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &keystore_storage_config)?;
 
         drop(key_manager3);
 
@@ -2710,7 +2710,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         drop(key_manager1);
@@ -2731,7 +2731,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         );
 
         // Expect CorruptedKeyDerivationSeed error
@@ -2758,7 +2758,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         drop(key_manager1);
@@ -2779,7 +2779,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         );
 
         // Expect CorruptedWinternitzSeed error
@@ -2807,7 +2807,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            storage_config.clone(),
+            &storage_config,
         )?;
 
         drop(key_manager1);
@@ -2817,7 +2817,7 @@ mod tests {
         let wrong_password = "wrong password".to_string();
         let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
 
-        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, wrong_storage_config);
+        let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &wrong_storage_config);
 
         // Expect StorageError which should contain the decryption error
         match result {
@@ -2851,7 +2851,7 @@ mod tests {
             REGTEST,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         // hardcoded values from https://iancoleman.io/bip39/
@@ -3092,7 +3092,7 @@ mod tests {
             Network::Testnet,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/
@@ -3331,7 +3331,7 @@ mod tests {
             Network::Bitcoin,
             Some(fixed_mnemonic.clone()),
             None,
-            keystore_storage_config.clone(),
+            &keystore_storage_config,
         )?;
 
         // hardcoded values from https://iancoleman.io/bip39/ and https://learnmeabitcoin.com/technical/keys/hd-wallets/derivation-paths/

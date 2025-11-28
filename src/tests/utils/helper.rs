@@ -24,7 +24,7 @@ pub fn create_key_manager(
         bitcoin::Network::Regtest,
         Some(random_mnemonic),
         None,
-        config,
+        &config,
     )?;
 
     Ok(key_manager)

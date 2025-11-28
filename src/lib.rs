@@ -25,7 +25,7 @@ pub use storage_backend;
 
 pub fn create_key_manager_from_config(
     key_manager_config: &KeyManagerConfig,
-    storage_config: StorageConfig,
+    storage_config: &StorageConfig,
 ) -> Result<KeyManager, KeyManagerError> {
     let mnemonic = match &key_manager_config.mnemonic_sentence {
         Some(mnemonic_sentence) => Some(decode_key_derivation_seed(mnemonic_sentence)?),

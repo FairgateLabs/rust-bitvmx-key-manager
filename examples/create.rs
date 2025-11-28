@@ -21,7 +21,7 @@ pub fn create_key_manager_example(name: &str) -> KeyManager {
         network,
         None, // will generate a new random mnemonic internally
         None, // sill use empty passphrase for mnemonic
-        storage_config,
+        &storage_config,
     )
     .unwrap();
 

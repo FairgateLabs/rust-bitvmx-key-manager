@@ -2631,8 +2631,12 @@ mod tests {
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &keystore_storage_config)?;
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            &keystore_storage_config,
+        )?;
 
         drop(key_manager3);
 
@@ -2687,8 +2691,12 @@ mod tests {
         ));
 
         // --- Test 3: Create KeyManager with same mnemonic and no passphrase (should succeed with stored passphrase)
-        let key_manager3 =
-            KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &keystore_storage_config)?;
+        let key_manager3 = KeyManager::new(
+            REGTEST,
+            Some(fixed_mnemonic),
+            None,
+            &keystore_storage_config,
+        )?;
 
         drop(key_manager3);
 
@@ -2803,12 +2811,8 @@ mod tests {
         // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
         let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let fixed_mnemonic = Mnemonic::parse(mnemonic_sentence).unwrap();
-        let key_manager1 = KeyManager::new(
-            REGTEST,
-            Some(fixed_mnemonic.clone()),
-            None,
-            &storage_config,
-        )?;
+        let key_manager1 =
+            KeyManager::new(REGTEST, Some(fixed_mnemonic.clone()), None, &storage_config)?;
 
         drop(key_manager1);
 

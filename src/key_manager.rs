@@ -665,6 +665,17 @@ impl KeyManager {
         Ok(self.musig2.get_my_pub_nonces(aggregated_pubkey, id)?)
     }
 
+    pub fn get_my_pub_nonce(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PubNonce, KeyManagerError> {
+        Ok(self
+            .musig2
+            .get_my_pub_nonce(aggregated_pubkey, id, message_id)?)
+    }
+
     pub fn save_partial_signatures_multi(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -735,6 +746,30 @@ impl KeyManager {
         }
 
         Ok(my_partial_signatures)
+    }
+
+    pub fn get_my_partial_signature(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        message_id: &str,
+    ) -> Result<PartialSignature, KeyManagerError> {
+        let (message, sec_nonce, tweak, aggregated_nonce) = self
+            .musig2
+            .get_data_for_partial_signature(aggregated_pubkey, id, message_id)?;
+
+        let sig = self
+            .sign_partial_message(
+                aggregated_pubkey,
+                self.musig2.my_public_key(aggregated_pubkey)?,
+                sec_nonce.clone(),
+                aggregated_nonce.clone(),
+                tweak,
+                message.clone(),
+            )
+            .map_err(|_| Musig2SignerError::InvalidSignature)?;
+
+        Ok(sig)
     }
 
     pub fn get_aggregated_signature(
@@ -1087,7 +1122,7 @@ mod tests {
     #[test]
     fn test_keystore() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
@@ -1130,7 +1165,7 @@ mod tests {
     #[test]
     fn test_keystore_index() -> Result<(), KeyManagerError> {
         let path = temp_storage();
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_bytes();
         let key_derivation_seed = random_bytes();
@@ -1382,7 +1417,7 @@ mod tests {
     }
 
     fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
-        let password = "secret password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
         let store = Rc::new(Storage::new(&config)?);
         Ok(KeyStore::new(store))

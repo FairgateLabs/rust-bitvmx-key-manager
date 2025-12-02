@@ -334,6 +334,13 @@ impl WinternitzPublicKey {
         hashes
     }
 
+    pub fn to_hashes_string(&self) -> Vec<String> {
+        self.hashes
+            .iter()
+            .map(|hash| hex::encode(&hash.hash))
+            .collect()
+    }
+
     pub fn total_len(&self) -> usize {
         self.hashes.len()
     }
@@ -561,7 +568,7 @@ impl Winternitz {
 
         for (i, digit) in checksummed_message.iter().enumerate() {
             let mut hashed_val = private_key.hash_at(i);
-            for _ in 0..(W - (*digit as usize)) {
+            for _ in 0..(*digit as usize) {
                 hashed_val = key_type.hash(&hashed_val);
             }
 
@@ -591,7 +598,7 @@ impl Winternitz {
                 digit = &(W as u8);
             }
 
-            for _ in 0..(*digit as usize) {
+            for _ in 0..(W - *digit as usize) {
                 hashed_val = key_type.hash(&hashed_val);
             }
 

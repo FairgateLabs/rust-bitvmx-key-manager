@@ -1481,7 +1481,7 @@ mod tests {
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError}, key_manager, key_store::KeyStore, key_type::BitcoinKeyType, rsa::RSAKeyPair, verifier::SignatureVerifier, winternitz::{WinternitzType, to_checksummed_message}
+        errors::{KeyManagerError, WinternitzError}, key_store::KeyStore, key_type::BitcoinKeyType, rsa::RSAKeyPair, verifier::SignatureVerifier, winternitz::{WinternitzType, to_checksummed_message}
     };
 
     use super::KeyManager;
@@ -1934,6 +1934,8 @@ mod tests {
             None, // No mnemonic provided, will generate one
             None,
         );
+
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
 
         let message_size_32_bytes = 32;
         let message_size_20_bytes = 20;
@@ -4883,6 +4885,8 @@ mod tests {
             Some(mnemonic_sentence.to_string()),
             None,
         );
+        
+        let key_manager1 = crate::create_key_manager_from_config(&key_manager_config1, &keystore_storage_config)?;
 
         drop(key_manager1);
 
@@ -4972,6 +4976,8 @@ mod tests {
             Some(mnemonic_sentence.to_string()),
             None,
         );
+        
+        let key_manager = crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
 
         // hardcoded values from https://iancoleman.io/bip39/
 

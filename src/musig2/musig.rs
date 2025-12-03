@@ -595,6 +595,12 @@ impl MuSig2SignerApi for MuSig2Signer {
                 participant_pubkeys.len(),
                 quantity_of_pub_nonces
             );
+            error!(
+                "Aggregated pubkey: {}, session id: {}, message id: {}",
+                aggregated_pubkey.to_string(),
+                id,
+                message_id
+            );
             return Err(Musig2SignerError::IncompleteParticipantNonces);
         }
 

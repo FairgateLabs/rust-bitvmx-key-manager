@@ -1,13 +1,13 @@
-use crate::winternitz::{
-    calculate_checksum, checksum_length, message_digits_length, to_checksummed_message, Winternitz,
-    WinternitzType,
-};
-
 #[cfg(test)]
 mod winternitz_tests {
     use crate::winternitz::SHA256_SIZE;
 
     use super::*;
+
+    use crate::winternitz::{
+        calculate_checksum, checksum_length, message_digits_length, to_checksummed_message,
+        Winternitz, WinternitzType,
+    };
 
     fn create_master_secret() -> Vec<u8> {
         b"test_master_secret_key_32_bytes".to_vec()

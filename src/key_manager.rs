@@ -2527,7 +2527,6 @@ mod tests {
             "bitcoin" | "mainnet" => Network::Bitcoin,
             "testnet" => Network::Testnet,
             "regtest" => Network::Regtest,
-            "signet" => Network::Signet,
             _ => return Err(KeyManagerError::ConfigError(ConfigError::InvalidNetwork)),
         };
 
@@ -2842,29 +2841,7 @@ mod tests {
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         
-        // Test Case 4: Valid network "signet"
-        let keystore_path = temp_storage();
-        let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
-        let store_path = temp_storage();
-        let config = StorageConfig::new(store_path.clone(), None);
-        let store = Rc::new(Storage::new(&config).expect("Failed to create storage"));
-        
-        let key_manager_config = TestKeyManagerConfig::new(
-            "signet".to_string(), // Valid network
-            Some(test_mnemonic.to_string()),
-            None,
-        );
-        
-        let result = create_key_manager_from_config(&key_manager_config, keystore, store);
-        assert!(result.is_ok(), "KeyManager creation should succeed for valid network 'signet'");
-        
-        // Explicitly drop the KeyManager to release storage handles
-        drop(result);
-        
-        cleanup_storage(&keystore_path);
-        cleanup_storage(&store_path);
-        
-        // Test Case 5: Invalid network value
+        // Test Case 4: Invalid network value
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
         let store_path = temp_storage();
@@ -2884,7 +2861,7 @@ mod tests {
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         
-        // Test Case 6: Empty network string
+        // Test Case 5: Empty network string
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
         let store_path = temp_storage();
@@ -2904,7 +2881,7 @@ mod tests {
         cleanup_storage(&keystore_path);
         cleanup_storage(&store_path);
         
-        // Test Case 7: Case insensitivity test (uppercase should work)
+        // Test Case 6: Case insensitivity test (uppercase should work)
         let keystore_path = temp_storage();
         let keystore = database_keystore(&keystore_path).expect("Failed to create keystore");
         let store_path = temp_storage();

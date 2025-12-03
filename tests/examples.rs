@@ -66,48 +66,88 @@ mod sign_verify_musig2_example {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+    
+    // Use a mutex to ensure examples run sequentially and don't interfere with each other
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    
+    fn setup_and_cleanup<F>(test_fn: F) 
+    where 
+        F: FnOnce()
+    {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        
+        // Ensure storage directory exists
+        let _ = std::fs::create_dir_all("./examples/storage");
+        
+        // Run the test
+        test_fn();
+        
+        // Clean up after test
+        let _ = std::fs::remove_dir_all("./examples/storage");
+        let _ = std::fs::remove_dir_all("test_output");
+    }
+
     #[test]
     fn test_create_example() {
-        super::create_example::run_example();
+        setup_and_cleanup(|| {
+            super::create_example::run_example();
+        });
     }
 
     #[test]
     fn test_deriving_winternitz_example() {
-        super::deriving_winternitz_example::run_example();
+        setup_and_cleanup(|| {
+            super::deriving_winternitz_example::run_example();
+        });
     }
 
     #[test]
     fn test_key_gen_example() {
-        super::key_gen_example::run_example();
+        setup_and_cleanup(|| {
+            super::key_gen_example::run_example();
+        });
     }
 
     #[test]
     fn test_key_import_example() {
-        super::key_import_example::run_example();
+        setup_and_cleanup(|| {
+            super::key_import_example::run_example();
+        });
     }
 
     #[test]
     fn test_sign_verify_ecdsa_example() {
-        super::sign_verify_ecdsa_example::run_example();
+        setup_and_cleanup(|| {
+            super::sign_verify_ecdsa_example::run_example();
+        });
     }
 
     #[test]
     fn test_sign_verify_schnorr_taproot_example() {
-        super::sign_verify_schnorr_taproot_example::run_example();
+        setup_and_cleanup(|| {
+            super::sign_verify_schnorr_taproot_example::run_example();
+        });
     }
 
     #[test]
     fn test_sign_verify_winternitz_example() {
-        super::sign_verify_winternitz_example::run_example();
+        setup_and_cleanup(|| {
+            super::sign_verify_winternitz_example::run_example();
+        });
     }
 
     #[test]
     fn test_rsa_example() {
-        super::rsa_example::run_example();
+        setup_and_cleanup(|| {
+            super::rsa_example::run_example();
+        });
     }
 
     #[test]
     fn test_sign_verify_musig2_example() {
-        super::sign_verify_musig2_example::run_example();
+        setup_and_cleanup(|| {
+            super::sign_verify_musig2_example::run_example();
+        });
     }
 }

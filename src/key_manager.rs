@@ -2496,20 +2496,20 @@ mod tests {
 
     struct TestKeyManagerConfig {
         network: String,
-        key_derivation_seed: Option<String>,
-        winternitz_seed: Option<String>,
+        mnemonic: Option<String>,
+        passphrase: Option<String>,
     }
 
     impl TestKeyManagerConfig {
         fn new(
             network: String,
-            key_derivation_seed: Option<String>,
-            winternitz_seed: Option<String>,
+            mnemonic: Option<String>,
+            passphrase: Option<String>,
         ) -> Self {
             Self {
                 network,
-                key_derivation_seed,
-                winternitz_seed,
+                mnemonic,
+                passphrase,
             }
         }
     }
@@ -2531,64 +2531,35 @@ mod tests {
             _ => return Err(KeyManagerError::ConfigError(ConfigError::InvalidNetwork)),
         };
 
-        // Parse and validate winternitz_seed if provided
-        if let Some(ref seed_hex) = config.winternitz_seed {
-            if seed_hex.is_empty() {
-                return Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed));
-            }
-            let seed_bytes: Vec<u8> = bitcoin::hex::FromHex::from_hex(seed_hex)
-                .map_err(|_| KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed))?;
-            if seed_bytes.len() != 32 {
-                return Err(KeyManagerError::ConfigError(ConfigError::InvalidWinternitzSeed));
-            }
-            let seed_array: [u8; 32] = seed_bytes.try_into().unwrap();
-            keystore.store_winternitz_seed(seed_array)?;
-        }
-
-        // Parse and validate key_derivation_seed if provided
-        let _key_derivation_seed_32 = if let Some(ref seed_hex) = config.key_derivation_seed {
-            if seed_hex.is_empty() {
-                return Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed));
-            }
-            let seed_bytes: Vec<u8> = bitcoin::hex::FromHex::from_hex(seed_hex)
-                .map_err(|_| KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed))?;
-            if seed_bytes.len() != 32 {
-                return Err(KeyManagerError::ConfigError(ConfigError::InvalidKeyDerivationSeed));
-            }
-            // For compatibility, we store it as a 64-byte seed (BIP39 seed format)
-            // by extending with zeros
-            let mut seed_64 = [0u8; 64];
-            seed_64[..32].copy_from_slice(&seed_bytes);
-            keystore.store_key_derivation_seed(seed_64)?;
-            seed_bytes.try_into().unwrap()
+        // Parse mnemonic if provided, otherwise generate a random one
+        let mnemonic = if let Some(ref mnemonic_str) = config.mnemonic {
+            Mnemonic::parse(mnemonic_str)
+                .map_err(|_| KeyManagerError::InvalidMnemonic)?
         } else {
-            // Generate random 64-byte seed if not provided
-            let seed = random_64bytes();
-            keystore.store_key_derivation_seed(seed)?;
-            let mut seed_32 = [0u8; 32];
-            seed_32.copy_from_slice(&seed[..32]);
-            seed_32
+            Mnemonic::from_entropy(&random_32bytes()).unwrap()
         };
 
-        // Store a mnemonic (required by KeyManager::new)
-        let mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        // Get passphrase or use empty string
+        let passphrase = config.passphrase.clone().unwrap_or_default();
+
+        // Store mnemonic and passphrase
         keystore.store_mnemonic(&mnemonic)?;
-        keystore.store_mnemonic_passphrase(&String::new())?;
+        keystore.store_mnemonic_passphrase(&passphrase)?;
 
-        // If winternitz_seed wasn't provided, generate it
-        if config.winternitz_seed.is_none() {
-            let secp = secp256k1::Secp256k1::new();
-            let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
-            let winternitz_seed = KeyManager::derive_winternitz_master_seed(
-                secp,
-                &loaded_key_derivation_seed,
-                network,
-                KeyManager::ACCOUNT_DERIVATION_INDEX,
-            )?;
-            keystore.store_winternitz_seed(winternitz_seed)?;
-        }
+        // Generate key derivation seed from mnemonic
+        let key_derivation_seed = mnemonic.to_seed(&passphrase);
+        keystore.store_key_derivation_seed(key_derivation_seed)?;
 
+        // Derive and store winternitz seed
         let secp = secp256k1::Secp256k1::new();
+        let winternitz_seed = KeyManager::derive_winternitz_master_seed(
+            secp.clone(),
+            &key_derivation_seed,
+            network,
+            KeyManager::ACCOUNT_DERIVATION_INDEX,
+        )?;
+        keystore.store_winternitz_seed(winternitz_seed)?;
+
         let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {
@@ -2616,8 +2587,8 @@ mod tests {
 
     fn create_test_config_and_run_with_cleanup<F>(
         network: &str,
-        key_derivation_seed: Option<String>,
-        winternitz_seed: Option<String>,
+        mnemonic: Option<String>,
+        passphrase: Option<String>,
         test_fn: F,
     ) -> Result<(), KeyManagerError>
     where
@@ -2627,8 +2598,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             network.to_string(),
-            key_derivation_seed,
-            winternitz_seed,
+            mnemonic,
+            passphrase,
         );
         
         let result = test_fn(&key_manager_config, keystore, store);
@@ -2681,11 +2652,11 @@ mod tests {
 
     // Helper macro to reduce boilerplate for error test cases
     macro_rules! assert_config_error {
-        ($network:expr, $key_derivation_seed:expr, $winternitz_seed:expr, $expected_error:pat) => {
+        ($network:expr, $mnemonic:expr, $passphrase:expr, $expected_error:pat) => {
             create_test_config_and_run_with_cleanup(
                 $network,
-                $key_derivation_seed,
-                $winternitz_seed,
+                $mnemonic,
+                $passphrase,
                 |config, keystore, store| {
                     let result = create_key_manager_from_config(config, keystore, store);
                     assert!(matches!(result, Err($expected_error)));
@@ -2741,11 +2712,14 @@ mod tests {
         let (keystore, store, keystore_path, store_path) = setup_test_environment()
             .expect("Failed to setup test environment");
         
-        // Create config with key_derivation_path set to None (omitted)
+        // Create config with a deterministic mnemonic for testing
+        // WARNING: NEVER USE THIS MNEMONIC TO STORE REAL FUNDS
+        let test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        
         let key_manager_config = TestKeyManagerConfig::new(
             "regtest".to_string(),
-            Some("fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string()),
-            Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string()),
+            Some(test_mnemonic.to_string()),
+            None, // No passphrase
         );
         
         // Step: Create KeyManager from config - should use default path
@@ -2798,9 +2772,9 @@ mod tests {
 
         use crate::errors::ConfigError;
         
-        // Valid seeds to use for all tests
-        let valid_winternitz_seed = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
-        let valid_key_derivation_seed = "fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321".to_string();
+        // Use a deterministic mnemonic for all tests
+        // WARNING: NEVER USE THIS MNEMONIC TO STORE REAL FUNDS
+        let test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         
         // Test Case 1: Valid network "regtest"
         let keystore_path = temp_storage();
@@ -2811,8 +2785,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "regtest".to_string(), // Valid network
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2833,8 +2807,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "testnet".to_string(), // Valid network
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2855,8 +2829,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "bitcoin".to_string(), // Valid network
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2877,8 +2851,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "signet".to_string(), // Valid network
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2899,8 +2873,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "invalid_network".to_string(), // Invalid network
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2919,8 +2893,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "".to_string(), // Empty network string
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);
@@ -2939,8 +2913,8 @@ mod tests {
         
         let key_manager_config = TestKeyManagerConfig::new(
             "REGTEST".to_string(), // Uppercase - should work due to case-insensitive parsing
-            Some(valid_key_derivation_seed.clone()),
-            Some(valid_winternitz_seed.clone()),
+            Some(test_mnemonic.to_string()),
+            None,
         );
         
         let result = create_key_manager_from_config(&key_manager_config, keystore, store);

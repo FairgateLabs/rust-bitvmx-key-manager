@@ -3,6 +3,7 @@ use std::{str::FromStr, vec};
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::errors::WinternitzError;
 
@@ -590,8 +591,14 @@ impl Winternitz {
 
         let key_type = public_key.key_type();
 
-        for (i, digit) in checksummed_message.iter().enumerate() {
+        for (i, mut digit) in checksummed_message.iter().enumerate() {
             let mut hashed_val = signature.hash_at(i);
+
+            if *digit > W as u8 {
+                warn!("Invalid digit: {} capping to {}", digit, W as u8);
+                digit = &(W as u8);
+            }
+
             for _ in 0..(W - *digit as usize) {
                 hashed_val = key_type.hash(&hashed_val);
             }
@@ -656,11 +663,15 @@ pub fn to_checksummed_message(message_bytes: &[u8]) -> Vec<u8> {
 }
 
 pub fn calculate_checksum(message_digits: &[u8]) -> Vec<u8> {
+    // Calculate the sum of all message digits
     let mut sum: u32 = 0;
     for digit in message_digits {
         sum += *digit as u32;
     }
 
+    // Calculate the checksum using Winternitz formula:
+    // checksum = (W * number_of_digits) - sum_of_digits
+    // To calculate the checksume is the inverse of the sum of the message digits, it's the same as summing (W-digit[i]) for all digits
     let checksum = (W * message_digits.len() - sum as usize) as u32;
     let checksum_size = checksum_length(message_digits.len());
     to_digits(checksum, checksum_size)

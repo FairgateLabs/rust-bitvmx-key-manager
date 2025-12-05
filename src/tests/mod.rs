@@ -4,3 +4,4 @@ pub mod multiple_msgs_test;
 pub mod nonces_test;
 pub mod partial_signature_test;
 pub mod utils;
+pub mod winternitz_test;

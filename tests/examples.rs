@@ -67,22 +67,22 @@ mod sign_verify_musig2_example {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
-    
+
     // Use a mutex to ensure examples run sequentially and don't interfere with each other
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
-    
-    fn setup_and_cleanup<F>(test_fn: F) 
-    where 
-        F: FnOnce()
+
+    fn setup_and_cleanup<F>(test_fn: F)
+    where
+        F: FnOnce(),
     {
         let _guard = TEST_MUTEX.lock().unwrap();
-        
+
         // Ensure storage directory exists
         let _ = std::fs::create_dir_all("./examples/storage");
-        
+
         // Run the test
         test_fn();
-        
+
         // Clean up after test
         let _ = std::fs::remove_dir_all("./examples/storage");
         let _ = std::fs::remove_dir_all("test_output");

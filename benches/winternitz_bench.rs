@@ -33,8 +33,10 @@ fn temp_storage() -> String {
 
 fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
-    let config_storage =
-        StorageConfig::new(storage_path.clone(), Some("secret password_123__ABC".to_string()));
+    let config_storage = StorageConfig::new(
+        storage_path.clone(),
+        Some("secret password_123__ABC".to_string()),
+    );
     let key_manager = test_key_manager(config_storage).unwrap();
 
     let mut criterion = Criterion::default().measurement_time(Duration::from_secs(40));

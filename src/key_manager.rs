@@ -186,7 +186,13 @@ impl KeyManager {
             Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
-        let musig2 = MuSig2Signer::new(keystore.store_clone());
+        // TODO, revisit how to save musig data without impacting performance
+        let plain_storage_config = StorageConfig {
+            path: format!("{}-plain", storage_config.path.clone()),
+            password: None,
+        };
+        let plain_key_store = Rc::new(Storage::new(&plain_storage_config)?);
+        let musig2 = MuSig2Signer::new(plain_key_store);
 
         Ok(KeyManager {
             secp,
@@ -2443,7 +2449,7 @@ mod tests {
 
     fn test_key_manager(
         keystore: KeyStore,
-        _store: Rc<Storage>,
+        store: Rc<Storage>,
     ) -> Result<KeyManager, KeyManagerError> {
         use crate::musig2::musig::MuSig2Signer;
 
@@ -2468,7 +2474,7 @@ mod tests {
         )?;
         keystore.store_winternitz_seed(winternitz_seed)?;
 
-        let musig2 = MuSig2Signer::new(keystore.store_clone());
+        let musig2 = MuSig2Signer::new(store);
 
         Ok(KeyManager {
             secp,
@@ -2533,7 +2539,7 @@ mod tests {
     fn create_key_manager_from_config(
         config: &TestKeyManagerConfig,
         keystore: KeyStore,
-        _store: Rc<Storage>,
+        store: Rc<Storage>,
     ) -> Result<KeyManager, KeyManagerError> {
         use crate::errors::ConfigError;
         use crate::musig2::musig::MuSig2Signer;
@@ -2574,7 +2580,7 @@ mod tests {
         )?;
         keystore.store_winternitz_seed(winternitz_seed)?;
 
-        let musig2 = MuSig2Signer::new(keystore.store_clone());
+        let musig2 = MuSig2Signer::new(store);
 
         Ok(KeyManager {
             secp,

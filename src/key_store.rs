@@ -23,6 +23,7 @@ impl KeyStore {
         Self { store }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn store_clone(&self) -> Rc<Storage> {
         Rc::clone(&self.store)
     }

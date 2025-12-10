@@ -1,12 +1,8 @@
 #[cfg(test)]
 mod winternitz_tests {
-    
-
-    
 
     use crate::winternitz::{
-        checksum_length, message_digits_length, to_checksummed_message,
-        Winternitz, WinternitzType,
+        checksum_length, message_digits_length, to_checksummed_message, Winternitz, WinternitzType,
     };
 
     fn create_master_secret() -> Vec<u8> {

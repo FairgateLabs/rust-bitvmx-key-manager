@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod winternitz_tests {
-    use crate::winternitz::SHA256_SIZE;
+    
 
-    use super::*;
+    
 
     use crate::winternitz::{
-        calculate_checksum, checksum_length, message_digits_length, to_checksummed_message,
+        checksum_length, message_digits_length, to_checksummed_message,
         Winternitz, WinternitzType,
     };
 

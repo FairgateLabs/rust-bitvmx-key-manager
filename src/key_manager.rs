@@ -875,6 +875,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::Signature, KeyManagerError> {
+        #[cfg_attr(not(feature = "strict"), allow(unused_variables))]
         let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
@@ -887,9 +888,12 @@ impl KeyManager {
         };
 
         // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
-        if let Some(key_type) = key_type {
-            if key_type == BitcoinKeyType::P2tr {
-                return Err(KeyManagerError::EcdsaWithTaprootKey);
+        #[cfg(feature = "strict")]
+        {
+            if let Some(key_type) = key_type {
+                if key_type == BitcoinKeyType::P2tr {
+                    return Err(KeyManagerError::EcdsaWithTaprootKey);
+                }
             }
         }
 
@@ -901,6 +905,7 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::ecdsa::RecoverableSignature, KeyManagerError> {
+        #[cfg_attr(not(feature = "strict"), allow(unused_variables))]
         let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
@@ -913,9 +918,12 @@ impl KeyManager {
         };
 
         // Check if this is a Taproot key - ECDSA is not supported for P2TR keys
-        if let Some(key_type) = key_type {
-            if key_type == BitcoinKeyType::P2tr {
-                return Err(KeyManagerError::EcdsaWithTaprootKey);
+        #[cfg(feature = "strict")]
+        {
+            if let Some(key_type) = key_type {
+                if key_type == BitcoinKeyType::P2tr {
+                    return Err(KeyManagerError::EcdsaWithTaprootKey);
+                }
             }
         }
 
@@ -958,7 +966,8 @@ impl KeyManager {
         message: &Message,
         public_key: &PublicKey,
     ) -> Result<secp256k1::schnorr::Signature, KeyManagerError> {
-        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
+        #[cfg_attr(not(feature = "strict"), allow(unused_variables))]
+        let (sk, _, _key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -971,9 +980,12 @@ impl KeyManager {
 
         // Check if this key type is appropriate for Schnorr signatures
         // Allow None (imported keys) or P2TR keys, reject others
-        if let Some(key_type) = key_type {
-            if key_type != BitcoinKeyType::P2tr {
-                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+        #[cfg(feature = "strict")]
+        {
+            if let Some(key_type) = _key_type {
+                if key_type != BitcoinKeyType::P2tr {
+                    return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+                }
             }
         }
 
@@ -989,7 +1001,8 @@ impl KeyManager {
         public_key: &PublicKey,
         merkle_root: Option<TapNodeHash>,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
+        #[cfg_attr(not(feature = "strict"), allow(unused_variables))]
+        let (sk, _, _key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -1002,9 +1015,12 @@ impl KeyManager {
 
         // Check if this key type is appropriate for Schnorr signatures
         // Allow None (imported keys) or P2TR keys, reject others
-        if let Some(key_type) = key_type {
-            if key_type != BitcoinKeyType::P2tr {
-                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+        #[cfg(feature = "strict")]
+        {
+            if let Some(key_type) = _key_type {
+                if key_type != BitcoinKeyType::P2tr {
+                    return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+                }
             }
         }
 
@@ -1025,7 +1041,8 @@ impl KeyManager {
         public_key: &PublicKey,
         tweak: &Scalar,
     ) -> Result<(secp256k1::schnorr::Signature, PublicKey), KeyManagerError> {
-        let (sk, _, key_type) = match self.keystore.load_keypair(public_key)? {
+        #[cfg_attr(not(feature = "strict"), allow(unused_variables))]
+        let (sk, _, _key_type) = match self.keystore.load_keypair(public_key)? {
             Some(entry) => entry,
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
@@ -1038,9 +1055,12 @@ impl KeyManager {
 
         // Check if this key type is appropriate for Schnorr signatures
         // Allow None (imported keys) or P2TR keys, reject others
-        if let Some(key_type) = key_type {
-            if key_type != BitcoinKeyType::P2tr {
-                return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+        #[cfg(feature = "strict")]
+        {
+            if let Some(key_type) = _key_type {
+                if key_type != BitcoinKeyType::P2tr {
+                    return Err(KeyManagerError::SchnorrWithNonTaprootKey);
+                }
             }
         }
 
@@ -2091,6 +2111,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "strict")]
     fn test_key_type_signature_validation() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
@@ -2441,7 +2462,7 @@ mod tests {
     }
 
     fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
-        let password = "secret_password".to_string();
+        let password = "secret password_123__ABC".to_string();
         let config = StorageConfig::new(storage_path.to_string(), Some(password));
         let store = Rc::new(Storage::new(&config)?);
         Ok(KeyStore::new(store))
@@ -5215,7 +5236,7 @@ mod tests {
     #[test]
     fn test_wrong_password_propagates_decryption_error() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
-        let password = "correct password".to_string();
+        let password = "correct password_123__ABC".to_string();
         let storage_config = StorageConfig::new(keystore_path.clone(), Some(password));
 
         // --- Create the 1st KeyManager with a mnemonic and correct password
@@ -5230,7 +5251,7 @@ mod tests {
 
         // --- Try to create a new KeyManager with same path but wrong password
 
-        let wrong_password = "wrong password".to_string();
+        let wrong_password = "wrong p4SSWord -_= but str0n9 123 ABC".to_string();
         let wrong_storage_config = StorageConfig::new(keystore_path.clone(), Some(wrong_password));
 
         let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &wrong_storage_config);

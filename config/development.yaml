@@ -4,5 +4,5 @@ key_manager:
   mnemonic_passphrase: ""
 
 storage:
-  password: "secret_password"
+  password: "secret password_123__ABC"
   path: "/tmp/storage.db"

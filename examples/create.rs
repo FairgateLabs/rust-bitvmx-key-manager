@@ -13,7 +13,7 @@ pub fn create_key_manager_example(name: &str) -> KeyManager {
     // --- Creating a KeyManager
     let network = Network::Regtest;
     let keystore_path = format!("./examples/storage/examples-keystore_{}.db", name);
-    let password = "secret password".to_string();
+    let password = "secret password_123__ABC".to_string();
 
     let storage_config = StorageConfig::new(keystore_path, Some(password));
 

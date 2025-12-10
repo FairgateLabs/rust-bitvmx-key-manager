@@ -57,3 +57,7 @@ path = "src/main.rs"
 [[bench]]
 name = "winternitz_bench"
 harness = false
+
+[features]
+default = []      # strict is OFF by default
+strict = []

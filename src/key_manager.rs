@@ -2627,6 +2627,7 @@ mod tests {
         cleanup_storage(store_path);
     }
 
+    #[allow(dead_code)]
     fn create_test_config_and_run_with_cleanup<F>(
         network: &str,
         mnemonic: Option<String>,
@@ -2693,6 +2694,7 @@ mod tests {
     }
 
     // Helper macro to reduce boilerplate for error test cases
+    #[allow(unused_macros)]
     macro_rules! assert_config_error {
         ($network:expr, $mnemonic:expr, $passphrase:expr, $expected_error:pat) => {
             create_test_config_and_run_with_cleanup(

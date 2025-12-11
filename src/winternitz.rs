@@ -533,6 +533,7 @@ impl Winternitz {
             checksum_size,
             derivation_index,
         )?;
+        // Dev note: we do not storage private winternitz keys because storage scalability reasons
         let public_key = WinternitzPublicKey::from(private_key)?;
 
         Ok(public_key)

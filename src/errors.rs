@@ -37,6 +37,15 @@ pub enum KeyManagerError {
     #[error("Invalid private key")]
     InvalidPrivateKey,
 
+    #[error("Invalid Mnemonic")]
+    InvalidMnemonic,
+
+    #[error("Mnemonic mismatch: {0}")]
+    MnemonicMismatch(String),
+
+    #[error("Mnemonic passphrase mismatch: {0}")]
+    MnemonicPassphraseMismatch(String),
+
     #[error("Failed to open secure storage")]
     OpenError,
 
@@ -49,11 +58,29 @@ pub enum KeyManagerError {
     #[error("Failed to decode public key")]
     FailedToDecodePublicKey(#[from] bitcoin::key::FromSliceError),
 
+    #[error("Failed to load Mnemonic from key store")]
+    MnemonicNotFound,
+
+    #[error("Failed to load Next keypair index from key store")]
+    NextKeypairIndexNotFound,
+
+    #[error("Failed to load Next Winternitz index from key store")]
+    NextWinternitzIndexNotFound,
+
+    #[error("Failed to load Mnemonic passphrase from key store")]
+    MnemonicPassphraseNotFound,
+
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
 
-    #[error("Failed to load the BIP32 key derivation seed from key store")]
+    #[error("Failed to load the BIP39 key derivation seed from key store")]
     KeyDerivationSeedNotFound,
+
+    #[error("Corrupted BIP39 key derivation seed")]
+    CorruptedKeyDerivationSeed,
+
+    #[error("Corrupted Winternitz seed")]
+    CorruptedWinternitzSeed,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,
@@ -64,8 +91,20 @@ pub enum KeyManagerError {
     #[error("Rsa Error: {0}")]
     RsaError(#[from] RSAError),
 
-    #[error("Rsa index not found: {0}")]
-    RsaKeyIndexNotFound(usize),
+    #[error("Rsa key not found")]
+    RsaKeyNotFound,
+
+    #[error("Invalid RSA key size: {0}")]
+    InvalidRSAKeySize(String),
+
+    #[error("Cannot use ECDSA with Taproot (P2TR) keys. Use Schnorr signature instead")]
+    EcdsaWithTaprootKey,
+
+    #[error("Cannot use Schnorr signature with non-Taproot keys. Use ECDSA signature instead")]
+    SchnorrWithNonTaprootKey,
+
+    #[error("Failed to generate nonce seed using HKDF")]
+    FailedToGenerateNonceSeed,
 }
 
 #[derive(Error, Debug)]
@@ -102,6 +141,9 @@ pub enum ConfigError {
 
     #[error("Key derivation seed is invalid")]
     InvalidKeyDerivationSeed,
+
+    #[error("Mnemonic sentence is invalid")]
+    InvalidMnemonicSentence,
 
     #[error("Network is invalid")]
     InvalidNetwork,

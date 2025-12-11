@@ -1,0 +1,2 @@
+[alias]
+buildall = "test --no-run --all-targets --benches --release"

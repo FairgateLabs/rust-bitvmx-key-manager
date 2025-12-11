@@ -40,7 +40,7 @@ rsa = "0.9.8"
 sha2 = "0.10"
 hkdf = "0.12"
 base64 = "0.22.0"
-rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", tag = "v0.1.1-review.1" }
+rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", branch = "v.0.0.2" }
 bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", branch = "v.0.0.2" }
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 strum = { version = "0.26", features = ["derive"] }

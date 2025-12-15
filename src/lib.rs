@@ -28,12 +28,14 @@ pub fn create_key_manager_from_config(
     storage_config: &StorageConfig,
 ) -> Result<KeyManager, KeyManagerError> {
     let mnemonic = match &key_manager_config.mnemonic_sentence {
-        Some(mnemonic_sentence) => Some(decode_key_derivation_seed(mnemonic_sentence)?),
+        Some(mnemonic_sentence_secret) => Some(decode_key_derivation_seed(
+            mnemonic_sentence_secret.expose_secret(),
+        )?),
         None => None,
     };
 
     let passphrase = match &key_manager_config.mnemonic_passphrase {
-        Some(pass) => Some(pass.clone()),
+        Some(pass) => Some(pass.expose_secret().to_owned()),
         None => None,
     };
 

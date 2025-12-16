@@ -155,10 +155,8 @@ impl KeyManager {
         });
 
 
-        // TODO zeroize stored seed
         match keystore.load_key_derivation_seed() {
             Ok(stored_seed) => {
-                let stored_seed = Zeroizing::new(stored_seed);
                 // Validate that the stored seed matches what would be generated from mnemonic + passphrase
                 if *stored_seed != *expected_key_derivation_seed {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
@@ -175,17 +173,20 @@ impl KeyManager {
 
         // Validate or generate Winternitz seed - similar to key derivation seed validation
         // The Winternitz seed is derived from the key derivation seed, so we validate it to detect corruption.
-        let expected_winternitz_seed = Self::derive_winternitz_master_seed(
-            secp.clone(),
-            &keystore.load_key_derivation_seed()?,
-            network,
-            Self::ACCOUNT_DERIVATION_INDEX,
-        )?;
+        let expected_winternitz_seed = {
+            let key_derivation_seed = keystore.load_key_derivation_seed()?;
+            Self::derive_winternitz_master_seed(
+                secp.clone(),
+                & *key_derivation_seed,
+                network,
+                Self::ACCOUNT_DERIVATION_INDEX,
+            )?
+        };
 
         match keystore.load_winternitz_seed() {
             Ok(stored_winternitz_seed) => {
                 // Validate that the stored Winternitz seed matches what would be derived from key derivation seed
-                if stored_winternitz_seed != expected_winternitz_seed {
+                if *stored_winternitz_seed != expected_winternitz_seed {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
@@ -486,7 +487,7 @@ impl KeyManager {
     // Generate account-level xpub (hardened up to account)
     pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
@@ -523,7 +524,7 @@ impl KeyManager {
         key_type: BitcoinKeyType,
     ) -> Result<String, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
@@ -551,7 +552,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -582,7 +583,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -738,7 +739,7 @@ impl KeyManager {
 
         let winternitz = winternitz::Winternitz::new();
         let public_key = winternitz.generate_public_key(
-            &master_secret,
+            & *master_secret,
             key_type,
             message_digits_length,
             checksum_size,
@@ -807,7 +808,7 @@ impl KeyManager {
         for index in initial_index..initial_index + number_of_keys {
             let winternitz = winternitz::Winternitz::new();
             let public_key = winternitz.generate_public_key(
-                &master_secret,
+                & *master_secret,
                 key_type,
                 message_digits_length,
                 checksum_size,
@@ -1116,7 +1117,7 @@ impl KeyManager {
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(
-            &master_secret,
+            & *master_secret,
             key_type,
             message_size,
             checksum_size,
@@ -1797,10 +1798,10 @@ mod tests {
         }
 
         let loaded_winternitz_seed = keystore.load_winternitz_seed()?;
-        assert!(loaded_winternitz_seed == winternitz_seed);
+        assert!(*loaded_winternitz_seed == winternitz_seed);
 
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
-        assert!(loaded_key_derivation_seed == key_derivation_seed);
+        assert!(*loaded_key_derivation_seed == key_derivation_seed);
 
         let loaded_mnemonic = keystore.load_mnemonic()?;
         assert!(loaded_mnemonic == random_mnemonic);
@@ -5312,7 +5313,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(REGTEST, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(REGTEST, & *key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5555,7 +5556,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Testnet, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Testnet, & *key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5796,7 +5797,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Bitcoin, & *key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);

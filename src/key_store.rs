@@ -158,9 +158,9 @@ impl KeyStore {
         Ok(())
     }
 
-    pub fn load_winternitz_seed(&self) -> Result<[u8; 32], KeyManagerError> {
+    pub fn load_winternitz_seed(&self) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
         match self.store.get(Self::WINTERNITZ_KEY)? {
-            Some(entry) => Ok(entry),
+            Some(entry) => Ok(Zeroizing::new(entry)),
             None => Err(KeyManagerError::WinternitzSeedNotFound),
         }
     }
@@ -173,7 +173,7 @@ impl KeyStore {
         Ok(())
     }
 
-    pub fn load_key_derivation_seed(&self) -> Result<[u8; 64], KeyManagerError> {
+    pub fn load_key_derivation_seed(&self) -> Result<Zeroizing<[u8; 64]>, KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
         let encoded: String = match self.store.get(Self::KEY_DERIVATION_SEED_KEY)? {
             Some(encoded) => encoded,
@@ -190,7 +190,7 @@ impl KeyStore {
 
         let mut seed = [0u8; 64];
         seed.copy_from_slice(&decoded);
-        Ok(seed)
+        Ok(Zeroizing::new(seed))
     }
 
     pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {

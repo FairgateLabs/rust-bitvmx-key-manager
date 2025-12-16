@@ -95,6 +95,7 @@ impl KeyManager {
                     tracing::info!("Using stored mnemonic from storage");
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
+                // Mnemonic is dropped here to minimize time in memory
             }
             Err(KeyManagerError::MnemonicNotFound) => {
                 // No mnemonic in storage, store the provided one or generate a new one
@@ -120,7 +121,7 @@ impl KeyManager {
                 // Passphrase found in storage
                 if let Some(provided_passphrase) = &mnemonic_passphrase {
                     // Both stored and provided passphrases exist - they must match
-                    if stored_passphrase != *provided_passphrase {
+                    if *stored_passphrase != *provided_passphrase {
                         return Err(KeyManagerError::MnemonicPassphraseMismatch(
                             "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
                         ));
@@ -136,7 +137,7 @@ impl KeyManager {
                 // No passphrase in storage, store the provided one or use empty string as default
                 let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
                 keystore.store_mnemonic_passphrase(&passphrase)?;
-                passphrase
+                Zeroizing::new(passphrase)
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
         };
@@ -146,18 +147,26 @@ impl KeyManager {
         // Since these values can be regenerated from the mnemonic and passphrase, we validate the stored seed matches
         // the expected value to detect potential corruption.
 
-        let expected_key_derivation_seed = keystore.load_mnemonic()?.to_seed(&mnemonic_passphrase);
+        let expected_key_derivation_seed = Zeroizing::new({
+            let mnemonic = keystore.load_mnemonic()?;
+            let seed = mnemonic.to_seed(& *mnemonic_passphrase);
+            // Mnemonic dropped here to minimize time in memory
+            seed
+        });
 
+
+        // TODO zeroize stored seed
         match keystore.load_key_derivation_seed() {
             Ok(stored_seed) => {
+                let stored_seed = Zeroizing::new(stored_seed);
                 // Validate that the stored seed matches what would be generated from mnemonic + passphrase
-                if stored_seed != expected_key_derivation_seed {
+                if *stored_seed != *expected_key_derivation_seed {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
             }
             Err(KeyManagerError::KeyDerivationSeedNotFound) => {
                 // No seed stored, generate and store it
-                keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
+                keystore.store_key_derivation_seed(*expected_key_derivation_seed)?;
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
         }

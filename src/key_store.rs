@@ -5,6 +5,7 @@ use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
+use zeroize::Zeroizing;
 
 pub struct KeyStore {
     store: Rc<Storage>,
@@ -131,11 +132,11 @@ impl KeyStore {
     }
 
     pub fn load_mnemonic(&self) -> Result<Mnemonic, KeyManagerError> {
-        let phrase: String = match self.store.get(Self::MNEMONIC_KEY)? {
-            Some(phrase) => phrase,
+        let phrase: Zeroizing<String> = match self.store.get(Self::MNEMONIC_KEY)? {
+            Some(phrase) => Zeroizing::new(phrase),
             None => return Err(KeyManagerError::MnemonicNotFound),
         };
-        let m = Mnemonic::parse(&phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
+        let m = Mnemonic::parse(& *phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
         Ok(m)
     }
 
@@ -145,9 +146,9 @@ impl KeyStore {
         Ok(())
     }
 
-    pub fn load_mnemonic_passphrase(&self) -> Result<String, KeyManagerError> {
+    pub fn load_mnemonic_passphrase(&self) -> Result<Zeroizing<String>, KeyManagerError> {
         match self.store.get(Self::MNEMONIC_PASSPHRASE_KEY)? {
-            Some(passphrase) => Ok(passphrase),
+            Some(passphrase) => Ok(Zeroizing::new(passphrase)),
             None => Err(KeyManagerError::MnemonicPassphraseNotFound),
         }
     }

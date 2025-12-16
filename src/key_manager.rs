@@ -11,6 +11,7 @@ use bitcoin::{
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use itertools::izip;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
@@ -100,9 +101,9 @@ impl KeyManager {
                 match mnemonic {
                     Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
                     None => {
-                        let mut entropy = [0u8; 32]; // 256 bits for 24 words
-                        secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
-                        let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+                        let mut entropy = Zeroizing::new([0u8; 32]); // 256 bits for 24 words, automatically zeroized when dropped
+                        secp256k1::rand::thread_rng().fill_bytes(&mut *entropy);
+                        let random_mnemonic = Mnemonic::from_entropy(& *entropy).unwrap();
                         keystore.store_mnemonic(&random_mnemonic)?;
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"

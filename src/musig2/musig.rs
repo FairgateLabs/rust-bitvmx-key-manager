@@ -1251,7 +1251,7 @@ impl MuSig2Signer {
         network: Network,
     ) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
         let secp = musig2::secp256k1::Secp256k1::new();
-        let mut partial_secret_keys: Vec<Scalar> = Vec::new(); // meme safety is responsibility fo Scalar type
+        let mut partial_secret_keys: Vec<Scalar> = Vec::new(); // Note: Scalar type is responsible for its own memory safety
         let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
 
         for partial_key_bytes in partial_keys_bytes.iter() {
@@ -1265,8 +1265,10 @@ impl MuSig2Signer {
         let aggregated_secret_key: musig2::secp256k1::SecretKey =
             ctx.aggregated_seckey(partial_secret_keys)?;
         let aggregated_public_key = to_bitcoin_pubkey(aggregated_secret_key.public_key(&secp))?;
-        let aggregated_seckey =
-            SecretKey::from_str(&aggregated_secret_key.display_secret().to_string())?;
+
+        // Zeroize the string representation of the secret key after use
+        let secret_display = Zeroizing::new(aggregated_secret_key.display_secret().to_string());
+        let aggregated_seckey = SecretKey::from_str(&secret_display)?;
         let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
 
         Ok((aggregated_private_key, aggregated_public_key))

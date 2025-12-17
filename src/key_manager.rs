@@ -260,16 +260,17 @@ impl KeyManager {
         Ok(public_key)
     }
 
-    // TODO zeroize partial keys strings after use
     pub fn import_partial_secret_keys(
         &self,
-        partial_keys: Vec<String>,
+        partial_keys: Zeroizing<Vec<String>>,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
-        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
-            .into_iter()
-            .map(|key| SecretKey::from_str(&key).map(|sk| sk.secret_bytes().to_vec()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let partial_keys_bytes = Zeroizing::new(
+            partial_keys
+                .iter()
+                .map(|key| SecretKey::from_str(key).map(|sk| sk.secret_bytes().to_vec()))
+                .collect::<Result<Vec<Vec<u8>>, _>>()?
+        );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
         if partial_keys_bytes.is_empty() {
@@ -281,19 +282,21 @@ impl KeyManager {
             .aggregate_private_key(partial_keys_bytes, network)?;
         // should we assume p2tr? always to use them with musig2 and schnorr
         self.keystore.store_keypair(private_key, public_key, None)?;
+
         Ok(public_key)
     }
 
-    // TODO zeroize partial keys strings after use
     pub fn import_partial_private_keys(
         &self,
-        partial_keys: Vec<String>,
+        partial_keys: Zeroizing<Vec<String>>,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
-        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
-            .into_iter()
-            .map(|key| PrivateKey::from_str(&key).map(|pk| pk.to_bytes().to_vec()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let partial_keys_bytes = Zeroizing::new(
+            partial_keys
+                .iter()
+                .map(|key| PrivateKey::from_str(key).map(|pk| pk.to_bytes().to_vec()))
+                .collect::<Result<Vec<Vec<u8>>, _>>()?
+        );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
         if partial_keys_bytes.is_empty() {
@@ -4591,10 +4594,10 @@ mod tests {
             let secret_key_1 = SecretKey::new(&mut rng);
             let secret_key_2 = SecretKey::new(&mut rng);
 
-            let partial_secret_keys = vec![
+            let partial_secret_keys = Zeroizing::new(vec![
                 secret_key_1.display_secret().to_string(),
                 secret_key_2.display_secret().to_string(),
-            ];
+            ]);
 
             // Import and aggregate partial secret keys
             let aggregated_public_key_1 =
@@ -4623,12 +4626,11 @@ mod tests {
             let secret_key_4 = SecretKey::new(&mut rng);
             let secret_key_5 = SecretKey::new(&mut rng);
 
-            let partial_secret_keys_3 = vec![
+            let partial_secret_keys_3 = Zeroizing::new(vec![
                 secret_key_3.display_secret().to_string(),
                 secret_key_4.display_secret().to_string(),
                 secret_key_5.display_secret().to_string(),
-            ];
-
+            ]);
             let aggregated_public_key_2 =
                 key_manager.import_partial_secret_keys(partial_secret_keys_3, REGTEST)?;
 
@@ -4641,7 +4643,7 @@ mod tests {
             let private_key_1 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
             let private_key_2 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
 
-            let partial_private_keys = vec![private_key_1.to_wif(), private_key_2.to_wif()];
+            let partial_private_keys = Zeroizing::new(vec![private_key_1.to_wif(), private_key_2.to_wif()]);
 
             let aggregated_public_key_3 =
                 key_manager.import_partial_private_keys(partial_private_keys, REGTEST)?;
@@ -4652,10 +4654,10 @@ mod tests {
                 .expect("WIF-based aggregated keypair should exist in keystore");
 
             // Test Case 4: Test with different networks
-            let mainnet_partial_keys = vec![
+            let mainnet_partial_keys = Zeroizing::new(vec![
                 PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
                 PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
-            ];
+            ]);
 
             let mainnet_aggregated = key_manager
                 .import_partial_private_keys(mainnet_partial_keys, bitcoin::Network::Bitcoin)?;
@@ -4717,10 +4719,10 @@ mod tests {
                 .expect("Mainnet aggregated key should exist");
 
             // Test Case 8: Test idempotent behavior - same partial keys should produce same result
-            let duplicate_partial_keys = vec![
+            let duplicate_partial_keys = Zeroizing::new(vec![
                 secret_key_1.display_secret().to_string(),
                 secret_key_2.display_secret().to_string(),
-            ];
+            ]);
 
             let duplicate_aggregated =
                 key_manager.import_partial_secret_keys(duplicate_partial_keys, REGTEST)?;
@@ -4750,7 +4752,7 @@ mod tests {
          */
         run_test_with_key_manager(|key_manager| -> Result<(), KeyManagerError> {
             // Test Case 1: Try with empty keys list
-            let empty_keys: Vec<String> = vec![];
+            let empty_keys: Zeroizing<Vec<String>> = Zeroizing::new(vec![]);
             let result1 = key_manager.import_partial_secret_keys(empty_keys, REGTEST);
             match result1 {
                 Err(KeyManagerError::InvalidPrivateKey) => (),
@@ -4763,7 +4765,7 @@ mod tests {
             // Test Case 2: Try to aggregate a single key (musig2 accepts single-key aggregation)
             let mut rng = secp256k1::rand::thread_rng();
             let secret_key = secp256k1::SecretKey::new(&mut rng);
-            let single_key = vec![secret_key.display_secret().to_string()];
+            let single_key = Zeroizing::new(vec![secret_key.display_secret().to_string()]);
 
             let result2 = key_manager.import_partial_secret_keys(single_key.clone(), REGTEST);
             // musig2 may accept a single key and return a valid aggregated pubkey; assert success
@@ -4781,78 +4783,78 @@ mod tests {
             );
 
             // Test Case 3: Invalid hex in partial secret keys
-            let invalid_hex_keys = vec![
+            let invalid_hex_keys = Zeroizing::new(vec![
                 "invalid_hex_string".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result3 = key_manager.import_partial_secret_keys(invalid_hex_keys, REGTEST);
             assert!(result3.is_err(), "Invalid hex should fail parsing");
 
             // Test Case 4: Invalid WIF in partial private keys
-            let invalid_wif_keys = vec![
+            let invalid_wif_keys = Zeroizing::new(vec![
                 "invalid_wif_string".to_string(),
                 "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294LvTJ".to_string(),
-            ];
+            ]);
             let result4 = key_manager.import_partial_private_keys(invalid_wif_keys, REGTEST);
             assert!(result4.is_err(), "Invalid WIF should fail parsing");
 
             // Test Case 5: Mixed valid and invalid keys
-            let mixed_keys = vec![
+            let mixed_keys = Zeroizing::new(vec![
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
                 "not_a_valid_key".to_string(),
                 "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
-            ];
+            ]);
             let result5 = key_manager.import_partial_secret_keys(mixed_keys, REGTEST);
             assert!(result5.is_err(), "Mixed valid/invalid keys should fail");
 
             // Test Case 6: All zero secret keys (invalid for cryptography)
-            let zero_keys = vec![
+            let zero_keys = Zeroizing::new(vec![
                 "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
                 "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            ];
+            ]);
             let result6 = key_manager.import_partial_secret_keys(zero_keys, REGTEST);
             assert!(result6.is_err(), "All-zero keys should fail");
 
             // Test Case 7: Keys above secp256k1 curve order
-            let above_curve_keys = vec![
+            let above_curve_keys = Zeroizing::new(vec![
                 "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result7 = key_manager.import_partial_secret_keys(above_curve_keys, REGTEST);
             assert!(result7.is_err(), "Keys above curve order should fail");
 
             // Test Case 8: Wrong length hex strings
-            let wrong_length_keys = vec![
+            let wrong_length_keys = Zeroizing::new(vec![
                 "0123456789abcdef".to_string(), // Too short
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(), // Correct
-            ];
+            ]);
             let result8 = key_manager.import_partial_secret_keys(wrong_length_keys, REGTEST);
             assert!(result8.is_err(), "Wrong length keys should fail");
 
             // Test Case 9: Empty strings in partial keys
-            let empty_string_keys = vec![
+            let empty_string_keys = Zeroizing::new(vec![
                 "".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result9 = key_manager.import_partial_secret_keys(empty_string_keys, REGTEST);
             assert!(result9.is_err(), "Empty string keys should fail");
 
             // Test Case 10: Special characters and whitespace
-            let special_char_keys = vec![
+            let special_char_keys = Zeroizing::new(vec![
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
                 "fedcba9876543210 fedcba9876543210 fedcba9876543210 fedcba9876543210".to_string(), // With spaces
-            ];
+            ]);
             let result10 = key_manager.import_partial_secret_keys(special_char_keys, REGTEST);
             assert!(result10.is_err(), "Keys with spaces should fail");
 
             // Test Case 11: Too many partial keys (test system limits)
-            let mut too_many_keys = Vec::new();
+            let mut too_many_keys = Zeroizing::new(Vec::new());
             let mut rng = secp256k1::rand::thread_rng();
 
             for _ in 0..100 {
                 // Create 100 keys to test limits
                 let secret_key = SecretKey::new(&mut rng);
-                too_many_keys.push(secret_key.display_secret().to_string());
+                (*too_many_keys).push(secret_key.display_secret().to_string());
             }
 
             let _result11 = key_manager.import_partial_secret_keys(too_many_keys, REGTEST);
@@ -4863,10 +4865,10 @@ mod tests {
             // Try a valid aggregation to ensure the KeyManager still works
             let valid_secret_1 = SecretKey::new(&mut rng);
             let valid_secret_2 = SecretKey::new(&mut rng);
-            let valid_keys = vec![
+            let valid_keys = Zeroizing::new(vec![
                 valid_secret_1.display_secret().to_string(),
                 valid_secret_2.display_secret().to_string(),
-            ];
+            ]);
 
             let valid_result = key_manager.import_partial_secret_keys(valid_keys, REGTEST);
             assert!(

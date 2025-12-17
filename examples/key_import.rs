@@ -45,10 +45,8 @@ pub fn import_key_to_key_manager_example() {
         .unwrap();
     println!("Imported public key 2: {} of type {:?}", pubkey, key2_type);
 
-
-    // TODO zeroize
-    let private_keys: Vec<String> =
-        vec![(*private_key_wif_z).clone(), (*private_key_wif2_z).clone()];
+    let private_keys: Zeroizing<Vec<String>> =
+        Zeroizing::new(vec![(*private_key_wif_z).clone(), (*private_key_wif2_z).clone()]);
 
     let pubkey = key_manager
         .import_partial_private_keys(private_keys, network)
@@ -58,11 +56,11 @@ pub fn import_key_to_key_manager_example() {
         pubkey
     );
 
-    let secret_keys: Vec<String> = vec![
+    let secret_keys: Zeroizing<Vec<String>> = Zeroizing::new(vec![
         secret_key.display_secret().to_string(),
         secret_key2.display_secret().to_string(),
-    ];
-    // TODO zeroize
+    ]);
+
     let pubkey = key_manager
         .import_partial_secret_keys(secret_keys, network)
         .unwrap();

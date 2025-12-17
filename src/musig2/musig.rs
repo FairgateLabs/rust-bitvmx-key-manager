@@ -19,7 +19,6 @@ use super::{
     types::{MessageId, Musig2MessageData, Musig2SessionData},
 };
 
-// TODO zeroize check
 
 /// Keys used for storing data in the key-value store
 enum StoreKey {
@@ -1248,15 +1247,15 @@ impl MuSig2Signer {
 
     pub(crate) fn aggregate_private_key(
         &self,
-        partial_keys_bytes: Vec<Vec<u8>>,
+        partial_keys_bytes: Zeroizing<Vec<Vec<u8>>>,
         network: Network,
     ) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
         let secp = musig2::secp256k1::Secp256k1::new();
-        let mut partial_secret_keys: Vec<Scalar> = Vec::new();
+        let mut partial_secret_keys: Vec<Scalar> = Vec::new(); // meme safety is responsibility fo Scalar type
         let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
 
-        for partial_key_bytes in partial_keys_bytes {
-            let scalar = Scalar::from_slice(&partial_key_bytes)?;
+        for partial_key_bytes in partial_keys_bytes.iter() {
+            let scalar = Scalar::from_slice(partial_key_bytes)?;
             let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, scalar.as_ref());
             partial_secret_keys.push(scalar);
             partial_public_keys.push(public_key);

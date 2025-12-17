@@ -1263,7 +1263,7 @@ impl KeyManager {
         &self,
         index: u32,
         public_key: PublicKey,
-    ) -> Result<[u8; 32], KeyManagerError> {
+    ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
         let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
@@ -1279,9 +1279,8 @@ impl KeyManager {
         // Salt: derived from public key to ensure different salts for different keys
         let salt = hashes::sha256::Hash::hash(&public_key.to_bytes()).to_byte_array();
 
-        // TODO zeroize this bytes
         // Input key material: secret key bytes
-        let ikm = sk.to_bytes();
+        let ikm = Zeroizing::new(sk.to_bytes()); // automatically zeroized when dropped
 
         // Context info: includes index and a domain separator
         let mut info = Vec::new();
@@ -1289,11 +1288,10 @@ impl KeyManager {
         info.extend_from_slice(&index.to_le_bytes());
 
         // Derive the nonce seed using HKDF-SHA256
-        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &(*ikm));
 
-        // TODO zeroize this bytes
-        let mut nonce_seed = [0u8; 32];
-        hkdf.expand(&info, &mut nonce_seed)
+        let mut nonce_seed = Zeroizing::new([0u8; 32]); // automatically zeroized when dropped and adjust for return type
+        hkdf.expand(&info, &mut *nonce_seed)
             .map_err(|_| KeyManagerError::FailedToGenerateNonceSeed)?;
 
         Ok(nonce_seed)
@@ -1462,7 +1460,7 @@ impl KeyManager {
         let index = self.musig2.get_index(aggregated_pubkey)?;
         let public_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
-        let nonce_seed: [u8; 32] = self
+        let nonce_seed: Zeroizing<[u8; 32]> = self
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 

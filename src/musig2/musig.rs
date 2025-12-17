@@ -6,6 +6,7 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
+use zeroize::Zeroizing;
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{debug, error};
@@ -17,6 +18,8 @@ use super::{
     helper::{to_bitcoin_pubkey, to_musig_pubkey},
     types::{MessageId, Musig2MessageData, Musig2SessionData},
 };
+
+// TODO zeroize check
 
 /// Keys used for storing data in the key-value store
 enum StoreKey {
@@ -383,7 +386,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
     ) -> Result<(), Musig2SignerError> {
         debug!(
-            "Aggregating nonces for aggregated pubkey: {} 
+            "Aggregating nonces for aggregated pubkey: {}
                 with nonces: {:?}",
             aggregated_pubkey.to_string(),
             pub_nonces_map
@@ -512,7 +515,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         partial_signatures_to_save: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
     ) -> Result<(), Musig2SignerError> {
         debug!(
-            "Saving partial signatures for aggregated pubkey: {} 
+            "Saving partial signatures for aggregated pubkey: {}
                 with partial signatures: {:?}",
             aggregated_pubkey.to_string(),
             partial_signatures_to_save
@@ -731,7 +734,7 @@ impl MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         id: &str,
         tweak: Option<musig2::secp256k1::Scalar>,
-        nonce_seed: [u8; 32],
+        nonce_seed: Zeroizing<[u8; 32]>,
     ) -> Result<(), Musig2SignerError> {
         match self.check_musig_data(aggregated_pubkey)? {
             true => {}
@@ -747,7 +750,7 @@ impl MuSig2Signer {
             return Ok(());
         }
 
-        let sec_nonce = musig2::SecNonceBuilder::new(nonce_seed)
+        let sec_nonce = musig2::SecNonceBuilder::new(*nonce_seed)
             .with_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
             .with_message(&message)
             .build();

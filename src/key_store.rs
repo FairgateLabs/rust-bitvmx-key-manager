@@ -48,8 +48,8 @@ impl KeyStore {
             None => Self::UNKNOWN_TYPE.to_string(),
         };
 
-        let typed_private_key = format!("{}:{}", key_type_str, private_key.to_string());
-        self.store.set(key, typed_private_key, None)?;
+        let typed_private_key = Zeroizing::new(format!("{}:{}", key_type_str, private_key.to_string()));
+        self.store.set(key, (*typed_private_key).clone(), None)?;
 
         Ok(())
     }
@@ -59,7 +59,7 @@ impl KeyStore {
         public_key: &PublicKey,
     ) -> Result<Option<(PrivateKey, PublicKey, Option<BitcoinKeyType>)>, KeyManagerError> {
         let key = public_key.to_string();
-        let data = self.store.get::<String, String>(key)?;
+        let data: Option<Zeroizing<String>> = self.store.get::<String, String>(key)?.map(Zeroizing::new);
 
         if let Some(private_key_str) = data {
             if let Some(colon_pos) = private_key_str.find(':') {
@@ -126,8 +126,8 @@ impl KeyStore {
     }
 
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
-        let phrase = mnemonic.to_string(); // normalized space-separated phrase
-        self.store.set(Self::MNEMONIC_KEY, phrase, None)?;
+        let phrase = Zeroizing::new(mnemonic.to_string()); // normalized space-separated phrase
+        self.store.set(Self::MNEMONIC_KEY, &(*phrase), None)?;
         Ok(())
     }
 
@@ -142,7 +142,7 @@ impl KeyStore {
 
     pub fn store_mnemonic_passphrase(&self, passphrase: &str) -> Result<(), KeyManagerError> {
         self.store
-            .set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase.to_string(), None)?;
+            .set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase, None)?;
         Ok(())
     }
 
@@ -169,23 +169,23 @@ impl KeyStore {
         // using base64 encoding to avoid 32 byte limitation in serde
         let mut encoded = general_purpose::STANDARD.encode(&(*seed));
         self.store
-            .set(Self::KEY_DERIVATION_SEED_KEY, encoded.clone(), None)?;
+            .set(Self::KEY_DERIVATION_SEED_KEY, &encoded, None)?;
         encoded.zeroize();
         Ok(())
     }
 
     pub fn load_key_derivation_seed(&self) -> Result<Zeroizing<[u8; 64]>, KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let mut encoded: String = match self.store.get(Self::KEY_DERIVATION_SEED_KEY)? {
+        let encoded: Option<Zeroizing<String>> = self.store.get::<String, String>(Self::KEY_DERIVATION_SEED_KEY.to_string())?.map(Zeroizing::new);
+
+        let encoded = match encoded {
             Some(encoded) => encoded,
             None => return Err(KeyManagerError::KeyDerivationSeedNotFound),
         };
 
-        let decoded = general_purpose::STANDARD
-            .decode(&encoded)
-            .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?;
-
-        encoded.zeroize(); // zeroize the encoded string after use
+        let decoded = Zeroizing::new(general_purpose::STANDARD
+            .decode(&*encoded)
+            .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?);
 
         if decoded.len() != 64 {
             return Err(KeyManagerError::CorruptedKeyDerivationSeed);
@@ -199,9 +199,8 @@ impl KeyStore {
 
     pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {
         let pubk = rsa_key.export_public_pem()?;
-        let mut privk = rsa_key.export_private_pem()?;
-        self.store.set(pubk, &privk, None)?;
-        privk.zeroize();
+        let privk = Zeroizing::new(rsa_key.export_private_pem()?);
+        self.store.set(pubk, &(*privk), None)?;
         Ok(())
     }
 
@@ -211,13 +210,13 @@ impl KeyStore {
         rsa_pub_key: RsaPublicKey,
     ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let mut privk = self.store.get::<String, String>(pubk)?;
-        if let Some(mut privk) = privk {
+        let privk: Option<Zeroizing<String>> = self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
+
+        if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
-            privk.zeroize();
             return Ok(Some(rsa_keypair));
         }
-        privk.zeroize();
+
         Ok(None)
     }
 }

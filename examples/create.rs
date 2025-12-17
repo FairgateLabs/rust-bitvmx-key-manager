@@ -1,6 +1,6 @@
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
-
 use key_manager::key_manager::KeyManager;
+use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
 
 #[allow(dead_code)]
@@ -15,7 +15,7 @@ pub fn create_key_manager_example(name: &str) -> KeyManager {
     let keystore_path = format!("./examples/storage/examples-keystore_{}.db", name);
     let password = "secret password_123__ABC".to_string();
 
-    let storage_config = StorageConfig::new(keystore_path, Some(password));
+    let storage_config = StorageConfig::new(keystore_path, Some(Secret::new(password)));
 
     let key_manager = KeyManager::new(
         network,

@@ -260,6 +260,7 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    // TODO zeroize partial keys strings after use
     pub fn import_partial_secret_keys(
         &self,
         partial_keys: Vec<String>,
@@ -283,6 +284,7 @@ impl KeyManager {
         Ok(public_key)
     }
 
+    // TODO zeroize partial keys strings after use
     pub fn import_partial_private_keys(
         &self,
         partial_keys: Vec<String>,
@@ -474,6 +476,7 @@ impl KeyManager {
         let account_xpriv =
             master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
 
+        // TODO zeroize this secret_32_bytes and return result
         let secret_32_bytes = account_xpriv.private_key.secret_bytes();
 
         // Return the private key bytes as master seed for Winternitz
@@ -1277,6 +1280,7 @@ impl KeyManager {
         // Salt: derived from public key to ensure different salts for different keys
         let salt = hashes::sha256::Hash::hash(&public_key.to_bytes()).to_byte_array();
 
+        // TODO zeroize this bytes
         // Input key material: secret key bytes
         let ikm = sk.to_bytes();
 
@@ -1287,6 +1291,8 @@ impl KeyManager {
 
         // Derive the nonce seed using HKDF-SHA256
         let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
+
+        // TODO zeroize this bytes
         let mut nonce_seed = [0u8; 32];
         hkdf.expand(&info, &mut nonce_seed)
             .map_err(|_| KeyManagerError::FailedToGenerateNonceSeed)?;
@@ -2522,12 +2528,14 @@ mod tests {
         Message::from_digest(digest)
     }
 
+    // TODO zeroize random bytes return type
     fn random_32bytes() -> [u8; 32] {
         let mut seed = [0u8; 32];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);
         seed
     }
 
+    // TODO zeroize random bytes return type
     fn random_64bytes() -> [u8; 64] {
         let mut seed = [0u8; 64];
         secp256k1::rand::thread_rng().fill_bytes(&mut seed);

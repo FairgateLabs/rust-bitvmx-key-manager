@@ -8,6 +8,8 @@ fn main() {
     import_key_to_key_manager_example();
 }
 
+// TODO zeroize the caller os responsible for zeroizing the private keys after use?
+
 pub fn import_key_to_key_manager_example() {
     let network = Network::Regtest;
     let key_manager = create_key_manager_example("key_import");

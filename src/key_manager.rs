@@ -164,7 +164,7 @@ impl KeyManager {
             }
             Err(KeyManagerError::KeyDerivationSeedNotFound) => {
                 // No seed stored, generate and store it
-                keystore.store_key_derivation_seed(*expected_key_derivation_seed)?;
+                keystore.store_key_derivation_seed(expected_key_derivation_seed)?;
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
         }
@@ -186,7 +186,7 @@ impl KeyManager {
         match keystore.load_winternitz_seed() {
             Ok(stored_winternitz_seed) => {
                 // Validate that the stored Winternitz seed matches what would be derived from key derivation seed
-                if *stored_winternitz_seed != expected_winternitz_seed {
+                if *stored_winternitz_seed != *expected_winternitz_seed {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
@@ -458,7 +458,7 @@ impl KeyManager {
         key_derivation_seed: &[u8],
         network: Network,
         account: u32,
-    ) -> Result<[u8; 32], KeyManagerError> {
+    ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
         // Dev note: Using coin type as its nice to differentiate by network, winternitz are OT,
         // so they should not be repeated across different networks, to avoid a kind of take from testnet and use in mainnet attack
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
@@ -476,8 +476,7 @@ impl KeyManager {
         let account_xpriv =
             master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
 
-        // TODO zeroize this secret_32_bytes and return result
-        let secret_32_bytes = account_xpriv.private_key.secret_bytes();
+        let secret_32_bytes = Zeroizing::new(account_xpriv.private_key.secret_bytes());
 
         // Return the private key bytes as master seed for Winternitz
         Ok(secret_32_bytes)
@@ -1525,6 +1524,7 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Address, Network, PrivateKey, PublicKey, XOnlyPublicKey,
     };
+    use zeroize::Zeroizing;
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
 
@@ -1776,13 +1776,13 @@ mod tests {
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_32bytes();
         let key_derivation_seed = random_64bytes();
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&(*random_32bytes())).unwrap();
 
         let config = StorageConfig::new(path.clone(), Some(password));
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
-        keystore.store_winternitz_seed(winternitz_seed)?;
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_winternitz_seed(winternitz_seed.clone())?;
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
         keystore.store_mnemonic(&random_mnemonic)?;
 
         for _ in 0..10 {
@@ -1804,10 +1804,10 @@ mod tests {
         }
 
         let loaded_winternitz_seed = keystore.load_winternitz_seed()?;
-        assert!(*loaded_winternitz_seed == winternitz_seed);
+        assert!(loaded_winternitz_seed == winternitz_seed);
 
         let loaded_key_derivation_seed = keystore.load_key_derivation_seed()?;
-        assert!(*loaded_key_derivation_seed == key_derivation_seed);
+        assert!(loaded_key_derivation_seed == key_derivation_seed);
 
         let loaded_mnemonic = keystore.load_mnemonic()?;
         assert!(loaded_mnemonic == random_mnemonic);
@@ -2444,7 +2444,7 @@ mod tests {
     fn test_random_key_manager(
         storage_config: StorageConfig,
     ) -> Result<KeyManager, KeyManagerError> {
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&*random_32bytes()).unwrap();
         let random_mnemonic_passphrase = generate_random_passphrase();
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
@@ -2492,7 +2492,7 @@ mod tests {
         use crate::musig2::musig::MuSig2Signer;
 
         // Create a simple test KeyManager using the provided keystore
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&*random_32bytes()).unwrap();
         let random_passphrase = generate_random_passphrase();
 
         // Store mnemonic and passphrase in keystore
@@ -2500,13 +2500,13 @@ mod tests {
         keystore.store_mnemonic_passphrase(&random_passphrase)?;
 
         // Generate and store seeds
-        let key_derivation_seed = random_mnemonic.to_seed(&random_passphrase);
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        let key_derivation_seed = zeroize::Zeroizing::new(random_mnemonic.to_seed(&random_passphrase));
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
 
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = KeyManager::derive_winternitz_master_seed(
             secp.clone(),
-            &key_derivation_seed,
+            &*key_derivation_seed,
             REGTEST,
             KeyManager::ACCOUNT_DERIVATION_INDEX,
         )?;
@@ -2528,17 +2528,17 @@ mod tests {
         Message::from_digest(digest)
     }
 
-    // TODO zeroize random bytes return type
-    fn random_32bytes() -> [u8; 32] {
-        let mut seed = [0u8; 32];
-        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+    fn random_32bytes() -> Zeroizing<[u8; 32]> {
+        // random bytes are usually sensitive, so we use Zeroizing to clear them from memory when done
+        let mut seed = Zeroizing::new([0u8; 32]);
+        secp256k1::rand::thread_rng().fill_bytes(&mut *seed);
         seed
     }
 
-    // TODO zeroize random bytes return type
-    fn random_64bytes() -> [u8; 64] {
-        let mut seed = [0u8; 64];
-        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+    fn random_64bytes() -> Zeroizing<[u8; 64]> {
+        // random bytes are usually sensitive, so we use Zeroizing to clear them from memory when done
+        let mut seed = Zeroizing::new([0u8; 64]);
+        secp256k1::rand::thread_rng().fill_bytes(&mut *seed);
         seed
     }
 
@@ -2596,7 +2596,7 @@ mod tests {
         let mnemonic = if let Some(ref mnemonic_str) = config.mnemonic {
             Mnemonic::parse(mnemonic_str).map_err(|_| KeyManagerError::InvalidMnemonic)?
         } else {
-            Mnemonic::from_entropy(&random_32bytes()).unwrap()
+            Mnemonic::from_entropy(&*random_32bytes()).unwrap()
         };
 
         // Get passphrase or use empty string
@@ -2607,14 +2607,14 @@ mod tests {
         keystore.store_mnemonic_passphrase(&passphrase)?;
 
         // Generate key derivation seed from mnemonic
-        let key_derivation_seed = mnemonic.to_seed(&passphrase);
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        let key_derivation_seed = zeroize::Zeroizing::new(mnemonic.to_seed(&passphrase));
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
 
         // Derive and store winternitz seed
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = KeyManager::derive_winternitz_master_seed(
             secp.clone(),
-            &key_derivation_seed,
+            &*key_derivation_seed,
             network,
             KeyManager::ACCOUNT_DERIVATION_INDEX,
         )?;
@@ -5181,7 +5181,7 @@ mod tests {
 
             // Store a corrupted seed (different from what the mnemonic would generate)
             let corrupted_seed = [0u8; 64]; // All zeros - definitely wrong
-            keystore.store_key_derivation_seed(corrupted_seed)?;
+            keystore.store_key_derivation_seed(zeroize::Zeroizing::new(corrupted_seed))?;
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to seed validation)
@@ -5232,7 +5232,7 @@ mod tests {
 
             // Store a corrupted Winternitz seed (different from what would be derived)
             let corrupted_winternitz_seed = [0u8; 32]; // All zeros - definitely wrong
-            keystore.store_winternitz_seed(corrupted_winternitz_seed)?;
+            keystore.store_winternitz_seed(zeroize::Zeroizing::new(corrupted_winternitz_seed))?;
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to Winternitz seed validation)

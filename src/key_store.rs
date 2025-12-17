@@ -5,7 +5,7 @@ use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct KeyStore {
     store: Rc<Storage>,
@@ -153,8 +153,8 @@ impl KeyStore {
         }
     }
 
-    pub fn store_winternitz_seed(&self, seed: [u8; 32]) -> Result<(), KeyManagerError> {
-        self.store.set(Self::WINTERNITZ_KEY, seed, None)?;
+    pub fn store_winternitz_seed(&self, seed: Zeroizing<[u8; 32]>) -> Result<(), KeyManagerError> {
+        self.store.set(Self::WINTERNITZ_KEY, *seed, None)?;
         Ok(())
     }
 
@@ -165,17 +165,18 @@ impl KeyStore {
         }
     }
 
-    pub fn store_key_derivation_seed(&self, seed: [u8; 64]) -> Result<(), KeyManagerError> {
+    pub fn store_key_derivation_seed(&self, seed: Zeroizing<[u8; 64]>) -> Result<(), KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let encoded = general_purpose::STANDARD.encode(&seed);
+        let mut encoded = general_purpose::STANDARD.encode(&(*seed));
         self.store
-            .set(Self::KEY_DERIVATION_SEED_KEY, encoded, None)?;
+            .set(Self::KEY_DERIVATION_SEED_KEY, encoded.clone(), None)?;
+        encoded.zeroize();
         Ok(())
     }
 
     pub fn load_key_derivation_seed(&self) -> Result<Zeroizing<[u8; 64]>, KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let encoded: String = match self.store.get(Self::KEY_DERIVATION_SEED_KEY)? {
+        let mut encoded: String = match self.store.get(Self::KEY_DERIVATION_SEED_KEY)? {
             Some(encoded) => encoded,
             None => return Err(KeyManagerError::KeyDerivationSeedNotFound),
         };
@@ -184,19 +185,23 @@ impl KeyStore {
             .decode(&encoded)
             .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?;
 
+        encoded.zeroize(); // zeroize the encoded string after use
+
         if decoded.len() != 64 {
             return Err(KeyManagerError::CorruptedKeyDerivationSeed);
         }
 
-        let mut seed = [0u8; 64];
-        seed.copy_from_slice(&decoded);
-        Ok(Zeroizing::new(seed))
+        let mut seed = Zeroizing::new([0u8; 64]);
+        seed.copy_from_slice(&decoded); // copy from slice supported by zeroize
+
+        Ok(seed)
     }
 
     pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {
         let pubk = rsa_key.export_public_pem()?;
-        let privk = rsa_key.export_private_pem()?;
-        self.store.set(pubk, privk, None)?;
+        let mut privk = rsa_key.export_private_pem()?;
+        self.store.set(pubk, &privk, None)?;
+        privk.zeroize();
         Ok(())
     }
 
@@ -206,11 +211,13 @@ impl KeyStore {
         rsa_pub_key: RsaPublicKey,
     ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let privk = self.store.get::<String, String>(pubk)?;
-        if let Some(privk) = privk {
+        let mut privk = self.store.get::<String, String>(pubk)?;
+        if let Some(mut privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
+            privk.zeroize();
             return Ok(Some(rsa_keypair));
         }
+        privk.zeroize();
         Ok(None)
     }
 }

@@ -124,3 +124,4 @@ This repository is a component of the **BitVMX Ecosystem**, an open platform for
 You can find the index of all BitVMX open-source components at [**FairgateLabs/BitVMX**](https://github.com/FairgateLabs/BitVMX).
 
 ---
+

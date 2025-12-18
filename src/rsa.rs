@@ -7,7 +7,7 @@ use rsa::{
     pkcs8::{spki, DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey},
     rand_core::RngCore,
     signature::{SignerMut, Verifier},
-    Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey,
+    Oaep, RsaPrivateKey, RsaPublicKey,
 };
 use sha2::Sha256;
 use thiserror::Error;
@@ -80,13 +80,15 @@ impl RSAKeyPair {
         rng: &mut R,
     ) -> Result<Vec<u8>, RSAError> {
         let pubk = RsaPublicKey::from_public_key_pem(public_key)?;
-        let encrypt = pubk.encrypt(rng, Pkcs1v15Encrypt, message)?;
+        let padding = Oaep::new::<Sha256>();
+        let encrypt = pubk.encrypt(rng, padding, message)?;
         Ok(encrypt)
     }
 
     /// Decrypt a message using RSA
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, RSAError> {
-        let decrypt = self.private_key.decrypt(Pkcs1v15Encrypt, ciphertext)?;
+        let padding = Oaep::new::<Sha256>();
+        let decrypt = self.private_key.decrypt(padding, ciphertext)?;
         Ok(decrypt)
     }
 

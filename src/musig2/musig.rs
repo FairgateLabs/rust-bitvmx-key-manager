@@ -9,6 +9,7 @@ use musig2::{
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{debug, error};
+use zeroize::Zeroizing;
 
 use musig2::{KeyAggContext, PubNonce};
 
@@ -383,7 +384,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
     ) -> Result<(), Musig2SignerError> {
         debug!(
-            "Aggregating nonces for aggregated pubkey: {} 
+            "Aggregating nonces for aggregated pubkey: {}
                 with nonces: {:?}",
             aggregated_pubkey.to_string(),
             pub_nonces_map
@@ -512,7 +513,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         partial_signatures_to_save: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
     ) -> Result<(), Musig2SignerError> {
         debug!(
-            "Saving partial signatures for aggregated pubkey: {} 
+            "Saving partial signatures for aggregated pubkey: {}
                 with partial signatures: {:?}",
             aggregated_pubkey.to_string(),
             partial_signatures_to_save
@@ -731,7 +732,7 @@ impl MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         id: &str,
         tweak: Option<musig2::secp256k1::Scalar>,
-        nonce_seed: [u8; 32],
+        nonce_seed: Zeroizing<[u8; 32]>,
     ) -> Result<(), Musig2SignerError> {
         match self.check_musig_data(aggregated_pubkey)? {
             true => {}
@@ -747,7 +748,7 @@ impl MuSig2Signer {
             return Ok(());
         }
 
-        let sec_nonce = musig2::SecNonceBuilder::new(nonce_seed)
+        let sec_nonce = musig2::SecNonceBuilder::new(*nonce_seed)
             .with_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
             .with_message(&message)
             .build();
@@ -1245,15 +1246,15 @@ impl MuSig2Signer {
 
     pub(crate) fn aggregate_private_key(
         &self,
-        partial_keys_bytes: Vec<Vec<u8>>,
+        partial_keys_bytes: Zeroizing<Vec<Vec<u8>>>,
         network: Network,
     ) -> Result<(PrivateKey, PublicKey), Musig2SignerError> {
         let secp = musig2::secp256k1::Secp256k1::new();
-        let mut partial_secret_keys: Vec<Scalar> = Vec::new();
+        let mut partial_secret_keys: Vec<Scalar> = Vec::new(); // Note: Scalar type is responsible for its own memory safety
         let mut partial_public_keys: Vec<musig2::secp256k1::PublicKey> = Vec::new();
 
-        for partial_key_bytes in partial_keys_bytes {
-            let scalar = Scalar::from_slice(&partial_key_bytes)?;
+        for partial_key_bytes in partial_keys_bytes.iter() {
+            let scalar = Scalar::from_slice(partial_key_bytes)?;
             let public_key = musig2::secp256k1::PublicKey::from_secret_key(&secp, scalar.as_ref());
             partial_secret_keys.push(scalar);
             partial_public_keys.push(public_key);
@@ -1263,8 +1264,10 @@ impl MuSig2Signer {
         let aggregated_secret_key: musig2::secp256k1::SecretKey =
             ctx.aggregated_seckey(partial_secret_keys)?;
         let aggregated_public_key = to_bitcoin_pubkey(aggregated_secret_key.public_key(&secp))?;
-        let aggregated_seckey =
-            SecretKey::from_str(&aggregated_secret_key.display_secret().to_string())?;
+
+        // Zeroize the string representation of the secret key after use
+        let secret_display = Zeroizing::new(aggregated_secret_key.display_secret().to_string());
+        let aggregated_seckey = SecretKey::from_str(&secret_display)?;
         let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
 
         Ok((aggregated_private_key, aggregated_public_key))

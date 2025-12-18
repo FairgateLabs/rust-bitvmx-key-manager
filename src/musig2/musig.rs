@@ -878,20 +878,19 @@ impl MuSig2Signer {
 
     pub fn get_index(&self, aggregated_pubkey: &PublicKey) -> Result<u32, Musig2SignerError> {
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
-
         let key_index_used_by_me = self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key));
 
-        let index_used_by_me = self
-            .store
-            .get::<String, u32>(key_index_used_by_me.clone())?;
+        // Atomic transaction: increment and return nonce index, using a closure just for readability
+        let new_index = {
+            let db_tx_id = self.store.begin_transaction();
 
-        let new_index = match index_used_by_me {
-            Some(index_used) => index_used + 1,
-            None => 0,
+            let current_index = self.store.get::<String, u32>(key_index_used_by_me.clone())?;
+            let new_index = current_index.map_or(0, |idx| idx + 1);
+            self.store.set(key_index_used_by_me, new_index, None)?;
+
+            self.store.commit_transaction(db_tx_id)?;
+            new_index
         };
-
-        // Update the index used by the participant
-        self.store.set(key_index_used_by_me, new_index, None)?;
 
         Ok(new_index)
     }

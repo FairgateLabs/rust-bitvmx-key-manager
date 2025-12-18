@@ -2452,8 +2452,8 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(random_mnemonic.to_string()),
-            Some(random_mnemonic_passphrase),
+            Some(random_mnemonic.to_string().into()),
+            Some(random_mnemonic_passphrase.into()),
         );
 
         let key_manager =
@@ -3032,8 +3032,8 @@ mod tests {
         // Step 1: Initialize KeyManager with provided mnemonic and passphrase
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some(test_passphrase.to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some(test_passphrase.to_string().into()),
         );
 
         let key_manager =
@@ -3100,8 +3100,8 @@ mod tests {
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some(test_passphrase.to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some(test_passphrase.to_string().into()),
         );
 
         let key_manager2 =
@@ -3143,8 +3143,8 @@ mod tests {
 
         let key_manager_config3 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some("different_passphrase".to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some("different_passphrase".to_string().into()),
         );
 
         let key_manager3 =
@@ -5041,7 +5041,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5059,7 +5059,7 @@ mod tests {
 
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence2.to_string()),
+            Some(mnemonic_sentence2.to_string().into()),
             None,
         );
 
@@ -5103,8 +5103,8 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(passphrase1.clone()),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(passphrase1.clone().into()),
         );
 
         let key_manager1 =
@@ -5115,8 +5115,8 @@ mod tests {
         // --- Test 1: Create KeyManager with same mnemonic and same passphrase (should succeed)
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(passphrase1.clone()),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(passphrase1.clone().into()),
         );
 
         let key_manager2 =
@@ -5129,8 +5129,8 @@ mod tests {
 
         let key_manager_config3 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(different_passphrase),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(different_passphrase.into()),
         );
 
         let result =
@@ -5169,7 +5169,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5219,7 +5219,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5312,7 +5312,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5555,7 +5555,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "testnet".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5796,7 +5796,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "bitcoin".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 

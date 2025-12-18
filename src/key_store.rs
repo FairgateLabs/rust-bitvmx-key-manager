@@ -5,6 +5,7 @@ use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
+use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct KeyStore {
@@ -27,6 +28,22 @@ impl KeyStore {
     #[allow(dead_code)]
     pub(crate) fn store_clone(&self) -> Rc<Storage> {
         Rc::clone(&self.store)
+    }
+
+    pub fn begin_transaction(&self) -> Uuid {
+        self.store.begin_transaction()
+    }
+
+    pub fn commit_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
+        self.store
+            .commit_transaction(transaction_id)
+            .map_err(|e| KeyManagerError::from(e))
+    }
+
+    pub fn rollback_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
+        self.store
+            .rollback_transaction(transaction_id)
+            .map_err(|e| KeyManagerError::from(e))
     }
 
     /**

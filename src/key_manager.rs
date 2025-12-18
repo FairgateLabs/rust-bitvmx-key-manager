@@ -626,11 +626,18 @@ impl KeyManager {
     /// - The sequence of generated keys is deterministic and recoverable
     ///
     pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
-        let index = self.next_keypair_index(key_type)?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivvation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
+        // it will be the wallet reposibility to detect if that key has been used or not.
+        let index = {
+            let tx_id = self.keystore.begin_transaction();
+            let index = self.next_keypair_index(key_type)?;
+            self.keystore.store_next_keypair_index(key_type, index + 1)?;
+            self.keystore.commit_transaction(tx_id)?;
+            index
+        };
+
         let pubkey = self.derive_keypair(key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_keypair_index(key_type, index + 1)?;
         Ok(pubkey)
     }
 
@@ -648,11 +655,18 @@ impl KeyManager {
         &self,
         key_type: BitcoinKeyType,
     ) -> Result<PublicKey, KeyManagerError> {
-        let index = self.next_keypair_index(key_type)?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivvation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
+        // it will be the wallet reposibility to detect if that key has been used or not.
+        let index = {
+            let tx_id = self.keystore.begin_transaction();
+            let index = self.next_keypair_index(key_type)?;
+            self.keystore.store_next_keypair_index(key_type, index + 1)?;
+            self.keystore.commit_transaction(tx_id)?;
+            index
+        };
+
         let pubkey = self.derive_keypair_adjust_parity(key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_keypair_index(key_type, index + 1)?;
         Ok(pubkey)
     }
 
@@ -771,10 +785,17 @@ impl KeyManager {
         message_size_in_bytes: usize,
         key_type: WinternitzType,
     ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
-        let index = self.next_winternitz_index()?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivvation fails, the index is wasted, this is not an issu in One Time Use keys
+        let index = {
+            let tx_id = self.keystore.begin_transaction();
+            let index = self.next_winternitz_index()?;
+            self.keystore.store_next_winternitz_index(index + 1)?;
+            self.keystore.commit_transaction(tx_id)?;
+            index
+        };
+
         let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore.store_next_winternitz_index(index + 1)?;
         Ok(pubkey)
     }
 
@@ -837,16 +858,22 @@ impl KeyManager {
         key_type: WinternitzType,
         number_of_keys: u32,
     ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
-        let initial_index = self.next_winternitz_index()?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivvation fails, the index is wasted, this is not an issu in One Time Use keys
+        let initial_index = {
+            let tx_id = self.keystore.begin_transaction();
+            let initial_index = self.next_winternitz_index()?;
+            self.keystore.store_next_winternitz_index(initial_index + number_of_keys)?;
+            self.keystore.commit_transaction(tx_id)?;
+            initial_index
+        };
+
         let pubkeys = self.derive_multiple_winternitz(
             message_size_in_bytes,
             key_type,
             initial_index,
             number_of_keys,
         )?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_winternitz_index(initial_index + number_of_keys)?;
         Ok(pubkeys)
     }
 

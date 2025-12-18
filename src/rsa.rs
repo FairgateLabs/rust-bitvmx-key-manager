@@ -85,9 +85,7 @@ impl RSAKeyPair {
 
     /// Decrypt a message using RSA
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, RSAError> {
-        let decrypt = self
-            .private_key
-            .decrypt(Pkcs1v15Encrypt, ciphertext)?;
+        let decrypt = self.private_key.decrypt(Pkcs1v15Encrypt, ciphertext)?;
         Ok(decrypt)
     }
 

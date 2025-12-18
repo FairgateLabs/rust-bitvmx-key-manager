@@ -80,16 +80,13 @@ impl RSAKeyPair {
         rng: &mut R,
     ) -> Result<Vec<u8>, RSAError> {
         let pubk = RsaPublicKey::from_public_key_pem(public_key)?;
-        let encrypt = pubk.encrypt(rng, Pkcs1v15Encrypt, message).unwrap();
+        let encrypt = pubk.encrypt(rng, Pkcs1v15Encrypt, message)?;
         Ok(encrypt)
     }
 
     /// Decrypt a message using RSA
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, RSAError> {
-        let decrypt = self
-            .private_key
-            .decrypt(Pkcs1v15Encrypt, ciphertext)
-            .unwrap();
+        let decrypt = self.private_key.decrypt(Pkcs1v15Encrypt, ciphertext)?;
         Ok(decrypt)
     }
 

@@ -4,6 +4,7 @@ use bip39::Mnemonic;
 use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use criterion::{criterion_group, criterion_main, Criterion};
 use key_manager::{errors::KeyManagerError, key_manager::KeyManager, winternitz::WinternitzType};
+use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
 const REGTEST: Network = Network::Regtest;
 
@@ -35,7 +36,7 @@ fn criterion_benchmark(_c: &mut Criterion) {
     let storage_path = temp_storage();
     let config_storage = StorageConfig::new(
         storage_path.clone(),
-        Some("secret password_123__ABC".to_string()),
+        Some(Secret::new("secret password_123__ABC".to_string())),
     );
     let key_manager = test_key_manager(config_storage).unwrap();
 

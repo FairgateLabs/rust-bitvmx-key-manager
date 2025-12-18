@@ -11,6 +11,7 @@ use rsa::{
 };
 use sha2::Sha256;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 #[derive(Error, Debug)]
 pub enum RSAError {
@@ -105,11 +106,11 @@ impl RSAKeyPair {
     }
 
     /// Export private key as PEM (PKCS#8)
-    pub fn export_private_pem(&self) -> Result<String, RSAError> {
-        let priv_pem = self
+    pub fn export_private_pem(&self) -> Result<Zeroizing<String>, RSAError> {
+        let priv_pem = Zeroizing::new(self
             .private_key
             .to_pkcs8_pem(Default::default())?
-            .to_string();
+            .to_string());
         Ok(priv_pem)
     }
 

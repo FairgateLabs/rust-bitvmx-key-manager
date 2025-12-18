@@ -527,7 +527,7 @@ impl KeyManager {
     fn get_account_xpriv_string(
         &self,
         key_type: BitcoinKeyType,
-    ) -> Result<String, KeyManagerError> {
+    ) -> Result<Zeroizing<String>, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
 
@@ -536,11 +536,11 @@ impl KeyManager {
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
 
-        let standard_xpriv_string = account_xpriv.to_string();
+        let standard_xpriv_string = Zeroizing::new(account_xpriv.to_string());
 
         // Convert to the appropriate version based on key type
         let target_version = Self::get_xpriv_version_bytes(key_type, self.network);
-        Self::convert_extended_key_version(&standard_xpriv_string, target_version)
+        Ok(Zeroizing::new(Self::convert_extended_key_version(&standard_xpriv_string, target_version)?))
     }
 
     /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
@@ -5340,7 +5340,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5378,7 +5378,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5426,7 +5426,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5468,7 +5468,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5583,7 +5583,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5621,7 +5621,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5669,7 +5669,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5711,7 +5711,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5824,7 +5824,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "xprv9xpXFhFpqdQK3TmytPBqXtGSwS3DLjojFhTGht8gwAAii8py5X6pxeBnQ6ehJiyJ6nDjWGJfZ95WxByFXVkDxHXrqu53WCRGypk2ttuqncb";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5862,7 +5862,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "yprvAHwhK6RbpuS3dgCYHM5jc2ZvEKd7Bi61u9FVhYMpgMSuZS613T1xxQeKTffhrHY79hZ5PsskBjcc6C2V7DrnsMsNaGDaWev3GLRQRgV7hxF";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5910,7 +5910,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5952,7 +5952,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 

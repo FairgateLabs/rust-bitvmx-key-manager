@@ -199,7 +199,7 @@ impl KeyStore {
 
     pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {
         let pubk = rsa_key.export_public_pem()?;
-        let privk = Zeroizing::new(rsa_key.export_private_pem()?);
+        let privk = rsa_key.export_private_pem()?;
         self.store.set(pubk, &(*privk), None)?;
         Ok(())
     }

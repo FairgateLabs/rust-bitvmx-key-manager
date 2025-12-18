@@ -35,7 +35,7 @@ pub fn create_key_manager_from_config(
     };
 
     let passphrase = match &key_manager_config.mnemonic_passphrase {
-        Some(pass) => Some(pass.expose_secret().to_string()),
+        Some(pass) => Some(pass.expose_secret().to_owned()),
         None => None,
     };
 

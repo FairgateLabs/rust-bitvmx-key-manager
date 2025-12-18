@@ -21,32 +21,32 @@ pub fn import_key_to_key_manager_example() {
 
     // -- Importing a single private key without typing it (internally its type 'unknown')
     let random_bytes_z = Zeroizing::new(random_bytes()); // adds automatic zeroization on drop
-    let secret_key = SecretKey::from_slice(& *random_bytes_z).unwrap();
+    let secret_key = SecretKey::from_slice(&*random_bytes_z).unwrap();
     let private_key = PrivateKey::new(secret_key, network);
     let private_key_wif_z = Zeroizing::new(private_key.to_wif()); // adds automatic zeroization on drop
 
-    let pubkey = key_manager
-        .import_private_key(& *private_key_wif_z)
-        .unwrap();
+    let pubkey = key_manager.import_private_key(&*private_key_wif_z).unwrap();
     println!("Imported public key: {}", pubkey);
 
     // -- Importing a single private key with type specified
     let random_bytes2_z = Zeroizing::new(random_bytes()); // adds automatic zeroization on drop
-    // In this case we are using random bytes for the sake of this example simplicity,
-    // but in real use cases the bytes should come from a secure source following BIP-39 derivation path for the desired key type
-    let secret_key2 = SecretKey::from_slice(& *random_bytes2_z).unwrap();
+                                                          // In this case we are using random bytes for the sake of this example simplicity,
+                                                          // but in real use cases the bytes should come from a secure source following BIP-39 derivation path for the desired key type
+    let secret_key2 = SecretKey::from_slice(&*random_bytes2_z).unwrap();
     let private_key2 = PrivateKey::new(secret_key2, network);
     let private_key_wif2_z = Zeroizing::new(private_key2.to_wif()); // adds automatic zeroization on drop
 
     // The key type could be any of the supported BitcoinKeyType variants (P2pkh, P2shP2wpkh, P2wpkh, P2tr)
     let key2_type = BitcoinKeyType::P2tr;
     let pubkey = key_manager
-        .import_private_key_typed(& *private_key_wif2_z, Some(key2_type))
+        .import_private_key_typed(&*private_key_wif2_z, Some(key2_type))
         .unwrap();
     println!("Imported public key 2: {} of type {:?}", pubkey, key2_type);
 
-    let private_keys: Zeroizing<Vec<String>> =
-        Zeroizing::new(vec![(*private_key_wif_z).clone(), (*private_key_wif2_z).clone()]);
+    let private_keys: Zeroizing<Vec<String>> = Zeroizing::new(vec![
+        (*private_key_wif_z).clone(),
+        (*private_key_wif2_z).clone(),
+    ]);
 
     let pubkey = key_manager
         .import_partial_private_keys(private_keys, network)

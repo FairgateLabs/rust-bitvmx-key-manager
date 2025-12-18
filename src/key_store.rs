@@ -48,7 +48,8 @@ impl KeyStore {
             None => Self::UNKNOWN_TYPE.to_string(),
         };
 
-        let typed_private_key = Zeroizing::new(format!("{}:{}", key_type_str, private_key.to_string()));
+        let typed_private_key =
+            Zeroizing::new(format!("{}:{}", key_type_str, private_key.to_string()));
         self.store.set(key, (*typed_private_key).clone(), None)?;
 
         Ok(())
@@ -59,7 +60,8 @@ impl KeyStore {
         public_key: &PublicKey,
     ) -> Result<Option<(PrivateKey, PublicKey, Option<BitcoinKeyType>)>, KeyManagerError> {
         let key = public_key.to_string();
-        let data: Option<Zeroizing<String>> = self.store.get::<String, String>(key)?.map(Zeroizing::new);
+        let data: Option<Zeroizing<String>> =
+            self.store.get::<String, String>(key)?.map(Zeroizing::new);
 
         if let Some(private_key_str) = data {
             if let Some(colon_pos) = private_key_str.find(':') {
@@ -136,7 +138,7 @@ impl KeyStore {
             Some(phrase) => Zeroizing::new(phrase),
             None => return Err(KeyManagerError::MnemonicNotFound),
         };
-        let m = Mnemonic::parse(& *phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
+        let m = Mnemonic::parse(&*phrase).map_err(|_| KeyManagerError::InvalidMnemonic)?;
         Ok(m)
     }
 
@@ -165,7 +167,10 @@ impl KeyStore {
         }
     }
 
-    pub fn store_key_derivation_seed(&self, seed: Zeroizing<[u8; 64]>) -> Result<(), KeyManagerError> {
+    pub fn store_key_derivation_seed(
+        &self,
+        seed: Zeroizing<[u8; 64]>,
+    ) -> Result<(), KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
         let mut encoded = general_purpose::STANDARD.encode(&(*seed));
         self.store
@@ -176,16 +181,21 @@ impl KeyStore {
 
     pub fn load_key_derivation_seed(&self) -> Result<Zeroizing<[u8; 64]>, KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let encoded: Option<Zeroizing<String>> = self.store.get::<String, String>(Self::KEY_DERIVATION_SEED_KEY.to_string())?.map(Zeroizing::new);
+        let encoded: Option<Zeroizing<String>> = self
+            .store
+            .get::<String, String>(Self::KEY_DERIVATION_SEED_KEY.to_string())?
+            .map(Zeroizing::new);
 
         let encoded = match encoded {
             Some(encoded) => encoded,
             None => return Err(KeyManagerError::KeyDerivationSeedNotFound),
         };
 
-        let decoded = Zeroizing::new(general_purpose::STANDARD
-            .decode(&*encoded)
-            .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?);
+        let decoded = Zeroizing::new(
+            general_purpose::STANDARD
+                .decode(&*encoded)
+                .map_err(|_| KeyManagerError::CorruptedKeyDerivationSeed)?,
+        );
 
         if decoded.len() != 64 {
             return Err(KeyManagerError::CorruptedKeyDerivationSeed);
@@ -210,7 +220,8 @@ impl KeyStore {
         rsa_pub_key: RsaPublicKey,
     ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let privk: Option<Zeroizing<String>> = self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
+        let privk: Option<Zeroizing<String>> =
+            self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
 
         if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;

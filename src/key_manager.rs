@@ -10,11 +10,11 @@ use bitcoin::{
     Network, PrivateKey, PublicKey, TapNodeHash,
 };
 use hkdf::Hkdf;
-use sha2::Sha256;
-use zeroize::Zeroizing;
 use itertools::izip;
+use sha2::Sha256;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
+use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
@@ -103,7 +103,7 @@ impl KeyManager {
                     None => {
                         let mut entropy = Zeroizing::new([0u8; 32]); // 256 bits for 24 words, automatically zeroized when dropped
                         secp256k1::rand::thread_rng().fill_bytes(&mut *entropy);
-                        let random_mnemonic = Mnemonic::from_entropy(& *entropy).unwrap();
+                        let random_mnemonic = Mnemonic::from_entropy(&*entropy).unwrap();
                         keystore.store_mnemonic(&random_mnemonic)?;
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"
@@ -148,11 +148,10 @@ impl KeyManager {
 
         let expected_key_derivation_seed = Zeroizing::new({
             let mnemonic = keystore.load_mnemonic()?;
-            let seed = mnemonic.to_seed(& *mnemonic_passphrase);
+            let seed = mnemonic.to_seed(&*mnemonic_passphrase);
             // Mnemonic dropped here to minimize time in memory
             seed
         });
-
 
         match keystore.load_key_derivation_seed() {
             Ok(stored_seed) => {
@@ -176,7 +175,7 @@ impl KeyManager {
             let key_derivation_seed = keystore.load_key_derivation_seed()?;
             Self::derive_winternitz_master_seed(
                 secp.clone(),
-                & *key_derivation_seed,
+                &*key_derivation_seed,
                 network,
                 Self::ACCOUNT_DERIVATION_INDEX,
             )?
@@ -268,7 +267,7 @@ impl KeyManager {
             partial_keys
                 .iter()
                 .map(|key| SecretKey::from_str(key).map(|sk| sk.secret_bytes().to_vec()))
-                .collect::<Result<Vec<Vec<u8>>, _>>()?
+                .collect::<Result<Vec<Vec<u8>>, _>>()?,
         );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
@@ -294,7 +293,7 @@ impl KeyManager {
             partial_keys
                 .iter()
                 .map(|key| PrivateKey::from_str(key).map(|pk| pk.to_bytes().to_vec()))
-                .collect::<Result<Vec<Vec<u8>>, _>>()?
+                .collect::<Result<Vec<Vec<u8>>, _>>()?,
         );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
@@ -491,7 +490,7 @@ impl KeyManager {
     // Generate account-level xpub (hardened up to account)
     pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
@@ -528,7 +527,7 @@ impl KeyManager {
         key_type: BitcoinKeyType,
     ) -> Result<Zeroizing<String>, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
@@ -539,7 +538,10 @@ impl KeyManager {
 
         // Convert to the appropriate version based on key type
         let target_version = Self::get_xpriv_version_bytes(key_type, self.network);
-        Ok(Zeroizing::new(Self::convert_extended_key_version(&standard_xpriv_string, target_version)?))
+        Ok(Zeroizing::new(Self::convert_extended_key_version(
+            &standard_xpriv_string,
+            target_version,
+        )?))
     }
 
     /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
@@ -556,7 +558,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -587,7 +589,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -743,7 +745,7 @@ impl KeyManager {
 
         let winternitz = winternitz::Winternitz::new();
         let public_key = winternitz.generate_public_key(
-            & *master_secret,
+            &*master_secret,
             key_type,
             message_digits_length,
             checksum_size,
@@ -812,7 +814,7 @@ impl KeyManager {
         for index in initial_index..initial_index + number_of_keys {
             let winternitz = winternitz::Winternitz::new();
             let public_key = winternitz.generate_public_key(
-                & *master_secret,
+                &*master_secret,
                 key_type,
                 message_digits_length,
                 checksum_size,
@@ -1121,7 +1123,7 @@ impl KeyManager {
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(
-            & *master_secret,
+            &*master_secret,
             key_type,
             message_size,
             checksum_size,
@@ -1524,10 +1526,10 @@ mod tests {
         secp256k1::{self, Message, SecretKey},
         Address, Network, PrivateKey, PublicKey, XOnlyPublicKey,
     };
-    use zeroize::Zeroizing;
     use redact::Secret;
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
+    use zeroize::Zeroizing;
 
     use crate::{
         errors::{KeyManagerError, WinternitzError},
@@ -2501,7 +2503,8 @@ mod tests {
         keystore.store_mnemonic_passphrase(&random_passphrase)?;
 
         // Generate and store seeds
-        let key_derivation_seed = zeroize::Zeroizing::new(random_mnemonic.to_seed(&random_passphrase));
+        let key_derivation_seed =
+            zeroize::Zeroizing::new(random_mnemonic.to_seed(&random_passphrase));
         keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
 
         let secp = secp256k1::Secp256k1::new();
@@ -4643,7 +4646,8 @@ mod tests {
             let private_key_1 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
             let private_key_2 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
 
-            let partial_private_keys = Zeroizing::new(vec![private_key_1.to_wif(), private_key_2.to_wif()]);
+            let partial_private_keys =
+                Zeroizing::new(vec![private_key_1.to_wif(), private_key_2.to_wif()]);
 
             let aggregated_public_key_3 =
                 key_manager.import_partial_private_keys(partial_private_keys, REGTEST)?;
@@ -5322,7 +5326,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(REGTEST, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(REGTEST, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5565,7 +5569,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Testnet, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Testnet, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5806,7 +5810,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Bitcoin, & *key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);

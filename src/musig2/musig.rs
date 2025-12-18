@@ -6,10 +6,10 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
-use zeroize::Zeroizing;
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 use tracing::{debug, error};
+use zeroize::Zeroizing;
 
 use musig2::{KeyAggContext, PubNonce};
 
@@ -18,7 +18,6 @@ use super::{
     helper::{to_bitcoin_pubkey, to_musig_pubkey},
     types::{MessageId, Musig2MessageData, Musig2SessionData},
 };
-
 
 /// Keys used for storing data in the key-value store
 enum StoreKey {

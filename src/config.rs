@@ -1,6 +1,7 @@
 use redact::Secret;
 use serde::{Deserialize, Deserializer};
 use storage_backend::storage_config::StorageConfig;
+use zeroize::Zeroizing;
 
 fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Secret<String>>, D::Error>
 where
@@ -28,13 +29,13 @@ pub struct KeyManagerConfig {
 impl KeyManagerConfig {
     pub fn new(
         network: String,
-        mnemonic_sentence: Option<String>,
-        mnemonic_passphrase: Option<String>,
+        mnemonic_sentence: Option<Zeroizing<String>>,
+        mnemonic_passphrase: Option<Zeroizing<String>>,
     ) -> Self {
         Self {
             network,
-            mnemonic_sentence: mnemonic_sentence.map(|s| Secret::new(s)),
-            mnemonic_passphrase: mnemonic_passphrase.map(|s| Secret::new(s)),
+            mnemonic_sentence: mnemonic_sentence.map(|s| Secret::new(s.to_string())),
+            mnemonic_passphrase: mnemonic_passphrase.map(|s| Secret::new(s.to_string())),
         }
     }
 }

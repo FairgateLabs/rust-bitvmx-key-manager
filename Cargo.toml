@@ -45,7 +45,8 @@ bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.
 musig2 = { version = "0.2.3", features = ["serde", "rand"] }
 strum = { version = "0.26", features = ["derive"] }
 xyzpub = "0.3.0"
-redact = { version = "0.1", features = ["serde"] }
+zeroize = "1.8.2"
+redact = { version = "0.1", features = ["serde", "zeroize"] }
 
 [dev-dependencies]
 criterion = "0.6.0"

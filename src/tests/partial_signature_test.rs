@@ -24,7 +24,7 @@ mod tests {
         let index = key_manager.musig2().get_index(&aggregated_pubkey)?;
         let public_key = key_manager.musig2().my_public_key(&aggregated_pubkey)?;
 
-        let nonce_seed: [u8; 32] = key_manager
+        let nonce_seed = key_manager
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 

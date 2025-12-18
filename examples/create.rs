@@ -2,6 +2,7 @@ use bitcoin::{key::rand::RngCore, secp256k1, Network};
 use key_manager::key_manager::KeyManager;
 use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
+use zeroize::Zeroizing;
 
 #[allow(dead_code)]
 fn main() {
@@ -13,9 +14,9 @@ pub fn create_key_manager_example(name: &str) -> KeyManager {
     // --- Creating a KeyManager
     let network = Network::Regtest;
     let keystore_path = format!("./examples/storage/examples-keystore_{}.db", name);
-    let password = "secret password_123__ABC".to_string();
+    let password = Zeroizing::new("secret password_123__ABC".to_string()); // adds automatic zeroization on drop
 
-    let storage_config = StorageConfig::new(keystore_path, Some(Secret::new(password)));
+    let storage_config = StorageConfig::new(keystore_path, Some(Secret::new((*password).clone())));
 
     let key_manager = KeyManager::new(
         network,

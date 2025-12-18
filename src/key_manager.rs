@@ -14,6 +14,7 @@ use itertools::izip;
 use sha2::Sha256;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
+use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
@@ -93,15 +94,16 @@ impl KeyManager {
                     tracing::info!("Using stored mnemonic from storage");
                 }
                 // If no mnemonic was provided or they match, continue with stored mnemonic
+                // Mnemonic is dropped here to minimize time in memory
             }
             Err(KeyManagerError::MnemonicNotFound) => {
                 // No mnemonic in storage, store the provided one or generate a new one
                 match mnemonic {
                     Some(mnemonic_sentence) => keystore.store_mnemonic(&mnemonic_sentence)?,
                     None => {
-                        let mut entropy = [0u8; 32]; // 256 bits for 24 words
-                        secp256k1::rand::thread_rng().fill_bytes(&mut entropy);
-                        let random_mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+                        let mut entropy = Zeroizing::new([0u8; 32]); // 256 bits for 24 words, automatically zeroized when dropped
+                        secp256k1::rand::thread_rng().fill_bytes(&mut *entropy);
+                        let random_mnemonic = Mnemonic::from_entropy(&*entropy).unwrap();
                         keystore.store_mnemonic(&random_mnemonic)?;
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"
@@ -118,7 +120,7 @@ impl KeyManager {
                 // Passphrase found in storage
                 if let Some(provided_passphrase) = &mnemonic_passphrase {
                     // Both stored and provided passphrases exist - they must match
-                    if stored_passphrase != *provided_passphrase {
+                    if *stored_passphrase != *provided_passphrase {
                         return Err(KeyManagerError::MnemonicPassphraseMismatch(
                             "Stored mnemonic passphrase does not match the provided mnemonic passphrase".to_string()
                         ));
@@ -134,7 +136,7 @@ impl KeyManager {
                 // No passphrase in storage, store the provided one or use empty string as default
                 let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
                 keystore.store_mnemonic_passphrase(&passphrase)?;
-                passphrase
+                Zeroizing::new(passphrase)
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
         };
@@ -144,12 +146,17 @@ impl KeyManager {
         // Since these values can be regenerated from the mnemonic and passphrase, we validate the stored seed matches
         // the expected value to detect potential corruption.
 
-        let expected_key_derivation_seed = keystore.load_mnemonic()?.to_seed(&mnemonic_passphrase);
+        let expected_key_derivation_seed = Zeroizing::new({
+            let mnemonic = keystore.load_mnemonic()?;
+            let seed = mnemonic.to_seed(&*mnemonic_passphrase);
+            // Mnemonic dropped here to minimize time in memory
+            seed
+        });
 
         match keystore.load_key_derivation_seed() {
             Ok(stored_seed) => {
                 // Validate that the stored seed matches what would be generated from mnemonic + passphrase
-                if stored_seed != expected_key_derivation_seed {
+                if *stored_seed != *expected_key_derivation_seed {
                     return Err(KeyManagerError::CorruptedKeyDerivationSeed);
                 }
             }
@@ -164,17 +171,20 @@ impl KeyManager {
 
         // Validate or generate Winternitz seed - similar to key derivation seed validation
         // The Winternitz seed is derived from the key derivation seed, so we validate it to detect corruption.
-        let expected_winternitz_seed = Self::derive_winternitz_master_seed(
-            secp.clone(),
-            &keystore.load_key_derivation_seed()?,
-            network,
-            Self::ACCOUNT_DERIVATION_INDEX,
-        )?;
+        let expected_winternitz_seed = {
+            let key_derivation_seed = keystore.load_key_derivation_seed()?;
+            Self::derive_winternitz_master_seed(
+                secp.clone(),
+                &*key_derivation_seed,
+                network,
+                Self::ACCOUNT_DERIVATION_INDEX,
+            )?
+        };
 
         match keystore.load_winternitz_seed() {
             Ok(stored_winternitz_seed) => {
                 // Validate that the stored Winternitz seed matches what would be derived from key derivation seed
-                if stored_winternitz_seed != expected_winternitz_seed {
+                if *stored_winternitz_seed != *expected_winternitz_seed {
                     return Err(KeyManagerError::CorruptedWinternitzSeed);
                 }
             }
@@ -250,13 +260,15 @@ impl KeyManager {
 
     pub fn import_partial_secret_keys(
         &self,
-        partial_keys: Vec<String>,
+        partial_keys: Zeroizing<Vec<String>>,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
-        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
-            .into_iter()
-            .map(|key| SecretKey::from_str(&key).map(|sk| sk.secret_bytes().to_vec()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let partial_keys_bytes = Zeroizing::new(
+            partial_keys
+                .iter()
+                .map(|key| SecretKey::from_str(key).map(|sk| sk.secret_bytes().to_vec()))
+                .collect::<Result<Vec<Vec<u8>>, _>>()?,
+        );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
         if partial_keys_bytes.is_empty() {
@@ -268,18 +280,21 @@ impl KeyManager {
             .aggregate_private_key(partial_keys_bytes, network)?;
         // should we assume p2tr? always to use them with musig2 and schnorr
         self.keystore.store_keypair(private_key, public_key, None)?;
+
         Ok(public_key)
     }
 
     pub fn import_partial_private_keys(
         &self,
-        partial_keys: Vec<String>,
+        partial_keys: Zeroizing<Vec<String>>,
         network: Network,
     ) -> Result<PublicKey, KeyManagerError> {
-        let partial_keys_bytes: Vec<Vec<u8>> = partial_keys
-            .into_iter()
-            .map(|key| PrivateKey::from_str(&key).map(|pk| pk.to_bytes().to_vec()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let partial_keys_bytes = Zeroizing::new(
+            partial_keys
+                .iter()
+                .map(|key| PrivateKey::from_str(key).map(|pk| pk.to_bytes().to_vec()))
+                .collect::<Result<Vec<Vec<u8>>, _>>()?,
+        );
 
         // Defensive: do not call musig2 aggregator with empty input - return an error instead
         if partial_keys_bytes.is_empty() {
@@ -444,7 +459,7 @@ impl KeyManager {
         key_derivation_seed: &[u8],
         network: Network,
         account: u32,
-    ) -> Result<[u8; 32], KeyManagerError> {
+    ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
         // Dev note: Using coin type as its nice to differentiate by network, winternitz are OT,
         // so they should not be repeated across different networks, to avoid a kind of take from testnet and use in mainnet attack
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
@@ -462,7 +477,7 @@ impl KeyManager {
         let account_xpriv =
             master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
 
-        let secret_32_bytes = account_xpriv.private_key.secret_bytes();
+        let secret_32_bytes = Zeroizing::new(account_xpriv.private_key.secret_bytes());
 
         // Return the private key bytes as master seed for Winternitz
         Ok(secret_32_bytes)
@@ -475,7 +490,7 @@ impl KeyManager {
     // Generate account-level xpub (hardened up to account)
     pub fn get_account_xpub(&self, key_type: BitcoinKeyType) -> Result<Xpub, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
@@ -510,20 +525,23 @@ impl KeyManager {
     fn get_account_xpriv_string(
         &self,
         key_type: BitcoinKeyType,
-    ) -> Result<String, KeyManagerError> {
+    ) -> Result<Zeroizing<String>, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
         let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
 
-        let standard_xpriv_string = account_xpriv.to_string();
+        let standard_xpriv_string = Zeroizing::new(account_xpriv.to_string());
 
         // Convert to the appropriate version based on key type
         let target_version = Self::get_xpriv_version_bytes(key_type, self.network);
-        Self::convert_extended_key_version(&standard_xpriv_string, target_version)
+        Ok(Zeroizing::new(Self::convert_extended_key_version(
+            &standard_xpriv_string,
+            target_version,
+        )?))
     }
 
     /// Derives a Bitcoin keypair at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
@@ -540,7 +558,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -571,7 +589,7 @@ impl KeyManager {
         index: u32,
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
-        let master_xpriv = Xpriv::new_master(self.network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
         let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
@@ -727,7 +745,7 @@ impl KeyManager {
 
         let winternitz = winternitz::Winternitz::new();
         let public_key = winternitz.generate_public_key(
-            &master_secret,
+            &*master_secret,
             key_type,
             message_digits_length,
             checksum_size,
@@ -796,7 +814,7 @@ impl KeyManager {
         for index in initial_index..initial_index + number_of_keys {
             let winternitz = winternitz::Winternitz::new();
             let public_key = winternitz.generate_public_key(
-                &master_secret,
+                &*master_secret,
                 key_type,
                 message_digits_length,
                 checksum_size,
@@ -1105,7 +1123,7 @@ impl KeyManager {
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(
-            &master_secret,
+            &*master_secret,
             key_type,
             message_size,
             checksum_size,
@@ -1249,7 +1267,7 @@ impl KeyManager {
         &self,
         index: u32,
         public_key: PublicKey,
-    ) -> Result<[u8; 32], KeyManagerError> {
+    ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
         let (sk, _, _) = match self.keystore.load_keypair(&public_key)? {
             Some(entry) => entry,
             None => {
@@ -1266,7 +1284,7 @@ impl KeyManager {
         let salt = hashes::sha256::Hash::hash(&public_key.to_bytes()).to_byte_array();
 
         // Input key material: secret key bytes
-        let ikm = sk.to_bytes();
+        let ikm = Zeroizing::new(sk.to_bytes()); // automatically zeroized when dropped
 
         // Context info: includes index and a domain separator
         let mut info = Vec::new();
@@ -1274,9 +1292,10 @@ impl KeyManager {
         info.extend_from_slice(&index.to_le_bytes());
 
         // Derive the nonce seed using HKDF-SHA256
-        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
-        let mut nonce_seed = [0u8; 32];
-        hkdf.expand(&info, &mut nonce_seed)
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &(*ikm));
+
+        let mut nonce_seed = Zeroizing::new([0u8; 32]); // automatically zeroized when dropped and adjust for return type
+        hkdf.expand(&info, &mut *nonce_seed)
             .map_err(|_| KeyManagerError::FailedToGenerateNonceSeed)?;
 
         Ok(nonce_seed)
@@ -1445,7 +1464,7 @@ impl KeyManager {
         let index = self.musig2.get_index(aggregated_pubkey)?;
         let public_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
-        let nonce_seed: [u8; 32] = self
+        let nonce_seed: Zeroizing<[u8; 32]> = self
             .generate_nonce_seed(index, public_key)
             .map_err(|_| Musig2SignerError::NonceSeedError)?;
 
@@ -1510,6 +1529,7 @@ mod tests {
     use redact::Secret;
     use std::{env, fs, panic, rc::Rc, str::FromStr};
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
+    use zeroize::Zeroizing;
 
     use crate::{
         errors::{KeyManagerError, WinternitzError},
@@ -1759,13 +1779,13 @@ mod tests {
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = random_32bytes();
         let key_derivation_seed = random_64bytes();
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&(*random_32bytes())).unwrap();
 
         let config = StorageConfig::new(path.clone(), Some(Secret::new(password)));
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
-        keystore.store_winternitz_seed(winternitz_seed)?;
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        keystore.store_winternitz_seed(winternitz_seed.clone())?;
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
         keystore.store_mnemonic(&random_mnemonic)?;
 
         for _ in 0..10 {
@@ -2427,13 +2447,13 @@ mod tests {
     fn test_random_key_manager(
         storage_config: StorageConfig,
     ) -> Result<KeyManager, KeyManagerError> {
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&*random_32bytes()).unwrap();
         let random_mnemonic_passphrase = generate_random_passphrase();
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(random_mnemonic.to_string()),
-            Some(random_mnemonic_passphrase),
+            Some(random_mnemonic.to_string().into()),
+            Some(random_mnemonic_passphrase.into()),
         );
 
         let key_manager =
@@ -2475,7 +2495,7 @@ mod tests {
         use crate::musig2::musig::MuSig2Signer;
 
         // Create a simple test KeyManager using the provided keystore
-        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_32bytes()).unwrap();
+        let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&*random_32bytes()).unwrap();
         let random_passphrase = generate_random_passphrase();
 
         // Store mnemonic and passphrase in keystore
@@ -2483,13 +2503,14 @@ mod tests {
         keystore.store_mnemonic_passphrase(&random_passphrase)?;
 
         // Generate and store seeds
-        let key_derivation_seed = random_mnemonic.to_seed(&random_passphrase);
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        let key_derivation_seed =
+            zeroize::Zeroizing::new(random_mnemonic.to_seed(&random_passphrase));
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
 
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = KeyManager::derive_winternitz_master_seed(
             secp.clone(),
-            &key_derivation_seed,
+            &*key_derivation_seed,
             REGTEST,
             KeyManager::ACCOUNT_DERIVATION_INDEX,
         )?;
@@ -2511,15 +2532,17 @@ mod tests {
         Message::from_digest(digest)
     }
 
-    fn random_32bytes() -> [u8; 32] {
-        let mut seed = [0u8; 32];
-        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+    fn random_32bytes() -> Zeroizing<[u8; 32]> {
+        // random bytes are usually sensitive, so we use Zeroizing to clear them from memory when done
+        let mut seed = Zeroizing::new([0u8; 32]);
+        secp256k1::rand::thread_rng().fill_bytes(&mut *seed);
         seed
     }
 
-    fn random_64bytes() -> [u8; 64] {
-        let mut seed = [0u8; 64];
-        secp256k1::rand::thread_rng().fill_bytes(&mut seed);
+    fn random_64bytes() -> Zeroizing<[u8; 64]> {
+        // random bytes are usually sensitive, so we use Zeroizing to clear them from memory when done
+        let mut seed = Zeroizing::new([0u8; 64]);
+        secp256k1::rand::thread_rng().fill_bytes(&mut *seed);
         seed
     }
 
@@ -2577,7 +2600,7 @@ mod tests {
         let mnemonic = if let Some(ref mnemonic_str) = config.mnemonic {
             Mnemonic::parse(mnemonic_str).map_err(|_| KeyManagerError::InvalidMnemonic)?
         } else {
-            Mnemonic::from_entropy(&random_32bytes()).unwrap()
+            Mnemonic::from_entropy(&*random_32bytes()).unwrap()
         };
 
         // Get passphrase or use empty string
@@ -2588,14 +2611,14 @@ mod tests {
         keystore.store_mnemonic_passphrase(&passphrase)?;
 
         // Generate key derivation seed from mnemonic
-        let key_derivation_seed = mnemonic.to_seed(&passphrase);
-        keystore.store_key_derivation_seed(key_derivation_seed)?;
+        let key_derivation_seed = zeroize::Zeroizing::new(mnemonic.to_seed(&passphrase));
+        keystore.store_key_derivation_seed(key_derivation_seed.clone())?;
 
         // Derive and store winternitz seed
         let secp = secp256k1::Secp256k1::new();
         let winternitz_seed = KeyManager::derive_winternitz_master_seed(
             secp.clone(),
-            &key_derivation_seed,
+            &*key_derivation_seed,
             network,
             KeyManager::ACCOUNT_DERIVATION_INDEX,
         )?;
@@ -3009,8 +3032,8 @@ mod tests {
         // Step 1: Initialize KeyManager with provided mnemonic and passphrase
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some(test_passphrase.to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some(test_passphrase.to_string().into()),
         );
 
         let key_manager =
@@ -3077,8 +3100,8 @@ mod tests {
         let keystore_storage_config2 = database_keystore_config(&keystore_path)?;
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some(test_passphrase.to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some(test_passphrase.to_string().into()),
         );
 
         let key_manager2 =
@@ -3120,8 +3143,8 @@ mod tests {
 
         let key_manager_config3 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(test_mnemonic_sentence.to_string()),
-            Some("different_passphrase".to_string()),
+            Some(test_mnemonic_sentence.to_string().into()),
+            Some("different_passphrase".to_string().into()),
         );
 
         let key_manager3 =
@@ -4574,10 +4597,10 @@ mod tests {
             let secret_key_1 = SecretKey::new(&mut rng);
             let secret_key_2 = SecretKey::new(&mut rng);
 
-            let partial_secret_keys = vec![
+            let partial_secret_keys = Zeroizing::new(vec![
                 secret_key_1.display_secret().to_string(),
                 secret_key_2.display_secret().to_string(),
-            ];
+            ]);
 
             // Import and aggregate partial secret keys
             let aggregated_public_key_1 =
@@ -4606,12 +4629,11 @@ mod tests {
             let secret_key_4 = SecretKey::new(&mut rng);
             let secret_key_5 = SecretKey::new(&mut rng);
 
-            let partial_secret_keys_3 = vec![
+            let partial_secret_keys_3 = Zeroizing::new(vec![
                 secret_key_3.display_secret().to_string(),
                 secret_key_4.display_secret().to_string(),
                 secret_key_5.display_secret().to_string(),
-            ];
-
+            ]);
             let aggregated_public_key_2 =
                 key_manager.import_partial_secret_keys(partial_secret_keys_3, REGTEST)?;
 
@@ -4624,7 +4646,8 @@ mod tests {
             let private_key_1 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
             let private_key_2 = PrivateKey::new(SecretKey::new(&mut rng), REGTEST);
 
-            let partial_private_keys = vec![private_key_1.to_wif(), private_key_2.to_wif()];
+            let partial_private_keys =
+                Zeroizing::new(vec![private_key_1.to_wif(), private_key_2.to_wif()]);
 
             let aggregated_public_key_3 =
                 key_manager.import_partial_private_keys(partial_private_keys, REGTEST)?;
@@ -4635,10 +4658,10 @@ mod tests {
                 .expect("WIF-based aggregated keypair should exist in keystore");
 
             // Test Case 4: Test with different networks
-            let mainnet_partial_keys = vec![
+            let mainnet_partial_keys = Zeroizing::new(vec![
                 PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
                 PrivateKey::new(SecretKey::new(&mut rng), bitcoin::Network::Bitcoin).to_wif(),
-            ];
+            ]);
 
             let mainnet_aggregated = key_manager
                 .import_partial_private_keys(mainnet_partial_keys, bitcoin::Network::Bitcoin)?;
@@ -4700,10 +4723,10 @@ mod tests {
                 .expect("Mainnet aggregated key should exist");
 
             // Test Case 8: Test idempotent behavior - same partial keys should produce same result
-            let duplicate_partial_keys = vec![
+            let duplicate_partial_keys = Zeroizing::new(vec![
                 secret_key_1.display_secret().to_string(),
                 secret_key_2.display_secret().to_string(),
-            ];
+            ]);
 
             let duplicate_aggregated =
                 key_manager.import_partial_secret_keys(duplicate_partial_keys, REGTEST)?;
@@ -4733,7 +4756,7 @@ mod tests {
          */
         run_test_with_key_manager(|key_manager| -> Result<(), KeyManagerError> {
             // Test Case 1: Try with empty keys list
-            let empty_keys: Vec<String> = vec![];
+            let empty_keys: Zeroizing<Vec<String>> = Zeroizing::new(vec![]);
             let result1 = key_manager.import_partial_secret_keys(empty_keys, REGTEST);
             match result1 {
                 Err(KeyManagerError::InvalidPrivateKey) => (),
@@ -4746,7 +4769,7 @@ mod tests {
             // Test Case 2: Try to aggregate a single key (musig2 accepts single-key aggregation)
             let mut rng = secp256k1::rand::thread_rng();
             let secret_key = secp256k1::SecretKey::new(&mut rng);
-            let single_key = vec![secret_key.display_secret().to_string()];
+            let single_key = Zeroizing::new(vec![secret_key.display_secret().to_string()]);
 
             let result2 = key_manager.import_partial_secret_keys(single_key.clone(), REGTEST);
             // musig2 may accept a single key and return a valid aggregated pubkey; assert success
@@ -4764,78 +4787,78 @@ mod tests {
             );
 
             // Test Case 3: Invalid hex in partial secret keys
-            let invalid_hex_keys = vec![
+            let invalid_hex_keys = Zeroizing::new(vec![
                 "invalid_hex_string".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result3 = key_manager.import_partial_secret_keys(invalid_hex_keys, REGTEST);
             assert!(result3.is_err(), "Invalid hex should fail parsing");
 
             // Test Case 4: Invalid WIF in partial private keys
-            let invalid_wif_keys = vec![
+            let invalid_wif_keys = Zeroizing::new(vec![
                 "invalid_wif_string".to_string(),
                 "5J1F7GHadZG3sCCKHCwg8Jvys9xUbFsjLnGec4H294LvTJ".to_string(),
-            ];
+            ]);
             let result4 = key_manager.import_partial_private_keys(invalid_wif_keys, REGTEST);
             assert!(result4.is_err(), "Invalid WIF should fail parsing");
 
             // Test Case 5: Mixed valid and invalid keys
-            let mixed_keys = vec![
+            let mixed_keys = Zeroizing::new(vec![
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
                 "not_a_valid_key".to_string(),
                 "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_string(),
-            ];
+            ]);
             let result5 = key_manager.import_partial_secret_keys(mixed_keys, REGTEST);
             assert!(result5.is_err(), "Mixed valid/invalid keys should fail");
 
             // Test Case 6: All zero secret keys (invalid for cryptography)
-            let zero_keys = vec![
+            let zero_keys = Zeroizing::new(vec![
                 "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
                 "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
-            ];
+            ]);
             let result6 = key_manager.import_partial_secret_keys(zero_keys, REGTEST);
             assert!(result6.is_err(), "All-zero keys should fail");
 
             // Test Case 7: Keys above secp256k1 curve order
-            let above_curve_keys = vec![
+            let above_curve_keys = Zeroizing::new(vec![
                 "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result7 = key_manager.import_partial_secret_keys(above_curve_keys, REGTEST);
             assert!(result7.is_err(), "Keys above curve order should fail");
 
             // Test Case 8: Wrong length hex strings
-            let wrong_length_keys = vec![
+            let wrong_length_keys = Zeroizing::new(vec![
                 "0123456789abcdef".to_string(), // Too short
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(), // Correct
-            ];
+            ]);
             let result8 = key_manager.import_partial_secret_keys(wrong_length_keys, REGTEST);
             assert!(result8.is_err(), "Wrong length keys should fail");
 
             // Test Case 9: Empty strings in partial keys
-            let empty_string_keys = vec![
+            let empty_string_keys = Zeroizing::new(vec![
                 "".to_string(),
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-            ];
+            ]);
             let result9 = key_manager.import_partial_secret_keys(empty_string_keys, REGTEST);
             assert!(result9.is_err(), "Empty string keys should fail");
 
             // Test Case 10: Special characters and whitespace
-            let special_char_keys = vec![
+            let special_char_keys = Zeroizing::new(vec![
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
                 "fedcba9876543210 fedcba9876543210 fedcba9876543210 fedcba9876543210".to_string(), // With spaces
-            ];
+            ]);
             let result10 = key_manager.import_partial_secret_keys(special_char_keys, REGTEST);
             assert!(result10.is_err(), "Keys with spaces should fail");
 
             // Test Case 11: Too many partial keys (test system limits)
-            let mut too_many_keys = Vec::new();
+            let mut too_many_keys = Zeroizing::new(Vec::new());
             let mut rng = secp256k1::rand::thread_rng();
 
             for _ in 0..100 {
                 // Create 100 keys to test limits
                 let secret_key = SecretKey::new(&mut rng);
-                too_many_keys.push(secret_key.display_secret().to_string());
+                (*too_many_keys).push(secret_key.display_secret().to_string());
             }
 
             let _result11 = key_manager.import_partial_secret_keys(too_many_keys, REGTEST);
@@ -4846,10 +4869,10 @@ mod tests {
             // Try a valid aggregation to ensure the KeyManager still works
             let valid_secret_1 = SecretKey::new(&mut rng);
             let valid_secret_2 = SecretKey::new(&mut rng);
-            let valid_keys = vec![
+            let valid_keys = Zeroizing::new(vec![
                 valid_secret_1.display_secret().to_string(),
                 valid_secret_2.display_secret().to_string(),
-            ];
+            ]);
 
             let valid_result = key_manager.import_partial_secret_keys(valid_keys, REGTEST);
             assert!(
@@ -5018,7 +5041,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5036,7 +5059,7 @@ mod tests {
 
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence2.to_string()),
+            Some(mnemonic_sentence2.to_string().into()),
             None,
         );
 
@@ -5080,8 +5103,8 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(passphrase1.clone()),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(passphrase1.clone().into()),
         );
 
         let key_manager1 =
@@ -5092,8 +5115,8 @@ mod tests {
         // --- Test 1: Create KeyManager with same mnemonic and same passphrase (should succeed)
         let key_manager_config2 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(passphrase1.clone()),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(passphrase1.clone().into()),
         );
 
         let key_manager2 =
@@ -5106,8 +5129,8 @@ mod tests {
 
         let key_manager_config3 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
-            Some(different_passphrase),
+            Some(mnemonic_sentence.to_string().into()),
+            Some(different_passphrase.into()),
         );
 
         let result =
@@ -5146,7 +5169,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5162,7 +5185,7 @@ mod tests {
 
             // Store a corrupted seed (different from what the mnemonic would generate)
             let corrupted_seed = [0u8; 64]; // All zeros - definitely wrong
-            keystore.store_key_derivation_seed(corrupted_seed)?;
+            keystore.store_key_derivation_seed(zeroize::Zeroizing::new(corrupted_seed))?;
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to seed validation)
@@ -5196,7 +5219,7 @@ mod tests {
 
         let key_manager_config1 = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5213,7 +5236,7 @@ mod tests {
 
             // Store a corrupted Winternitz seed (different from what would be derived)
             let corrupted_winternitz_seed = [0u8; 32]; // All zeros - definitely wrong
-            keystore.store_winternitz_seed(corrupted_winternitz_seed)?;
+            keystore.store_winternitz_seed(zeroize::Zeroizing::new(corrupted_winternitz_seed))?;
         }
 
         // --- Try to create KeyManager with the same mnemonic (should fail due to Winternitz seed validation)
@@ -5289,7 +5312,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "regtest".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5303,7 +5326,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(REGTEST, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(REGTEST, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5322,7 +5345,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5360,7 +5383,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5408,7 +5431,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5450,7 +5473,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5532,7 +5555,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "testnet".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5546,7 +5569,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Testnet, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Testnet, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "tprv8ZgxMBicQKsPe5YMU9gHen4Ez3ApihUfykaqUorj9t6FDqy3nP6eoXiAo2ssvpAjoLroQxHqr3R5nE3a5dU3DHTjTgJDd7zrbniJr6nrCzd";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5565,7 +5588,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "tprv8fPDJN9UQqg6pFsQsrVxTwHZmXLvHpfGGcsCA9rtnatUgVtBKxhtFeqiyaYKSWydunKpjhvgJf6PwTwgirwuCbFq8YKgpQiaVJf3JCrNmkR";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5603,7 +5626,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "uprv91G7gZkzehuMVxDJTYE6tLivdF8e4rvzSu1LFfKw3b2Qx1Aj8vpoFnHdfUZ3hmi9jsvPifmZ24RTN2KhwB8BfMLTVqaBReibyaFFcTP1s9n";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5651,7 +5674,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "vprv9K7GLAaERuM58PVvbk1sMo7wzVCoPwzZpVXLRBmum93gL5pSqQCAAvZjtmz93nnnYMr9i2FwG2fqrwYLRgJmDDwFjGiamGsbRMJ5Y6siJ8H";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5693,7 +5716,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "tprv8gytrHbFLhE7zLJ6BvZWEDDGJe8aS8VrmFnvqpMv8CEZtUbn2NY5KoRKQNpkcL1yniyCBRi7dAPy4kUxHkcSvd9jzLmLMEG96TPwant2jbX";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5773,7 +5796,7 @@ mod tests {
 
         let key_manager_config = crate::config::KeyManagerConfig::new(
             "bitcoin".to_string(),
-            Some(mnemonic_sentence.to_string()),
+            Some(mnemonic_sentence.to_string().into()),
             None,
         );
 
@@ -5787,7 +5810,7 @@ mod tests {
         let expected_key_derivation_seed = "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4";
         assert_eq!(key_derivation_seed_hex, expected_key_derivation_seed);
 
-        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(Network::Bitcoin, &*key_derivation_seed)?;
         let master_xpriv_hex = master_xpriv.to_string();
         let expected_master_xpriv = "xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu";
         assert_eq!(master_xpriv_hex, expected_master_xpriv);
@@ -5806,7 +5829,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2pkh)?;
         let expected_account_extended_privkey = "xprv9xpXFhFpqdQK3TmytPBqXtGSwS3DLjojFhTGht8gwAAii8py5X6pxeBnQ6ehJiyJ6nDjWGJfZ95WxByFXVkDxHXrqu53WCRGypk2ttuqncb";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5844,7 +5867,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2shP2wpkh)?;
         let expected_account_extended_privkey = "yprvAHwhK6RbpuS3dgCYHM5jc2ZvEKd7Bi61u9FVhYMpgMSuZS613T1xxQeKTffhrHY79hZ5PsskBjcc6C2V7DrnsMsNaGDaWev3GLRQRgV7hxF";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5892,7 +5915,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2wpkh)?;
         let expected_account_extended_privkey = "zprvAdG4iTXWBoARxkkzNpNh8r6Qag3irQB8PzEMkAFeTRXxHpbF9z4QgEvBRmfvqWvGp42t42nvgGpNgYSJA9iefm1yYNZKEm7z6qUWCroSQnE";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 
@@ -5934,7 +5957,7 @@ mod tests {
             key_manager.get_account_xpriv_string(BitcoinKeyType::P2tr)?;
         let expected_account_extended_privkey = "xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
         assert_eq!(
-            account_extended_privkey_hex,
+            *account_extended_privkey_hex,
             expected_account_extended_privkey
         );
 

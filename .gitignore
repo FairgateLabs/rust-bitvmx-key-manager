@@ -5,3 +5,4 @@ Cargo.lock
 secure_storage.db
 /test_output
 /examples/storage/*.db
+/examples/storage/*.db-plain

@@ -884,7 +884,9 @@ impl MuSig2Signer {
         let new_index = {
             let db_tx_id = self.store.begin_transaction();
 
-            let current_index = self.store.get::<String, u32>(key_index_used_by_me.clone())?;
+            let current_index = self
+                .store
+                .get::<String, u32>(key_index_used_by_me.clone())?;
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, None)?;
 

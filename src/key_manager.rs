@@ -632,7 +632,8 @@ impl KeyManager {
         let index = {
             let tx_id = self.keystore.begin_transaction();
             let index = self.next_keypair_index(key_type)?;
-            self.keystore.store_next_keypair_index(key_type, index + 1)?;
+            self.keystore
+                .store_next_keypair_index(key_type, index + 1)?;
             self.keystore.commit_transaction(tx_id)?;
             index
         };
@@ -661,7 +662,8 @@ impl KeyManager {
         let index = {
             let tx_id = self.keystore.begin_transaction();
             let index = self.next_keypair_index(key_type)?;
-            self.keystore.store_next_keypair_index(key_type, index + 1)?;
+            self.keystore
+                .store_next_keypair_index(key_type, index + 1)?;
             self.keystore.commit_transaction(tx_id)?;
             index
         };
@@ -863,7 +865,8 @@ impl KeyManager {
         let initial_index = {
             let tx_id = self.keystore.begin_transaction();
             let initial_index = self.next_winternitz_index()?;
-            self.keystore.store_next_winternitz_index(initial_index + number_of_keys)?;
+            self.keystore
+                .store_next_winternitz_index(initial_index + number_of_keys)?;
             self.keystore.commit_transaction(tx_id)?;
             initial_index
         };

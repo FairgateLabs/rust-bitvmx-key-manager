@@ -48,7 +48,7 @@ impl KeyStore {
 
     /**
         Dev note: key_type is optional to maintain compatibility with older stored keys
-        its is stored as a prefix in the private key string, separated by a ":"
+        it is stored as a prefix in the private key string, separated by a ":"
         in the case of no key type, the prefix is "unknown"
     */
 
@@ -111,7 +111,7 @@ impl KeyStore {
         let key_type_str = format!("{:?}", key_type);
         let typed_next_keypair_index_key =
             format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        // this will store the next keypair index for the given key type eg: p2tr:next_keypair_index
+        // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
         self.store.set(typed_next_keypair_index_key, index, None)?;
         Ok(())
     }

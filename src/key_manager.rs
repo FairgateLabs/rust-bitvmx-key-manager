@@ -731,8 +731,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make this func private in the future to force the usage of next_winternitz
-    pub fn derive_winternitz(
+    fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
         key_type: WinternitzType,
@@ -796,8 +795,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make this func private in the future to force the usage of next_multiple_winternitz
-    pub fn derive_multiple_winternitz(
+    fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
         key_type: WinternitzType,
@@ -1107,7 +1105,7 @@ impl KeyManager {
     }
 
     // For one-time winternitz keys
-    pub fn sign_winternitz_message(
+    fn sign_winternitz_message_by_index(
         &self,
         message_bytes: &[u8],
         key_type: WinternitzType,
@@ -1136,13 +1134,13 @@ impl KeyManager {
         Ok(signature)
     }
 
-    // For one-time winternitz keys
+    // For one-time winternitz keys // TODO change name to sign_winternitz_message
     pub fn sign_winternitz_message_by_pubkey(
         &self,
         message_bytes: &[u8],
         public_key: &WinternitzPublicKey,
     ) -> Result<WinternitzSignature, KeyManagerError> {
-        self.sign_winternitz_message(
+        self.sign_winternitz_message_by_index(
             message_bytes,
             public_key.key_type(),
             public_key.derivation_index()?,
@@ -1669,8 +1667,11 @@ mod tests {
         let message = random_message();
 
         let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0)?;
-        let signature =
-            key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)?;
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::SHA256,
+            0,
+        )?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
@@ -1692,8 +1693,11 @@ mod tests {
         let message = Message::from_digest(digest);
 
         let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 0)?;
-        let signature =
-            key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::HASH160,
+            0,
+        )?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 

@@ -51,9 +51,9 @@ fn criterion_benchmark(_c: &mut Criterion) {
             ),
             |b| {
                 b.iter(|| {
-                    for i in 0..number_of_keys {
+                    for _ in 0..number_of_keys {
                         key_manager
-                            .derive_winternitz(32, WinternitzType::HASH160, i)
+                            .next_winternitz(32, WinternitzType::HASH160)
                             .unwrap();
                     }
                 })
@@ -67,10 +67,9 @@ fn criterion_benchmark(_c: &mut Criterion) {
             ),
             |b| {
                 b.iter(|| {
-                    key_manager.derive_multiple_winternitz(
+                    key_manager.next_multiple_winternitz(
                         32,
                         WinternitzType::HASH160,
-                        0,
                         number_of_keys,
                     )
                 })

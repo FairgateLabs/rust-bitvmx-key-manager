@@ -772,7 +772,9 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
+        // TODO check if transactional feature flag could be applied (what to save as transaction_id if disabled?)
         let transaction_id = self.store.begin_transaction();
+
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -831,7 +833,9 @@ impl MuSig2Signer {
             message_ids,
             Some(transaction_id),
         )?;
+
         self.store.commit_transaction(transaction_id)?;
+
         Ok(())
     }
 
@@ -882,6 +886,7 @@ impl MuSig2Signer {
 
         // Atomic transaction: increment and return nonce index, using a closure just for readability
         let new_index = {
+            #[cfg(feature = "transactional")]
             let db_tx_id = self.store.begin_transaction();
 
             let current_index = self
@@ -890,7 +895,9 @@ impl MuSig2Signer {
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, None)?;
 
+            #[cfg(feature = "transactional")]
             self.store.commit_transaction(db_tx_id)?;
+
             new_index
         };
 
@@ -1099,7 +1106,9 @@ impl MuSig2Signer {
             musig2_data
         );
 
+        // TODO check if transactional feature flag could be applied (what to save as transaction_id if disabled?)
         let transaction_id = self.store.begin_transaction();
+
         self.store.set(
             self.get_key(StoreKey::MuSig2ParticipantPubKeys {
                 aggregated_pubkey: musig2_data.0.to_string(),
@@ -1114,6 +1123,7 @@ impl MuSig2Signer {
             musig2_data.2,
             Some(transaction_id),
         )?;
+
         self.store.commit_transaction(transaction_id)?;
 
         Ok(())

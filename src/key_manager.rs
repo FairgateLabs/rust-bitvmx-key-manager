@@ -630,11 +630,16 @@ impl KeyManager {
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
         let index = {
+            #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
+
             let index = self.next_keypair_index(key_type)?;
             self.keystore
                 .store_next_keypair_index(key_type, index + 1)?;
+
+            #[cfg(feature = "transactional")]
             self.keystore.commit_transaction(tx_id)?;
+
             index
         };
 
@@ -660,11 +665,16 @@ impl KeyManager {
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
         let index = {
+            #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
+
             let index = self.next_keypair_index(key_type)?;
             self.keystore
                 .store_next_keypair_index(key_type, index + 1)?;
+
+            #[cfg(feature = "transactional")]
             self.keystore.commit_transaction(tx_id)?;
+
             index
         };
 
@@ -790,10 +800,15 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
         let index = {
+            #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
+
             let index = self.next_winternitz_index()?;
             self.keystore.store_next_winternitz_index(index + 1)?;
+
+            #[cfg(feature = "transactional")]
             self.keystore.commit_transaction(tx_id)?;
+
             index
         };
 
@@ -863,11 +878,16 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
         let initial_index = {
+            #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
+
             let initial_index = self.next_winternitz_index()?;
             self.keystore
                 .store_next_winternitz_index(initial_index + number_of_keys)?;
+
+            #[cfg(feature = "transactional")]
             self.keystore.commit_transaction(tx_id)?;
+
             initial_index
         };
 

@@ -460,8 +460,8 @@ impl KeyManager {
         network: Network,
         account: u32,
     ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
-        // Dev note: Using coin type as its nice to differentiate by network, winternitz are OT,
-        // so they should not be repeated across different networks, to avoid a kind of take from testnet and use in mainnet attack
+        // Dev note: Using coin type as it's nice to differentiate by network, winternitz are OT,
+        // so they should not be repeated across different networks, to avoid a kind of "take from testnet and use in mainnet" attack
         let wots_full_derivation_path = Self::build_bip44_derivation_path(
             Self::WINTERNITZ_PURPOSE_INDEX,
             Self::get_bitcoin_coin_type_by_network(network),
@@ -565,7 +565,7 @@ impl KeyManager {
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
-        // the standars the parity should not be modified here at derivation time.
+        // the standards the parity should not be modified here at derivation time.
 
         let public_key = PublicKey::new(internal_keypair.public_key());
         let private_key = PrivateKey::new(internal_keypair.secret_key(), self.network);
@@ -596,7 +596,7 @@ impl KeyManager {
         let internal_keypair = xpriv.to_keypair(&self.secp);
 
         // Dev Note: taproot keys use “x-only with even-Y” at address generation time, but to follow
-        // the standars the parity should not be modified here at derivation time.
+        // the standards the parity should not be modified here at derivation time.
         // but in the case of this function, we adjust parity here just to facilitate that the user
         // in case he want the parity adjusted key to use it a some low lvl taproot/musig construction
 
@@ -626,11 +626,24 @@ impl KeyManager {
     /// - The sequence of generated keys is deterministic and recoverable
     ///
     pub fn next_keypair(&self, key_type: BitcoinKeyType) -> Result<PublicKey, KeyManagerError> {
-        let index = self.next_keypair_index(key_type)?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
+        // it will be the wallet reposibility to detect if that key has been used or not.
+        let index = {
+            #[cfg(feature = "transactional")]
+            let tx_id = self.keystore.begin_transaction();
+
+            let index = self.next_keypair_index(key_type)?;
+            self.keystore
+                .store_next_keypair_index(key_type, index + 1)?;
+
+            #[cfg(feature = "transactional")]
+            self.keystore.commit_transaction(tx_id)?;
+
+            index
+        };
+
         let pubkey = self.derive_keypair(key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_keypair_index(key_type, index + 1)?;
         Ok(pubkey)
     }
 
@@ -648,11 +661,24 @@ impl KeyManager {
         &self,
         key_type: BitcoinKeyType,
     ) -> Result<PublicKey, KeyManagerError> {
-        let index = self.next_keypair_index(key_type)?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
+        // it will be the wallet reposibility to detect if that key has been used or not.
+        let index = {
+            #[cfg(feature = "transactional")]
+            let tx_id = self.keystore.begin_transaction();
+
+            let index = self.next_keypair_index(key_type)?;
+            self.keystore
+                .store_next_keypair_index(key_type, index + 1)?;
+
+            #[cfg(feature = "transactional")]
+            self.keystore.commit_transaction(tx_id)?;
+
+            index
+        };
+
         let pubkey = self.derive_keypair_adjust_parity(key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_keypair_index(key_type, index + 1)?;
         Ok(pubkey)
     }
 
@@ -707,7 +733,7 @@ impl KeyManager {
     ) -> Result<PublicKey, KeyManagerError> {
         let secp = secp256k1::Secp256k1::new();
 
-        // key type seems irrelevant here, as we will start from account xpub that alrady has its key_type (purpose) specified,
+        // key type seems irrelevant here, as we will start from account xpub that already has its key_type (purpose) specified,
         // and we will add just the chain path, but we need it in order to know if we need to adjust parity or not for the final key
 
         // Build the full derivation path and extract only the chain part after account level
@@ -770,10 +796,22 @@ impl KeyManager {
         message_size_in_bytes: usize,
         key_type: WinternitzType,
     ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
-        let index = self.next_winternitz_index()?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        let index = {
+            #[cfg(feature = "transactional")]
+            let tx_id = self.keystore.begin_transaction();
+
+            let index = self.next_winternitz_index()?;
+            self.keystore.store_next_winternitz_index(index + 1)?;
+
+            #[cfg(feature = "transactional")]
+            self.keystore.commit_transaction(tx_id)?;
+
+            index
+        };
+
         let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
-        // if derivation was successful, store the next index
-        self.keystore.store_next_winternitz_index(index + 1)?;
         Ok(pubkey)
     }
 
@@ -835,16 +873,28 @@ impl KeyManager {
         key_type: WinternitzType,
         number_of_keys: u32,
     ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
-        let initial_index = self.next_winternitz_index()?;
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        let initial_index = {
+            #[cfg(feature = "transactional")]
+            let tx_id = self.keystore.begin_transaction();
+
+            let initial_index = self.next_winternitz_index()?;
+            self.keystore
+                .store_next_winternitz_index(initial_index + number_of_keys)?;
+
+            #[cfg(feature = "transactional")]
+            self.keystore.commit_transaction(tx_id)?;
+
+            initial_index
+        };
+
         let pubkeys = self.derive_multiple_winternitz(
             message_size_in_bytes,
             key_type,
             initial_index,
             number_of_keys,
         )?;
-        // if derivation was successful, store the next index
-        self.keystore
-            .store_next_winternitz_index(initial_index + number_of_keys)?;
         Ok(pubkeys)
     }
 

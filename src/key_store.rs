@@ -111,12 +111,13 @@ impl KeyStore {
         &self,
         key_type: BitcoinKeyType,
         index: u32,
+        transaction_id: Option<Uuid>
     ) -> Result<(), KeyManagerError> {
         let key_type_str = format!("{:?}", key_type);
         let typed_next_keypair_index_key =
             format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
         // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
-        self.store.set(typed_next_keypair_index_key, index, None)?;
+        self.store.set(typed_next_keypair_index_key, index, transaction_id)?;
         Ok(())
     }
 
@@ -133,11 +134,11 @@ impl KeyStore {
         }
     }
 
-    pub fn store_next_winternitz_index(&self, index: u32) -> Result<(), KeyManagerError> {
+    pub fn store_next_winternitz_index(&self, index: u32, transaction_id: Option<Uuid>) -> Result<(), KeyManagerError> {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next winternitz index
         self.store
-            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, None)?;
+            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, transaction_id)?;
         Ok(())
     }
 

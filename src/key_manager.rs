@@ -629,17 +629,18 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
-        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
-            let tx_id = self.keystore.begin_transaction();
+            let tx_id = Some(self.keystore.begin_transaction());
+            #[cfg(not(feature = "transactional"))]
+            let tx_id = None;
 
             let index = self.next_keypair_index(key_type)?;
             self.keystore
-                .store_next_keypair_index(key_type, index + 1)?;
+                .store_next_keypair_index(key_type, index + 1, tx_id)?;
 
             #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id)?;
+            self.keystore.commit_transaction(tx_id.unwrap())?;
 
             index
         };
@@ -665,17 +666,18 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
-        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
-            let tx_id = self.keystore.begin_transaction();
+            let tx_id = Some(self.keystore.begin_transaction());
+            #[cfg(not(feature = "transactional"))]
+            let tx_id = None;
 
             let index = self.next_keypair_index(key_type)?;
             self.keystore
-                .store_next_keypair_index(key_type, index + 1)?;
+                .store_next_keypair_index(key_type, index + 1, tx_id)?;
 
             #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id)?;
+            self.keystore.commit_transaction(tx_id.unwrap())?;
 
             index
         };
@@ -801,16 +803,17 @@ impl KeyManager {
     ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
-        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
-            let tx_id = self.keystore.begin_transaction();
+            let tx_id = Some(self.keystore.begin_transaction());
+            #[cfg(not(feature = "transactional"))]
+            let tx_id = None;
 
             let index = self.next_winternitz_index()?;
-            self.keystore.store_next_winternitz_index(index + 1)?;
+            self.keystore.store_next_winternitz_index(index + 1, tx_id)?;
 
             #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id)?;
+            self.keystore.commit_transaction(tx_id.unwrap())?;
 
             index
         };
@@ -880,17 +883,18 @@ impl KeyManager {
     ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
-        // TODO pass tx_id to store methods to have full transactionality
         let initial_index = {
             #[cfg(feature = "transactional")]
-            let tx_id = self.keystore.begin_transaction();
+            let tx_id = Some(self.keystore.begin_transaction());
+            #[cfg(not(feature = "transactional"))]
+            let tx_id = None;
 
             let initial_index = self.next_winternitz_index()?;
             self.keystore
-                .store_next_winternitz_index(initial_index + number_of_keys)?;
+                .store_next_winternitz_index(initial_index + number_of_keys, tx_id)?;
 
             #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id)?;
+            self.keystore.commit_transaction(tx_id.unwrap())?;
 
             initial_index
         };
@@ -6080,4 +6084,101 @@ mod tests {
         cleanup_storage(&keystore_path);
         Ok(())
     }
+
+    #[test]
+    fn test_next_keypair_index_transactional_rollback() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "bitcoin".to_string(),
+            None,
+            None,
+        );
+
+        let key_manager =
+            crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
+
+        let key_type = BitcoinKeyType::P2tr;
+
+        // Get the initial index (should be 0)
+        let initial_index = key_manager.next_keypair_index(key_type).unwrap();
+        assert_eq!(initial_index, 0, "Initial index should be 0");
+
+        // Simulate a transaction that gets rolled back
+        // Begin transaction manually
+        let tx_id = key_manager.keystore.begin_transaction();
+
+        // Increment the index within the transaction
+        let current_index = key_manager.next_keypair_index(key_type).unwrap();
+        key_manager
+            .keystore
+            .store_next_keypair_index(key_type, current_index + 1, Some(tx_id))
+            .unwrap();
+
+        // Rollback the transaction before commit
+        key_manager
+            .keystore
+            .rollback_transaction(tx_id)
+            .unwrap();
+
+        // The index should NOT be incremented after rollback
+        let index_after_rollback = key_manager.next_keypair_index(key_type).unwrap();
+        assert_eq!(
+            index_after_rollback, initial_index,
+            "Index should remain unchanged after rollback"
+        );
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_next_winternitz_index_transactional_rollback() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager_config = crate::config::KeyManagerConfig::new(
+            "bitcoin".to_string(),
+            None,
+            None,
+        );
+
+        let key_manager =
+            crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
+
+        // Get the initial index (should be 0)
+        let initial_index = key_manager.next_winternitz_index().unwrap();
+        assert_eq!(initial_index, 0, "Initial index should be 0");
+
+        // Simulate a transaction that gets rolled back
+        // Begin transaction manually
+        let tx_id = key_manager.keystore.begin_transaction();
+
+        // Increment the index within the transaction
+        let current_index = key_manager.next_winternitz_index().unwrap();
+        key_manager
+            .keystore
+            .store_next_winternitz_index(current_index + 1, Some(tx_id))
+            .unwrap();
+
+        // Rollback the transaction before commit
+        key_manager
+            .keystore
+            .rollback_transaction(tx_id)
+            .unwrap();
+
+        // The index should NOT be incremented after rollback
+        let index_after_rollback = key_manager.next_winternitz_index().unwrap();
+        assert_eq!(
+            index_after_rollback, initial_index,
+            "Index should remain unchanged after rollback"
+        );
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
 }

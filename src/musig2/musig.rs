@@ -773,7 +773,7 @@ impl MuSig2Signer {
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
         #[cfg(feature = "transactional")]
-        let transaction_id = self.store.begin_transaction();
+        let transaction_id = Some(self.store.begin_transaction());
         #[cfg(not(feature = "transactional"))]
         let transaction_id = None;
 
@@ -784,7 +784,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.0,
-            Some(transaction_id),
+            transaction_id,
         )?;
         for (pub_key, pub_nonce) in data.1.iter() {
             self.store.set(
@@ -795,7 +795,7 @@ impl MuSig2Signer {
                     participant_pubkey: pub_key.to_string(),
                 }),
                 pub_nonce.clone(),
-                Some(transaction_id),
+                transaction_id,
             )?;
         }
         self.store.set(
@@ -805,7 +805,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.2,
-            Some(transaction_id),
+            transaction_id,
         )?;
         if let Some(tweak_value) = data.3 {
             self.store.set(
@@ -815,7 +815,7 @@ impl MuSig2Signer {
                     message_id: message_id.to_string(),
                 }),
                 tweak_value.to_be_bytes(),
-                Some(transaction_id),
+                transaction_id,
             )?;
         }
         let message_ids =
@@ -833,11 +833,11 @@ impl MuSig2Signer {
                 session_id: id.to_string(),
             }),
             message_ids,
-            Some(transaction_id),
+            transaction_id,
         )?;
 
         #[cfg(feature = "transactional")]
-        self.store.commit_transaction(transaction_id)?;
+        self.store.commit_transaction(transaction_id.unwrap())?;
 
         Ok(())
     }
@@ -888,19 +888,20 @@ impl MuSig2Signer {
         let key_index_used_by_me = self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key));
 
         // Atomic transaction: increment and return nonce index, using a closure just for readability
-        // TODO pass tx_id to store methods to have full transactionality
         let new_index = {
             #[cfg(feature = "transactional")]
-            let db_tx_id = self.store.begin_transaction();
+            let db_tx_id = Some(self.store.begin_transaction());
+            #[cfg(not(feature = "transactional"))]
+            let db_tx_id = None;
 
             let current_index = self
                 .store
                 .get::<String, u32>(key_index_used_by_me.clone())?;
             let new_index = current_index.map_or(0, |idx| idx + 1);
-            self.store.set(key_index_used_by_me, new_index, None)?;
+            self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
 
             #[cfg(feature = "transactional")]
-            self.store.commit_transaction(db_tx_id)?;
+            self.store.commit_transaction(db_tx_id.unwrap())?;
 
             new_index
         };
@@ -1111,7 +1112,7 @@ impl MuSig2Signer {
         );
 
         #[cfg(feature = "transactional")]
-        let transaction_id = self.store.begin_transaction();
+        let transaction_id = Some(self.store.begin_transaction());
         #[cfg(not(feature = "transactional"))]
         let transaction_id = None;
 
@@ -1120,19 +1121,18 @@ impl MuSig2Signer {
                 aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.1,
-            Some(transaction_id),
+            transaction_id,
         )?;
         self.store.set(
             self.get_key(StoreKey::MuSig2MyPublicKey {
                 aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.2,
-            Some(transaction_id),
+            transaction_id,
         )?;
 
         #[cfg(feature = "transactional")]
-        self.store.commit_transaction(transaction_id)?;
-
+        self.store.commit_transaction(transaction_id.unwrap())?;
         Ok(())
     }
 

@@ -629,6 +629,7 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
+        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
@@ -664,6 +665,7 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
+        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
@@ -799,6 +801,7 @@ impl KeyManager {
     ) -> Result<winternitz::WinternitzPublicKey, KeyManagerError> {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        // TODO pass tx_id to store methods to have full transactionality
         let index = {
             #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();
@@ -877,6 +880,7 @@ impl KeyManager {
     ) -> Result<Vec<winternitz::WinternitzPublicKey>, KeyManagerError> {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        // TODO pass tx_id to store methods to have full transactionality
         let initial_index = {
             #[cfg(feature = "transactional")]
             let tx_id = self.keystore.begin_transaction();

@@ -888,6 +888,7 @@ impl MuSig2Signer {
         let key_index_used_by_me = self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key));
 
         // Atomic transaction: increment and return nonce index, using a closure just for readability
+        // TODO pass tx_id to store methods to have full transactionality
         let new_index = {
             #[cfg(feature = "transactional")]
             let db_tx_id = self.store.begin_transaction();

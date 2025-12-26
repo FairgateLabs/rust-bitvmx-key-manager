@@ -1128,8 +1128,11 @@ impl KeyManager {
             index,
         )?;
 
+        // TODO make this transactional
+        // TODO check if index was saved, if its error, if not save and
         let signature =
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
+        // TODO save index and return (so signature error does not burn the index)
 
         Ok(signature)
     }

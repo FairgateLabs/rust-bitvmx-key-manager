@@ -62,6 +62,7 @@ name = "winternitz_bench"
 harness = false
 
 [features]
-default = ["transactional"] # transactional is ON by default, strict is OFF
+default = ["transactional", "wots_idx_check"] # transactional is ON by default, strict is OFF
+wots_idx_check = []
 transactional = []
 strict = []

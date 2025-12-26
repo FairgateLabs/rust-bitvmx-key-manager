@@ -107,6 +107,25 @@ run with `cargo run --example sign_verify_winternitz`
 - **[rsa:](examples/rsa.rs)**
 run with `cargo run --example rsa`
 
+## Feature Flags
+
+The library provides several compile-time feature flags to customize behavior:
+
+- **`transactional`** (enabled by default): Enables transactional database operations for atomicity guarantees when storing keys. When enabled, all database operations are wrapped in transactions to ensure consistency. Disable this feature if you need to use the library without transactional support.
+
+- **`wots_idx_check`** (enabled by default): Enables index validation checks for Winternitz One-Time Signature (WOTS) keys. This ensures that each WOTS key index is only used once, preventing security vulnerabilities from key reuse. It's highly recommended to keep this enabled for production use.
+
+- **`strict`** (disabled by default): Enables strict validation and additional safety checks throughout the library. When enabled, operations perform extra validation steps that may impact performance but provide stronger guarantees. Useful for development and testing environments.
+
+To use without default features:
+```toml
+bitvmx-key-manager = { version = "0.5.0", default-features = false }
+```
+
+To enable specific features:
+```toml
+bitvmx-key-manager = { version = "0.5.0", features = ["strict"] }
+```
 
 ## Contributing
 

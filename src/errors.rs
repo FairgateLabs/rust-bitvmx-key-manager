@@ -105,6 +105,12 @@ pub enum KeyManagerError {
 
     #[error("Failed to generate nonce seed using HKDF")]
     FailedToGenerateNonceSeed,
+
+    #[error("Winternitz index {0} has already been used")]
+    WinternitzIndexAlreadyUsed(u32),
+
+    #[error("Corrupted Winternitz index bitmap")]
+    CorruptedWinternitzIndexBitmap,
 }
 
 #[derive(Error, Debug)]

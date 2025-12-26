@@ -5,6 +5,7 @@ use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
+use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct KeyStore {
@@ -19,6 +20,10 @@ impl KeyStore {
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
+    const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
+    // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+    const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
+    const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -29,9 +34,25 @@ impl KeyStore {
         Rc::clone(&self.store)
     }
 
+    pub fn begin_transaction(&self) -> Uuid {
+        self.store.begin_transaction()
+    }
+
+    pub fn commit_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
+        self.store
+            .commit_transaction(transaction_id)
+            .map_err(|e| KeyManagerError::from(e))
+    }
+
+    pub fn rollback_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
+        self.store
+            .rollback_transaction(transaction_id)
+            .map_err(|e| KeyManagerError::from(e))
+    }
+
     /**
         Dev note: key_type is optional to maintain compatibility with older stored keys
-        its is stored as a prefix in the private key string, separated by a ":"
+        it is stored as a prefix in the private key string, separated by a ":"
         in the case of no key type, the prefix is "unknown"
     */
 
@@ -90,12 +111,13 @@ impl KeyStore {
         &self,
         key_type: BitcoinKeyType,
         index: u32,
+        transaction_id: Option<Uuid>
     ) -> Result<(), KeyManagerError> {
         let key_type_str = format!("{:?}", key_type);
         let typed_next_keypair_index_key =
             format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        // this will store the next keypair index for the given key type eg: p2tr:next_keypair_index
-        self.store.set(typed_next_keypair_index_key, index, None)?;
+        // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
+        self.store.set(typed_next_keypair_index_key, index, transaction_id)?;
         Ok(())
     }
 
@@ -112,11 +134,11 @@ impl KeyStore {
         }
     }
 
-    pub fn store_next_winternitz_index(&self, index: u32) -> Result<(), KeyManagerError> {
+    pub fn store_next_winternitz_index(&self, index: u32, transaction_id: Option<Uuid>) -> Result<(), KeyManagerError> {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next winternitz index
         self.store
-            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, None)?;
+            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, transaction_id)?;
         Ok(())
     }
 
@@ -165,6 +187,48 @@ impl KeyStore {
             Some(entry) => Ok(Zeroizing::new(entry)),
             None => Err(KeyManagerError::WinternitzSeedNotFound),
         }
+    }
+
+    // this index is independent of the index used for key derivation, it is marked when used in a signature
+    pub fn check_and_mark_winternitz_index_used(
+        &self,
+        index: u32,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(),KeyManagerError> {
+        // Bitmap with block size of 1024 indices for efficiency
+        // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
+
+        let block_num = (index as u64) / Self::WOTS_CHECK_BLOCK_SIZE;
+        let bit_pos = (index as u64) % Self::WOTS_CHECK_BLOCK_SIZE;
+
+        let byte_index = (bit_pos / 8) as usize;
+        let bit_index = (bit_pos % 8) as u8;
+
+        // Load the block from storage (or create new if doesn't exist)
+        let block_key = format!("{}:{}", Self::WINTERNITZ_INDEX_BLOCK_KEY, block_num);
+        let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone())? {
+            Some(block) => block,
+            None => vec![0u8; Self::WOTS_CHECK_BLOCK_BYTES], // Create new empty block
+        };
+
+        // Validate block size
+        if block.len() != Self::WOTS_CHECK_BLOCK_BYTES {
+            return Err(KeyManagerError::CorruptedWinternitzIndexBitmap);
+        }
+
+        // Check if the bit is already set (index already used)
+        let mask = 1u8 << bit_index;
+        if block[byte_index] & mask != 0 {
+            return Err(KeyManagerError::WinternitzIndexAlreadyUsed(index));
+        }
+
+        // Mark the bit as used
+        block[byte_index] |= mask;
+
+        // Store the updated block back to storage
+        self.store.set(block_key, block, transaction_id)?;
+
+        Ok(())
     }
 
     pub fn store_key_derivation_seed(

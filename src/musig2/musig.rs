@@ -772,8 +772,10 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
-        // TODO check if transactional feature flag could be applied (what to save as transaction_id if disabled?)
+        #[cfg(feature = "transactional")]
         let transaction_id = self.store.begin_transaction();
+        #[cfg(not(feature = "transactional"))]
+        let transaction_id = None;
 
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
@@ -834,6 +836,7 @@ impl MuSig2Signer {
             Some(transaction_id),
         )?;
 
+        #[cfg(feature = "transactional")]
         self.store.commit_transaction(transaction_id)?;
 
         Ok(())
@@ -1106,8 +1109,10 @@ impl MuSig2Signer {
             musig2_data
         );
 
-        // TODO check if transactional feature flag could be applied (what to save as transaction_id if disabled?)
+        #[cfg(feature = "transactional")]
         let transaction_id = self.store.begin_transaction();
+        #[cfg(not(feature = "transactional"))]
+        let transaction_id = None;
 
         self.store.set(
             self.get_key(StoreKey::MuSig2ParticipantPubKeys {
@@ -1124,6 +1129,7 @@ impl MuSig2Signer {
             Some(transaction_id),
         )?;
 
+        #[cfg(feature = "transactional")]
         self.store.commit_transaction(transaction_id)?;
 
         Ok(())

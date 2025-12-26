@@ -47,6 +47,7 @@ strum = { version = "0.26", features = ["derive"] }
 xyzpub = "0.3.0"
 zeroize = "1.8.2"
 redact = { version = "0.1", features = ["serde", "zeroize"] }
+uuid = { version = "1.10.0", features = ["v4"] }
 
 [dev-dependencies]
 criterion = "0.6.0"
@@ -61,5 +62,6 @@ name = "winternitz_bench"
 harness = false
 
 [features]
-default = [] # strict is OFF by default
+default = ["transactional"] # transactional is ON by default, strict is OFF
+transactional = []
 strict = []

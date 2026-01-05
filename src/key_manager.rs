@@ -1172,11 +1172,9 @@ impl KeyManager {
         )?;
 
         // TODO check vec<u8> type with transactions implementation
-        // #[cfg(feature = "transactional")]
-        let tx_id = None; // TODO transaction suspeded
-        // let tx_id = self.keystore.begin_transaction(); // TODO transaction suspeded
-        // #[cfg(not(feature = "transactional"))]
-        // let tx_id = None;
+
+        let tx_id = None; // TODO transaction suspended
+        // let tx_id = self.begin_transaction(); // TODO transaction suspended
 
         // check if index was already used, if its error, if not mark and save
         #[cfg(feature = "wots_idx_check")]
@@ -1185,8 +1183,7 @@ impl KeyManager {
         let signature =
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
-        // #[cfg(feature = "transactional")]
-        // self.keystore.commit_transaction(tx_id)?; // TODO transaction suspeded
+        // self.commit_transaction(tx_id)?; // TODO transaction suspended
 
         Ok(signature)
     }

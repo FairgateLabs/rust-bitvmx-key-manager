@@ -6,8 +6,9 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
+use uuid::Uuid;
 use std::{collections::HashMap, rc::Rc, str::FromStr};
-use storage_backend::storage::{KeyValueStore, Storage};
+use storage_backend::{error::StorageError, storage::{KeyValueStore, Storage}};
 use tracing::{debug, error};
 use zeroize::Zeroizing;
 
@@ -772,10 +773,7 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
-        #[cfg(feature = "transactional")]
-        let transaction_id = Some(self.store.begin_transaction());
-        #[cfg(not(feature = "transactional"))]
-        let transaction_id = None;
+        let transaction_id = self.begin_transaction();
 
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
@@ -836,8 +834,7 @@ impl MuSig2Signer {
             transaction_id,
         )?;
 
-        #[cfg(feature = "transactional")]
-        self.store.commit_transaction(transaction_id.unwrap())?;
+        self.commit_transaction(transaction_id)?;
 
         Ok(())
     }
@@ -889,10 +886,7 @@ impl MuSig2Signer {
 
         // Atomic transaction: increment and return nonce index, using a closure just for readability
         let new_index = {
-            #[cfg(feature = "transactional")]
-            let db_tx_id = Some(self.store.begin_transaction());
-            #[cfg(not(feature = "transactional"))]
-            let db_tx_id = None;
+            let db_tx_id = self.begin_transaction();
 
             let current_index = self
                 .store
@@ -900,8 +894,7 @@ impl MuSig2Signer {
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
 
-            #[cfg(feature = "transactional")]
-            self.store.commit_transaction(db_tx_id.unwrap())?;
+            self.commit_transaction(db_tx_id)?;
 
             new_index
         };
@@ -1111,10 +1104,7 @@ impl MuSig2Signer {
             musig2_data
         );
 
-        #[cfg(feature = "transactional")]
-        let transaction_id = Some(self.store.begin_transaction());
-        #[cfg(not(feature = "transactional"))]
-        let transaction_id = None;
+        let transaction_id = self.begin_transaction();
 
         self.store.set(
             self.get_key(StoreKey::MuSig2ParticipantPubKeys {
@@ -1131,8 +1121,7 @@ impl MuSig2Signer {
             transaction_id,
         )?;
 
-        #[cfg(feature = "transactional")]
-        self.store.commit_transaction(transaction_id.unwrap())?;
+        self.commit_transaction(transaction_id)?;
         Ok(())
     }
 
@@ -1289,5 +1278,23 @@ impl MuSig2Signer {
         let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
 
         Ok((aggregated_private_key, aggregated_public_key))
+    }
+
+    // Private local begin transaction wrapper to manage feature flag
+    fn begin_transaction(&self) -> Option<Uuid> {
+        #[cfg(feature = "transactional")]
+        let tx_id = Some(self.store.begin_transaction());
+        #[cfg(not(feature = "transactional"))]
+        let tx_id = None;
+
+        tx_id
+    }
+
+    // Private local commit transaction wrapper to manage feature flag
+    fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), StorageError> {
+        #[cfg(feature = "transactional")]
+        self.store.commit_transaction(tx_id.unwrap())?;
+
+        Ok(())
     }
 }

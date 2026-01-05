@@ -14,6 +14,7 @@ use itertools::izip;
 use sha2::Sha256;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
@@ -630,17 +631,13 @@ impl KeyManager {
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
         let index = {
-            #[cfg(feature = "transactional")]
-            let tx_id = Some(self.keystore.begin_transaction());
-            #[cfg(not(feature = "transactional"))]
-            let tx_id = None;
+            let tx_id = self.begin_transaction();
 
             let index = self.next_keypair_index(key_type)?;
             self.keystore
                 .store_next_keypair_index(key_type, index + 1, tx_id)?;
 
-            #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id.unwrap())?;
+            self.commit_transaction(tx_id)?;
 
             index
         };
@@ -667,17 +664,13 @@ impl KeyManager {
         // if key derivation fails, the index is wasted, but this is an acceptable trade-off for better performance and parallelism.
         // it will be the wallet reposibility to detect if that key has been used or not.
         let index = {
-            #[cfg(feature = "transactional")]
-            let tx_id = Some(self.keystore.begin_transaction());
-            #[cfg(not(feature = "transactional"))]
-            let tx_id = None;
+            let tx_id = self.begin_transaction();
 
             let index = self.next_keypair_index(key_type)?;
             self.keystore
                 .store_next_keypair_index(key_type, index + 1, tx_id)?;
 
-            #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id.unwrap())?;
+            self.commit_transaction(tx_id)?;
 
             index
         };
@@ -803,16 +796,12 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
         let index = {
-            #[cfg(feature = "transactional")]
-            let tx_id = Some(self.keystore.begin_transaction());
-            #[cfg(not(feature = "transactional"))]
-            let tx_id = None;
+            let tx_id = self.begin_transaction();
 
             let index = self.next_winternitz_index()?;
             self.keystore.store_next_winternitz_index(index + 1, tx_id)?;
 
-            #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id.unwrap())?;
+            self.commit_transaction(tx_id)?;
 
             index
         };
@@ -882,17 +871,13 @@ impl KeyManager {
         // Dev note: Only the index increment is transactional to minimize database lock time.
         // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
         let initial_index = {
-            #[cfg(feature = "transactional")]
-            let tx_id = Some(self.keystore.begin_transaction());
-            #[cfg(not(feature = "transactional"))]
-            let tx_id = None;
+            let tx_id = self.begin_transaction();
 
             let initial_index = self.next_winternitz_index()?;
             self.keystore
                 .store_next_winternitz_index(initial_index + number_of_keys, tx_id)?;
 
-            #[cfg(feature = "transactional")]
-            self.keystore.commit_transaction(tx_id.unwrap())?;
+            self.commit_transaction(tx_id)?;
 
             initial_index
         };
@@ -1581,6 +1566,24 @@ impl KeyManager {
     /*pub fn get_aggregated_pubkey(&self, id: &str) -> Result<PublicKey, Musig2SignerError> {
         self.musig2.get_aggregated_pubkey(id)
     }*/
+
+    // Private local begin transaction wrapper to manage feature flag
+    fn begin_transaction(&self) -> Option<Uuid> {
+        #[cfg(feature = "transactional")]
+        let tx_id = Some(self.keystore.begin_transaction());
+        #[cfg(not(feature = "transactional"))]
+        let tx_id = None;
+
+        tx_id
+    }
+
+    // Private local commit transaction wrapper to manage feature flag
+    fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
+        #[cfg(feature = "transactional")]
+        self.keystore.commit_transaction(tx_id.unwrap())?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

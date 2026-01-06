@@ -1171,20 +1171,22 @@ impl KeyManager {
             index,
         )?;
 
-        // TODO check vec<u8> type with transactions implementation
-
-        let tx_id = None; // TODO transaction suspended
-        // let tx_id = self.begin_transaction(); // TODO transaction suspended
+        let tx_id = self.begin_transaction();
 
         // check if index was already used, if its error, if not mark and save
         #[cfg(feature = "wots_idx_check")]
-        self.keystore.check_and_mark_winternitz_index_used(index, tx_id)?;
+        match self.keystore.check_and_mark_winternitz_index_used(index, tx_id) {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
+            }
+        }
 
         let signature =
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
-        // self.commit_transaction(tx_id)?; // TODO transaction suspended
-
+        self.commit_transaction(tx_id)?;
         Ok(signature)
     }
 
@@ -1572,6 +1574,14 @@ impl KeyManager {
         let tx_id = None;
 
         tx_id
+    }
+
+    // Private local rollback transaction wrapper to manage feature flag
+    fn rollback_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
+        #[cfg(feature = "transactional")]
+        self.keystore.rollback_transaction(tx_id.unwrap())?;
+
+        Ok(())
     }
 
     // Private local commit transaction wrapper to manage feature flag

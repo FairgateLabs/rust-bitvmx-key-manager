@@ -21,7 +21,7 @@ impl KeyStore {
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
     const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
-    // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+                                                                       // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
 
@@ -111,13 +111,14 @@ impl KeyStore {
         &self,
         key_type: BitcoinKeyType,
         index: u32,
-        transaction_id: Option<Uuid>
+        transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
         let key_type_str = format!("{:?}", key_type);
         let typed_next_keypair_index_key =
             format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
         // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
-        self.store.set(typed_next_keypair_index_key, index, transaction_id)?;
+        self.store
+            .set(typed_next_keypair_index_key, index, transaction_id)?;
         Ok(())
     }
 
@@ -134,7 +135,11 @@ impl KeyStore {
         }
     }
 
-    pub fn store_next_winternitz_index(&self, index: u32, transaction_id: Option<Uuid>) -> Result<(), KeyManagerError> {
+    pub fn store_next_winternitz_index(
+        &self,
+        index: u32,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next winternitz index
         self.store
@@ -194,7 +199,7 @@ impl KeyStore {
         &self,
         index: u32,
         transaction_id: Option<Uuid>,
-    ) -> Result<(),KeyManagerError> {
+    ) -> Result<(), KeyManagerError> {
         // Bitmap with block size of 1024 indices for efficiency
         // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
 

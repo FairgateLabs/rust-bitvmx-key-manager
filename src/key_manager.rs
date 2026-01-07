@@ -799,7 +799,8 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_winternitz_index()?;
-            self.keystore.store_next_winternitz_index(index + 1, tx_id)?;
+            self.keystore
+                .store_next_winternitz_index(index + 1, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 
@@ -1176,7 +1177,10 @@ impl KeyManager {
 
         // check if index was already used, if its error, if not mark and save
         #[cfg(feature = "wots_idx_check")]
-        match self.keystore.check_and_mark_winternitz_index_used(index, tx_id) {
+        match self
+            .keystore
+            .check_and_mark_winternitz_index_used(index, tx_id)
+        {
             Ok(()) => {}
             Err(e) => {
                 self.rollback_transaction(tx_id)?;
@@ -6119,11 +6123,8 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager_config = crate::config::KeyManagerConfig::new(
-            "bitcoin".to_string(),
-            None,
-            None,
-        );
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("bitcoin".to_string(), None, None);
 
         let key_manager =
             crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
@@ -6146,10 +6147,7 @@ mod tests {
             .unwrap();
 
         // Rollback the transaction before commit
-        key_manager
-            .keystore
-            .rollback_transaction(tx_id)
-            .unwrap();
+        key_manager.keystore.rollback_transaction(tx_id).unwrap();
 
         // The index should NOT be incremented after rollback
         let index_after_rollback = key_manager.next_keypair_index(key_type).unwrap();
@@ -6168,11 +6166,8 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager_config = crate::config::KeyManagerConfig::new(
-            "bitcoin".to_string(),
-            None,
-            None,
-        );
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("bitcoin".to_string(), None, None);
 
         let key_manager =
             crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
@@ -6193,10 +6188,7 @@ mod tests {
             .unwrap();
 
         // Rollback the transaction before commit
-        key_manager
-            .keystore
-            .rollback_transaction(tx_id)
-            .unwrap();
+        key_manager.keystore.rollback_transaction(tx_id).unwrap();
 
         // The index should NOT be incremented after rollback
         let index_after_rollback = key_manager.next_winternitz_index().unwrap();
@@ -6221,19 +6213,13 @@ mod tests {
         let message = random_message();
 
         // First signature should succeed
-        let signature_result = key_manager.sign_winternitz_message_by_index(
-            &message[..],
-            WinternitzType::SHA256,
-            5,
-        );
+        let signature_result =
+            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
         assert!(signature_result.is_ok(), "First signature should succeed");
 
         // Second signature with the same index should fail
-        let second_signature_result = key_manager.sign_winternitz_message_by_index(
-            &message[..],
-            WinternitzType::SHA256,
-            5,
-        );
+        let second_signature_result =
+            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
         assert!(
             second_signature_result.is_err(),
             "Second signature with same index should fail"
@@ -6267,17 +6253,13 @@ mod tests {
         let public_key = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
 
         // First signature should succeed
-        let signature_result = key_manager.sign_winternitz_message_by_pubkey(
-            &message[..],
-            &public_key,
-        );
+        let signature_result =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
         assert!(signature_result.is_ok(), "First signature should succeed");
 
         // Second signature with the same key should fail
-        let second_signature_result = key_manager.sign_winternitz_message_by_pubkey(
-            &message[..],
-            &public_key,
-        );
+        let second_signature_result =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
         assert!(
             second_signature_result.is_err(),
             "Second signature with same key should fail"
@@ -6299,11 +6281,12 @@ mod tests {
         let public_key2 = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
 
         // First signature should succeed
-        let signature_result_for_k2 = key_manager.sign_winternitz_message_by_pubkey(
-            &message[..],
-            &public_key2,
+        let signature_result_for_k2 =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key2);
+        assert!(
+            signature_result_for_k2.is_ok(),
+            "First signature for k2 should succeed"
         );
-        assert!(signature_result_for_k2.is_ok(), "First signature for k2 should succeed");
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -6415,13 +6398,13 @@ mod tests {
 
         // Test boundary conditions: block boundaries and edge cases
         let boundary_indices = [
-            0,          // Very first index
-            1,          // Second index
-            1022,       // Second to last in block 0
-            1023,       // Last in block 0
-            1024,       // First in block 1
-            1025,       // Second in block 1
-            100000,     // Large index in block 97
+            0,      // Very first index
+            1,      // Second index
+            1022,   // Second to last in block 0
+            1023,   // Last in block 0
+            1024,   // First in block 1
+            1025,   // Second in block 1
+            100000, // Large index in block 97
         ];
 
         for &index in &boundary_indices {
@@ -6512,8 +6495,11 @@ mod tests {
 
             // Mark indices 10, 20, 30
             for index in [10, 20, 30] {
-                key_manager
-                    .sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, index)?;
+                key_manager.sign_winternitz_message_by_index(
+                    &message[..],
+                    WinternitzType::SHA256,
+                    index,
+                )?;
             }
             // key_manager dropped here
         }
@@ -6538,8 +6524,11 @@ mod tests {
             }
 
             // But index 40 should still be available
-            let fresh_result =
-                key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 40);
+            let fresh_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                40,
+            );
             assert!(
                 fresh_result.is_ok(),
                 "Unmarked index 40 should be available"
@@ -6549,6 +6538,4 @@ mod tests {
         cleanup_storage(&keystore_path);
         Ok(())
     }
-
-
 }

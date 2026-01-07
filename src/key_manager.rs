@@ -1147,8 +1147,9 @@ impl KeyManager {
         Ok(signatures)
     }
 
+    // TODO make this fun private to force sign by key
     // For one-time winternitz keys
-    fn sign_winternitz_message_by_index(
+    pub fn sign_winternitz_message_by_index(
         &self,
         message_bytes: &[u8],
         key_type: WinternitzType,

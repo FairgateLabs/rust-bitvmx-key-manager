@@ -6,8 +6,9 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
+use uuid::Uuid;
 use std::{collections::HashMap, rc::Rc, str::FromStr};
-use storage_backend::storage::{KeyValueStore, Storage};
+use storage_backend::{error::StorageError, storage::{KeyValueStore, Storage}};
 use tracing::{debug, error};
 use zeroize::Zeroizing;
 
@@ -772,7 +773,8 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
-        let transaction_id = self.store.begin_transaction();
+        let transaction_id = self.begin_transaction();
+
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -780,7 +782,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.0,
-            Some(transaction_id),
+            transaction_id,
         )?;
         for (pub_key, pub_nonce) in data.1.iter() {
             self.store.set(
@@ -791,7 +793,7 @@ impl MuSig2Signer {
                     participant_pubkey: pub_key.to_string(),
                 }),
                 pub_nonce.clone(),
-                Some(transaction_id),
+                transaction_id,
             )?;
         }
         self.store.set(
@@ -801,7 +803,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.2,
-            Some(transaction_id),
+            transaction_id,
         )?;
         if let Some(tweak_value) = data.3 {
             self.store.set(
@@ -811,7 +813,7 @@ impl MuSig2Signer {
                     message_id: message_id.to_string(),
                 }),
                 tweak_value.to_be_bytes(),
-                Some(transaction_id),
+                transaction_id,
             )?;
         }
         let message_ids =
@@ -829,9 +831,11 @@ impl MuSig2Signer {
                 session_id: id.to_string(),
             }),
             message_ids,
-            Some(transaction_id),
+            transaction_id,
         )?;
-        self.store.commit_transaction(transaction_id)?;
+
+        self.commit_transaction(transaction_id)?;
+
         Ok(())
     }
 
@@ -878,20 +882,22 @@ impl MuSig2Signer {
 
     pub fn get_index(&self, aggregated_pubkey: &PublicKey) -> Result<u32, Musig2SignerError> {
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
-
         let key_index_used_by_me = self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key));
 
-        let index_used_by_me = self
-            .store
-            .get::<String, u32>(key_index_used_by_me.clone())?;
+        // Atomic transaction: increment and return nonce index, using a closure just for readability
+        let new_index = {
+            let db_tx_id = self.begin_transaction();
 
-        let new_index = match index_used_by_me {
-            Some(index_used) => index_used + 1,
-            None => 0,
+            let current_index = self
+                .store
+                .get::<String, u32>(key_index_used_by_me.clone())?;
+            let new_index = current_index.map_or(0, |idx| idx + 1);
+            self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
+
+            self.commit_transaction(db_tx_id)?;
+
+            new_index
         };
-
-        // Update the index used by the participant
-        self.store.set(key_index_used_by_me, new_index, None)?;
 
         Ok(new_index)
     }
@@ -1098,23 +1104,24 @@ impl MuSig2Signer {
             musig2_data
         );
 
-        let transaction_id = self.store.begin_transaction();
+        let transaction_id = self.begin_transaction();
+
         self.store.set(
             self.get_key(StoreKey::MuSig2ParticipantPubKeys {
                 aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.1,
-            Some(transaction_id),
+            transaction_id,
         )?;
         self.store.set(
             self.get_key(StoreKey::MuSig2MyPublicKey {
                 aggregated_pubkey: musig2_data.0.to_string(),
             }),
             musig2_data.2,
-            Some(transaction_id),
+            transaction_id,
         )?;
-        self.store.commit_transaction(transaction_id)?;
 
+        self.commit_transaction(transaction_id)?;
         Ok(())
     }
 
@@ -1271,5 +1278,23 @@ impl MuSig2Signer {
         let aggregated_private_key = PrivateKey::new(aggregated_seckey, network);
 
         Ok((aggregated_private_key, aggregated_public_key))
+    }
+
+    // Private local begin transaction wrapper to manage feature flag
+    fn begin_transaction(&self) -> Option<Uuid> {
+        #[cfg(feature = "transactional")]
+        let tx_id = Some(self.store.begin_transaction());
+        #[cfg(not(feature = "transactional"))]
+        let tx_id = None;
+
+        tx_id
+    }
+
+    // Private local commit transaction wrapper to manage feature flag
+    fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), StorageError> {
+        #[cfg(feature = "transactional")]
+        self.store.commit_transaction(tx_id.unwrap())?;
+
+        Ok(())
     }
 }

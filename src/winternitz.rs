@@ -533,7 +533,7 @@ impl Winternitz {
             checksum_size,
             derivation_index,
         )?;
-        // Dev note: we do not storage private winternitz keys because storage scalability reasons
+        // Dev note: we do not store private winternitz keys because of storage scalability reasons
         let public_key = WinternitzPublicKey::from(private_key)?;
 
         Ok(public_key)
@@ -671,7 +671,7 @@ pub fn calculate_checksum(message_digits: &[u8]) -> Vec<u8> {
 
     // Calculate the checksum using Winternitz formula:
     // checksum = (W * number_of_digits) - sum_of_digits
-    // To calculate the checksume is the inverse of the sum of the message digits, it's the same as summing (W-digit[i]) for all digits
+    // To calculate the checksum is the inverse of the sum of the message digits, it's the same as summing (W-digit[i]) for all digits
     let checksum = (W * message_digits.len() - sum as usize) as u32;
     let checksum_size = checksum_length(message_digits.len());
     to_digits(checksum, checksum_size)

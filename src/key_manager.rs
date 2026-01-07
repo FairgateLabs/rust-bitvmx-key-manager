@@ -1148,7 +1148,7 @@ impl KeyManager {
         Ok(signatures)
     }
 
-    // TODO make this fun private to force sign by key
+    // TODO: make this fun private to force sign by key? Protocol should store the key and not the index
     // For one-time winternitz keys
     pub fn sign_winternitz_message_by_index(
         &self,
@@ -1195,7 +1195,7 @@ impl KeyManager {
         Ok(signature)
     }
 
-    // For one-time winternitz keys // TODO change name to sign_winternitz_message
+    // For one-time winternitz keys
     pub fn sign_winternitz_message_by_pubkey(
         &self,
         message_bytes: &[u8],

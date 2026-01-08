@@ -21,7 +21,7 @@ impl KeyStore {
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
     const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
-    // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+                                                                       // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
 

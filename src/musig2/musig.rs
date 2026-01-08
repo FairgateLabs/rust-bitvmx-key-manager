@@ -6,13 +6,13 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
-use uuid::Uuid;
 use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::{
     error::StorageError,
     storage::{KeyValueStore, Storage},
 };
 use tracing::{debug, error};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use musig2::{KeyAggContext, PubNonce};

@@ -754,8 +754,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make this func private in the future to force the usage of next_winternitz
-    pub fn derive_winternitz(
+    fn derive_winternitz(
         &self,
         message_size_in_bytes: usize,
         key_type: WinternitzType,
@@ -800,7 +799,8 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_winternitz_index()?;
-            self.keystore.store_next_winternitz_index(index + 1, tx_id)?;
+            self.keystore
+                .store_next_winternitz_index(index + 1, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 
@@ -829,8 +829,7 @@ impl KeyManager {
     /// the next available derivation index, preventing accidental key reuse and simplifying
     /// key generation workflows.
     ///
-    // TODO make this func private in the future to force the usage of next_multiple_winternitz
-    pub fn derive_multiple_winternitz(
+    fn derive_multiple_winternitz(
         &self,
         message_size_in_bytes: usize,
         key_type: WinternitzType,
@@ -1149,8 +1148,9 @@ impl KeyManager {
         Ok(signatures)
     }
 
+    // TODO: make this fun private to force sign by key? Protocol should store the key and not the index
     // For one-time winternitz keys
-    pub fn sign_winternitz_message(
+    pub fn sign_winternitz_message_by_index(
         &self,
         message_bytes: &[u8],
         key_type: WinternitzType,
@@ -1173,9 +1173,25 @@ impl KeyManager {
             index,
         )?;
 
+        let tx_id = self.begin_transaction();
+
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "wots_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_winternitz_index_used(index, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
+            }
+        }
+
         let signature =
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
 
+        self.commit_transaction(tx_id)?;
         Ok(signature)
     }
 
@@ -1185,7 +1201,7 @@ impl KeyManager {
         message_bytes: &[u8],
         public_key: &WinternitzPublicKey,
     ) -> Result<WinternitzSignature, KeyManagerError> {
-        self.sign_winternitz_message(
+        self.sign_winternitz_message_by_index(
             message_bytes,
             public_key.key_type(),
             public_key.derivation_index()?,
@@ -1565,6 +1581,14 @@ impl KeyManager {
         tx_id
     }
 
+    // Private local rollback transaction wrapper to manage feature flag
+    fn rollback_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
+        #[cfg(feature = "transactional")]
+        self.keystore.rollback_transaction(tx_id.unwrap())?;
+
+        Ok(())
+    }
+
     // Private local commit transaction wrapper to manage feature flag
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
         #[cfg(feature = "transactional")]
@@ -1730,8 +1754,11 @@ mod tests {
         let message = random_message();
 
         let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0)?;
-        let signature =
-            key_manager.sign_winternitz_message(&message[..], WinternitzType::SHA256, 0)?;
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::SHA256,
+            0,
+        )?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
@@ -1753,8 +1780,11 @@ mod tests {
         let message = Message::from_digest(digest);
 
         let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 0)?;
-        let signature =
-            key_manager.sign_winternitz_message(&message[..], WinternitzType::HASH160, 0)?;
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::HASH160,
+            0,
+        )?;
 
         assert!(signature_verifier.verify_winternitz_signature(&signature, &message[..], &pk));
 
@@ -6093,11 +6123,8 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager_config = crate::config::KeyManagerConfig::new(
-            "bitcoin".to_string(),
-            None,
-            None,
-        );
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("bitcoin".to_string(), None, None);
 
         let key_manager =
             crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
@@ -6120,10 +6147,7 @@ mod tests {
             .unwrap();
 
         // Rollback the transaction before commit
-        key_manager
-            .keystore
-            .rollback_transaction(tx_id)
-            .unwrap();
+        key_manager.keystore.rollback_transaction(tx_id).unwrap();
 
         // The index should NOT be incremented after rollback
         let index_after_rollback = key_manager.next_keypair_index(key_type).unwrap();
@@ -6142,11 +6166,8 @@ mod tests {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
-        let key_manager_config = crate::config::KeyManagerConfig::new(
-            "bitcoin".to_string(),
-            None,
-            None,
-        );
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("bitcoin".to_string(), None, None);
 
         let key_manager =
             crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
@@ -6167,10 +6188,7 @@ mod tests {
             .unwrap();
 
         // Rollback the transaction before commit
-        key_manager
-            .keystore
-            .rollback_transaction(tx_id)
-            .unwrap();
+        key_manager.keystore.rollback_transaction(tx_id).unwrap();
 
         // The index should NOT be incremented after rollback
         let index_after_rollback = key_manager.next_winternitz_index().unwrap();
@@ -6184,4 +6202,340 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_index_reuse_prevention() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // First signature should succeed
+        let signature_result =
+            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
+        assert!(signature_result.is_ok(), "First signature should succeed");
+
+        // Second signature with the same index should fail
+        let second_signature_result =
+            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
+        assert!(
+            second_signature_result.is_err(),
+            "Second signature with same index should fail"
+        );
+
+        // Verify it's the correct error type
+        match second_signature_result {
+            Err(KeyManagerError::WinternitzIndexAlreadyUsed(idx)) => {
+                assert_eq!(idx, 5, "Error should report the correct index");
+            }
+            _ => panic!("Expected WinternitzIndexAlreadyUsed error"),
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_index_reuse_prevention_by_key() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+        let message_size = message[..].len();
+
+        // Derive a key using the public API (next_winternitz)
+        let public_key = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
+
+        // First signature should succeed
+        let signature_result =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
+        assert!(signature_result.is_ok(), "First signature should succeed");
+
+        // Second signature with the same key should fail
+        let second_signature_result =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
+        assert!(
+            second_signature_result.is_err(),
+            "Second signature with same key should fail"
+        );
+
+        // Verify it's the correct error type
+        match second_signature_result {
+            Err(KeyManagerError::WinternitzIndexAlreadyUsed(idx)) => {
+                assert_eq!(
+                    idx,
+                    public_key.derivation_index()?,
+                    "Error should report the correct index"
+                );
+            }
+            _ => panic!("Expected WinternitzIndexAlreadyUsed error"),
+        }
+
+        // Derive another key using the public API (next_winternitz)
+        let public_key2 = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
+
+        // First signature should succeed
+        let signature_result_for_k2 =
+            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key2);
+        assert!(
+            signature_result_for_k2.is_ok(),
+            "First signature for k2 should succeed"
+        );
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_bitmap_basic_operations() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test marking indices in the same block (0-1023)
+        for index in [0, 1, 50, 100, 500, 1023] {
+            let result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                result.is_ok(),
+                "Should succeed marking index {} for first time",
+                index
+            );
+
+            // Try to reuse the same index
+            let reuse_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                reuse_result.is_err(),
+                "Should fail when reusing index {}",
+                index
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_bitmap_multiple_blocks() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test indices across multiple blocks
+        // Block 0: 0-1023, Block 1: 1024-2047, Block 2: 2048-3071
+        let test_indices = [
+            0,      // First index of block 0
+            1023,   // Last index of block 0
+            1024,   // First index of block 1
+            2047,   // Last index of block 1
+            2048,   // First index of block 2
+            10000,  // Index in block 9
+            100000, // Index in block 97
+        ];
+
+        for &index in &test_indices {
+            let result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                result.is_ok(),
+                "Should succeed marking index {} in its block",
+                index
+            );
+
+            // Verify reuse fails
+            let reuse_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                reuse_result.is_err(),
+                "Should fail reusing index {} in its block",
+                index
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_bitmap_boundary_conditions() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test boundary conditions: block boundaries and edge cases
+        let boundary_indices = [
+            0,      // Very first index
+            1,      // Second index
+            1022,   // Second to last in block 0
+            1023,   // Last in block 0
+            1024,   // First in block 1
+            1025,   // Second in block 1
+            100000, // Large index in block 97
+        ];
+
+        for &index in &boundary_indices {
+            let result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                result.is_ok(),
+                "Should handle boundary index {} correctly",
+                index
+            );
+        }
+
+        // Verify all marked indices cannot be reused
+        for &index in &boundary_indices {
+            let reuse_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                index,
+            );
+            assert!(
+                reuse_result.is_err(),
+                "Boundary index {} should be marked as used",
+                index
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_bitmap_all_bits_in_byte() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager = test_random_key_manager(keystore_storage_config)?;
+
+        let message = random_message();
+
+        // Test all 8 bits within a single byte (indices 0-7 are in the first byte)
+        for bit_index in 0..8 {
+            let result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                bit_index,
+            );
+            assert!(
+                result.is_ok(),
+                "Should mark bit {} in first byte",
+                bit_index
+            );
+        }
+
+        // Verify all bits are marked
+        for bit_index in 0..8 {
+            let reuse_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                bit_index,
+            );
+            assert!(
+                reuse_result.is_err(),
+                "Bit {} should be marked as used",
+                bit_index
+            );
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "wots_idx_check")]
+    fn test_winternitz_bitmap_persistence() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        // Create first key manager and mark some indices
+        {
+            let key_manager = test_deterministic_key_manager(keystore_storage_config.clone())?;
+            let message = random_message();
+
+            // Mark indices 10, 20, 30
+            for index in [10, 20, 30] {
+                key_manager.sign_winternitz_message_by_index(
+                    &message[..],
+                    WinternitzType::SHA256,
+                    index,
+                )?;
+            }
+            // key_manager dropped here
+        }
+
+        // Create new key manager with same storage and verify indices are still marked
+        {
+            let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
+            let message = random_message();
+
+            // Try to reuse the previously marked indices
+            for index in [10, 20, 30] {
+                let reuse_result = key_manager.sign_winternitz_message_by_index(
+                    &message[..],
+                    WinternitzType::SHA256,
+                    index,
+                );
+                assert!(
+                    reuse_result.is_err(),
+                    "Index {} should still be marked after recreation",
+                    index
+                );
+            }
+
+            // But index 40 should still be available
+            let fresh_result = key_manager.sign_winternitz_message_by_index(
+                &message[..],
+                WinternitzType::SHA256,
+                40,
+            );
+            assert!(
+                fresh_result.is_ok(),
+                "Unmarked index 40 should be available"
+            );
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
 }

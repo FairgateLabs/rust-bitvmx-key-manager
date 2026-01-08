@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_type::BitcoinKeyType, verifier::SignatureVerifier, winternitz::WinternitzSignature,
+    key_type::BitcoinKeyType, verifier::SignatureVerifier,
 };
 use bitcoin::{
     bip32::Xpub,
@@ -70,14 +70,6 @@ enum Commands {
         adjust_parity_for_taproot: bool,
     },
 
-    NewWinternitzKey {
-        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
-        winternitz_type: String,
-
-        #[arg(value_name = "message_length", short = 'm', long = "message_length")]
-        message_length: usize,
-    },
-
     NewRsaKey,
 
     SignECDSA {
@@ -94,17 +86,6 @@ enum Commands {
 
         #[arg(value_name = "public_key", short = 'p', long = "public_key")]
         public_key: String,
-    },
-
-    SignWinternitz {
-        #[arg(value_name = "message", short = 'm', long = "message")]
-        message: String,
-
-        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
-        winternitz_type: String,
-
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
     },
 
     SignRsa {
@@ -135,27 +116,6 @@ enum Commands {
 
         #[arg(value_name = "signature", short = 's', long = "signature")]
         signature: String,
-    },
-
-    VerifyWinternitz {
-        #[arg(value_name = "message", short = 'm', long = "message")]
-        message: String,
-
-        #[arg(
-            value_name = "message_digits_len",
-            short = 'l',
-            long = "message_digits_length"
-        )]
-        message_digits_length: usize,
-
-        #[arg(value_name = "winternitz_type", short = 'w', long = "winternitz_type")]
-        winternitz_type: String,
-
-        #[arg(value_name = "signature", short = 's', long = "signature")]
-        signature: String,
-
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
-        key_index: u32,
     },
 
     VerifyRsa {
@@ -235,13 +195,6 @@ impl Cli {
                 self.next_keypair(*key_type)?;
             }
 
-            Commands::NewWinternitzKey {
-                winternitz_type,
-                message_length,
-            } => {
-                self.generate_winternitz_key(winternitz_type, *message_length)?;
-            }
-
             Commands::NewRsaKey => {
                 self.generate_rsa_key()?;
             }
@@ -258,14 +211,6 @@ impl Cli {
                 public_key,
             } => {
                 self.sign_schnorr(message, public_key)?;
-            }
-
-            Commands::SignWinternitz {
-                message,
-                winternitz_type,
-                key_index,
-            } => {
-                self.sign_winternitz(message, winternitz_type, *key_index)?;
             }
 
             Commands::SignRsa { message, pub_key } => {
@@ -286,22 +231,6 @@ impl Cli {
                 signature,
             } => {
                 self.verify_schnorr_signature(signature, message, public_key)?;
-            }
-
-            Commands::VerifyWinternitz {
-                message,
-                message_digits_length,
-                winternitz_type,
-                signature,
-                key_index,
-            } => {
-                self.verify_winternitz_signature(
-                    signature,
-                    message,
-                    *message_digits_length,
-                    *key_index,
-                    winternitz_type,
-                )?;
             }
 
             Commands::VerifyRsa {
@@ -339,24 +268,6 @@ impl Cli {
         Ok(())
     }
 
-    //
-    // Commands
-    //
-
-    fn generate_winternitz_key(&self, winternitz_type: &str, msg_len_bytes: usize) -> Result<()> {
-        let key_manager = self.key_manager()?;
-
-        let public_key = key_manager.next_winternitz(msg_len_bytes, winternitz_type.parse()?)?;
-
-        info!(
-            "New key pair created of Winternitz Key. Index is: {} Public key is: {}",
-            public_key.derivation_index()?,
-            hex::encode(public_key.to_bytes())
-        );
-
-        Ok(())
-    }
-
     fn generate_rsa_key(&self) -> Result<()> {
         let key_manager = self.key_manager()?;
 
@@ -389,25 +300,6 @@ impl Cli {
         )?;
 
         info!("ECDSA Message signed. Signature is: {:?}", signature);
-
-        Ok(())
-    }
-
-    fn sign_winternitz(&self, message: &str, winternitz_type: &str, key_index: u32) -> Result<()> {
-        let key_manager = self.key_manager()?;
-
-        let message_bytes = hex::decode(message)?;
-
-        let signature = key_manager.sign_winternitz_message(
-            message_bytes.as_slice(),
-            winternitz_type.parse()?,
-            key_index,
-        )?;
-
-        info!(
-            "Winternitz Message signed. Signature is: {}",
-            hex::encode(signature.to_bytes())
-        );
 
         Ok(())
     }
@@ -514,37 +406,6 @@ impl Cli {
         match verifier.verify_schnorr_signature(&signature, &message, public_key) {
             true => info!("Schnorr Signature is valid"),
             false => info!("Schnorr Signature is invalid"),
-        };
-
-        Ok(())
-    }
-
-    fn verify_winternitz_signature(
-        &self,
-        signature: &str,
-        message: &str,
-        message_digits_length: usize,
-        key_index: u32,
-        winternitz_type: &str,
-    ) -> Result<()> {
-        let verifier = SignatureVerifier::new();
-        let key_type = winternitz_type.parse()?;
-
-        let signature_bytes = hex::decode(signature)
-            .map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
-        let signature =
-            WinternitzSignature::from_bytes(&signature_bytes, message_digits_length, key_type)
-                .map_err(|_| CliError::InvalidHexString(signature.to_string()))?;
-
-        let message_bytes = hex::decode(message)?;
-
-        let public_key =
-            self.key_manager()?
-                .derive_winternitz(message_bytes.len(), key_type, key_index)?;
-
-        match verifier.verify_winternitz_signature(&signature, &message_bytes, &public_key) {
-            true => info!("Winternitz Signature is valid"),
-            false => info!("Winternitz Signature is invalid"),
         };
 
         Ok(())

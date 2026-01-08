@@ -744,11 +744,18 @@ impl MuSig2Signer {
         }
 
         // If message exists then nonces are already generated
-        if self.store.has_key(&self.get_key(StoreKey::MuSig2Message {
-            aggregated_pubkey: aggregated_pubkey.to_string(),
-            session_id: id.to_string(),
-            message_id: message_id.to_string(),
-        }))? {
+        if let Some(stored_message) =
+            self.store
+                .get::<String, Vec<u8>>(self.get_key(StoreKey::MuSig2Message {
+                    aggregated_pubkey: aggregated_pubkey.to_string(),
+                    session_id: id.to_string(),
+                    message_id: message_id.to_string(),
+                }))?
+        {
+            // Check if that nonce was generated for the exact same message
+            if stored_message != message {
+                return Err(Musig2SignerError::InvalidMessage);
+            }
             return Ok(());
         }
 

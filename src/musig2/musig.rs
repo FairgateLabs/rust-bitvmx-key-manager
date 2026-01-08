@@ -729,15 +729,13 @@ impl MuSig2Signer {
         Self { store }
     }
 
-    pub fn generate_nonce(
+    pub fn message_nonce_already_stored(
         &self,
         message_id: &str,
         message: Vec<u8>,
         aggregated_pubkey: &PublicKey,
         id: &str,
-        tweak: Option<musig2::secp256k1::Scalar>,
-        nonce_seed: Zeroizing<[u8; 32]>,
-    ) -> Result<(), Musig2SignerError> {
+    ) -> Result<bool, Musig2SignerError> {
         match self.check_musig_data(aggregated_pubkey)? {
             true => {}
             false => return Err(Musig2SignerError::AggregatedPubkeyNotFound),
@@ -756,6 +754,23 @@ impl MuSig2Signer {
             if stored_message != message {
                 return Err(Musig2SignerError::InvalidMessage);
             }
+            return Ok(true);
+        }
+
+        return Ok(false);
+    }
+
+    pub fn generate_nonce(
+        &self,
+        message_id: &str,
+        message: Vec<u8>,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        tweak: Option<musig2::secp256k1::Scalar>,
+        nonce_seed: Zeroizing<[u8; 32]>,
+    ) -> Result<(), Musig2SignerError> {
+        // This should be checked here, as the method cant know in which context it would be called
+        if self.message_nonce_already_stored(message_id, message.clone(), aggregated_pubkey, id)? {
             return Ok(());
         }
 

@@ -1520,6 +1520,17 @@ impl KeyManager {
         id: &str,
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<(), KeyManagerError> {
+        // This might seem redundant, but it's necessary to avoid regenerating nonces before asking for a new index
+        // (even if .musig2.generate_nonce checks this inisde again)
+        if self.musig2.message_nonce_already_stored(
+            message_id,
+            message.clone(),
+            aggregated_pubkey,
+            id,
+        )? {
+            return Ok(());
+        }
+
         let index = self.musig2.get_index(aggregated_pubkey)?;
         let public_key = self.musig2.my_public_key(aggregated_pubkey)?;
 

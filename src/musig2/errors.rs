@@ -59,6 +59,9 @@ pub enum Musig2SignerError {
     #[error("Invalid message id")]
     InvalidMessageId,
 
+    #[error("Invalid message")]
+    InvalidMessage,
+
     #[error("Nonces not generated")]
     NoncesNotGenerated,
 

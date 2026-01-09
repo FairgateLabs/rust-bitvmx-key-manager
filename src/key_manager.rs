@@ -1521,7 +1521,7 @@ impl KeyManager {
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<(), KeyManagerError> {
         // This might seem redundant, but it's necessary to avoid regenerating nonces before asking for a new index
-        // even if .musig2.generate_nonce checks this inisde again)
+        // (even if .musig2.generate_nonce checks this inisde again)
         if self.musig2.message_nonce_already_stored(
             message_id,
             message.clone(),

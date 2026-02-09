@@ -37,6 +37,9 @@ pub enum KeyManagerError {
     #[error("Invalid private key")]
     InvalidPrivateKey,
 
+    #[error("Invalid lamport private key")]
+    InvalidLamportPrivateKey,
+
     #[error("Invalid Mnemonic")]
     InvalidMnemonic,
 
@@ -93,6 +96,9 @@ pub enum KeyManagerError {
 
     #[error("Rsa key not found")]
     RsaKeyNotFound,
+
+    #[error("Lamport key not found")]
+    LamportKeyNotFound,
 
     #[error("Invalid RSA key size: {0}")]
     InvalidRSAKeySize(String),

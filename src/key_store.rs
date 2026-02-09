@@ -24,6 +24,7 @@ impl KeyStore {
                                                                        // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
+    const LAMPORT: &str = "lamport"; // Key prefix for Lamport pubkeys
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -295,6 +296,66 @@ impl KeyStore {
         if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
             return Ok(Some(rsa_keypair));
+        }
+
+        Ok(None)
+    }
+
+    fn format_lamport_key(key_0s: &[[u8; 32]], key_1s: &[[u8; 32]]) -> String {
+    // TODO optimize storage format? hash the concatenation?
+        format!(
+            "{}:{}:{}",
+            Self::LAMPORT,
+            general_purpose::STANDARD.encode(key_0s.concat()),
+            general_purpose::STANDARD.encode(key_1s.concat())
+        )
+    }
+
+    pub fn store_lamport_key_sha256(&self, private_key_0s: Zeroizing<Vec<[u8; 32]>>, private_key_1s: Zeroizing<Vec<[u8; 32]>>, public_key_0s: Vec<[u8; 32]>, public_key_1s: Vec<[u8; 32]>) -> Result<(), KeyManagerError> {
+        // TODO discuss, winternitz key design decision was not to be stored, but lamport?
+        let pubk = Zeroizing::new(Self::format_lamport_key(&public_key_0s, &public_key_1s));
+        let privk = Zeroizing::new(Self::format_lamport_key(&private_key_0s, &private_key_1s));
+        self.store.set(pubk, &(*privk), None)?;
+        Ok(())
+    }
+
+    pub fn load_lamport_key_sha256(&self, public_key_0s: Vec<[u8; 32]>, public_key_1s: Vec<[u8; 32]>) -> Result<Option<(Zeroizing<Vec<[u8; 32]>>, Zeroizing<Vec<[u8; 32]>>)>, KeyManagerError> {
+        // TODO test store and load
+        let pubk = Self::format_lamport_key(&public_key_0s, &public_key_1s);
+        let privk: Option<Zeroizing<String>> =
+            self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
+
+        if let Some(privk) = privk {
+            let parts: Vec<&str> = privk.split(':').collect();
+            if parts.len() != 3 || parts[0] != Self::LAMPORT {
+                return Err(KeyManagerError::InvalidLamportPrivateKey);
+            }
+            let private_key_0s_decoded = general_purpose::STANDARD.decode(parts[1].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let private_key_1s_decoded = general_purpose::STANDARD.decode(parts[2].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+
+            if private_key_0s_decoded.len() % 32 != 0 || private_key_1s_decoded.len() % 32 != 0 {
+                return Err(KeyManagerError::InvalidLamportPrivateKey);
+            }
+
+            let private_key_0s = Zeroizing::new(private_key_0s_decoded
+                .chunks(32)
+                .map(|chunk| {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(chunk);
+                    arr
+                })
+                .collect());
+
+            let private_key_1s = Zeroizing::new(private_key_1s_decoded
+                .chunks(32)
+                .map(|chunk| {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(chunk);
+                    arr
+                })
+                .collect());
+
+            return Ok(Some((private_key_0s, private_key_1s)));
         }
 
         Ok(None)

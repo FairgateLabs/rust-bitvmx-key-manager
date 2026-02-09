@@ -320,6 +320,33 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
+    pub fn import_lamport_private_key_sha_256(
+        &self,
+        private_key_0s: Zeroizing<Vec<[u8; 32]>>, // Vector of private key parts representing the value 0
+        private_key_1s: Zeroizing<Vec<[u8; 32]>>, // Vector of private key parts representing the value 1
+    ) -> Result<(Vec<[u8; 32]>, Vec<[u8; 32]>), KeyManagerError> { // Returns the corresponding public key parts
+        if private_key_0s.len() != private_key_1s.len() {
+            return Err(KeyManagerError::InvalidLamportPrivateKey);
+        }
+
+        let mut public_key_0s: Vec<[u8; 32]> = Vec::new();
+        let mut public_key_1s: Vec<[u8; 32]> = Vec::new();
+
+        for i in 0..private_key_0s.len() {
+            let pub_0s = hashes::sha256::Hash::hash(&private_key_0s[i]).to_byte_array();
+            public_key_0s.push(pub_0s);
+
+            let pub_1s = hashes::sha256::Hash::hash(&private_key_1s[i]).to_byte_array();
+            public_key_1s.push(pub_1s);
+        }
+
+        self.keystore.store_lamport_key_sha256(private_key_0s, private_key_1s, public_key_0s.clone(), public_key_1s.clone())?;
+        // store the lamport keys in a way that we can retrieve them for signing
+        // TODO mark them as used after signing to prevent reuse, ambiguous for imports. we don't know if it was already used before importing???
+
+        Ok((public_key_0s, public_key_1s))
+    }
+
     /*********************************/
     /****** Derivation path **********/
     /*********************************/
@@ -1206,6 +1233,92 @@ impl KeyManager {
             public_key.key_type(),
             public_key.derivation_index()?,
         )
+    }
+
+    // Use this fn if you want to sign an arbitrary lenght message, but take in mind that this is gruped by bytes,
+    // so you might neer to use padding, for the message and also when generating the keys
+    pub fn sign_lamport_raw_message_by_pubkey_sha256(
+        &self,
+        message_bytes: &[u8],
+        public_key_0s: Vec<[u8; 32]>,
+        public_key_1s: Vec<[u8; 32]>,
+    ) -> Result<Vec<[u8; 32]>, KeyManagerError> {
+
+        let (private_key_0s, private_key_1s) = self.keystore
+            .load_lamport_key_sha256(public_key_0s, public_key_1s)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+        let message_bits_length = message_bytes.len() * 8; // number of bits in the message
+        // Check that private key len is equal to message_bytes quantity of bits (8 bits per byte)
+        if private_key_0s.len() != message_bits_length || private_key_1s.len() != message_bits_length {
+            return Err(KeyManagerError::InvalidLamportPrivateKey);
+        }
+
+        let mut sig = Vec::with_capacity(message_bits_length);
+
+        // Iterate through each byte in the message
+        for byte in message_bytes.iter() {
+            // Process each bit in the byte (from most significant to least significant)
+            for bit_index in 0..8 {
+                // Example for first iteration (bit_index=0) with byte = 0b10110011:
+                // - byte >> (7 - 0) = 0b10110011 >> 7 = 0b00000001 (shift MSB to rightmost position)
+                // - mask: & 1 = & 0b00000001 (isolate the rightmost bit)
+                // - result: 0b00000001 & 0b00000001 = 1
+                // - bit = 1 (extracts the MSB)
+                let bit = (byte >> (7 - bit_index)) & 1;
+                let key_index = sig.len(); // Current position = number of keys already added
+
+                if bit == 1 {
+                    sig.push(private_key_1s[key_index]);
+                } else {
+                    sig.push(private_key_0s[key_index]);
+                }
+            }
+        }
+
+        Ok(sig)
+    }
+
+    // SHA-256 Lamport: expects 32-byte message digest
+    // Also could be used to group 256 garbled circuit wire labels in one signature, where each bit represent a label
+    pub fn sign_lamport_message_digest_by_pubkey_sha256(
+        &self,
+        message_bytes: &[u8; 32], // SHA-256 outputs a [u8; 32] in big-endian byte order according to the specification
+        public_key_0s: Vec<[u8; 32]>,
+        public_key_1s: Vec<[u8; 32]>,
+    ) -> Result<Vec<[u8; 32]>, KeyManagerError> {
+        // Simply delegate to the raw message signing method
+        self.sign_lamport_raw_message_by_pubkey_sha256(message_bytes, public_key_0s, public_key_1s)
+    }
+
+    // Can be used to sign a simple garbled circuit wire label
+    pub fn sign_lamport_bit_by_pubkey_sha256(
+        &self,
+        bit: bool, // bool representing a bit false = 0, true = 1
+        public_key_0: [u8; 32],
+        public_key_1: [u8; 32],
+    ) -> Result<[u8; 32], KeyManagerError> {
+
+        let public_key_0s = vec![public_key_0];
+        let public_key_1s = vec![public_key_1];
+
+        let (private_key_0s, private_key_1s) = self.keystore
+            .load_lamport_key_sha256(public_key_0s, public_key_1s)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+        // Validate that we retrieved the expected number of private keys
+        if private_key_0s.len() != 1 || private_key_1s.len() != 1 {
+            return Err(KeyManagerError::InvalidLamportPrivateKey);
+        }
+
+        // Get signature based on bit value
+        let sig = if bit {
+            private_key_1s[0]
+        } else {
+            private_key_0s[0]
+        };
+
+        Ok(sig)
     }
 
     /// Exports the private key for a given public key.

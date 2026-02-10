@@ -828,8 +828,6 @@ impl Lamport {
     }
 
 
-    // TODO Sign and Verify by message bits, and also by messages bytes, as for many cases using SHA256 as hash function will imply that the message is really the message digest, obtained by hashing also the message, so it willl be 32 exact bytes
-
     /// Sign a message using a Lamport private key
     ///
     /// # Arguments
@@ -868,6 +866,54 @@ impl Lamport {
         }
 
         Ok(signature)
+    }
+
+    /// Sign a message from bytes using a Lamport private key
+    ///
+    /// This is a convenience wrapper around `sign_message` that converts bytes to bits.
+    /// For most use cases (e.g., signing SHA256 digests), this is the preferred method.
+    ///
+    /// # Arguments
+    /// * `message_bytes` - The message to sign as bytes
+    /// * `private_key` - The private key to use for signing
+    ///
+    /// # Returns
+    /// The signature containing the revealed private key fragments
+    ///
+    /// # Security Critical
+    /// After calling this function, the private key MUST be marked as used and never reused.
+    /// Reusing a Lamport private key allows attackers to forge signatures.
+    pub fn sign_message_bytes(
+        &self,
+        message_bytes: &[u8],
+        private_key: &LamportPrivateKey,
+    ) -> Result<LamportSignature, LamportError> {
+        let message_bits = bytes_to_bits(message_bytes, 0);
+        self.sign_message(&message_bits, private_key)
+    }
+
+    /// Sign a single bit using a Lamport private key
+    ///
+    /// This is a convenience wrapper around `sign_message` for signing individual bits.
+    /// Commonly used for garbled circuits where wire labels need to be signed bit by bit.
+    ///
+    /// # Arguments
+    /// * `message_bit` - The single bit to sign
+    /// * `private_key` - The private key to use for signing (must have message_bit_length = 1)
+    ///
+    /// # Returns
+    /// The signature containing the revealed private key fragment
+    ///
+    /// # Security Critical
+    /// After calling this function, the private key MUST be marked as used and never reused.
+    /// Reusing a Lamport private key allows attackers to forge signatures.
+    pub fn sign_message_bit(
+        &self,
+        message_bit: bool,
+        private_key: &LamportPrivateKey,
+    ) -> Result<LamportSignature, LamportError> {
+        let message_bits = [message_bit];
+        self.sign_message(&message_bits, private_key)
     }
 
     /// Verify a Lamport signature
@@ -918,6 +964,50 @@ impl Lamport {
         }
 
         Ok(true)
+    }
+
+    /// Verify a Lamport signature from message bytes
+    ///
+    /// This is a convenience wrapper around `verify_signature` that converts bytes to bits.
+    /// For most use cases (e.g., verifying SHA256 digests), this is the preferred method.
+    ///
+    /// # Arguments
+    /// * `message_bytes` - The message that was allegedly signed
+    /// * `signature` - The signature to verify
+    /// * `public_key` - The public key to verify against
+    ///
+    /// # Returns
+    /// True if the signature is valid, false otherwise
+    pub fn verify_signature_bytes(
+        &self,
+        message_bytes: &[u8],
+        signature: &LamportSignature,
+        public_key: &LamportPublicKey,
+    ) -> Result<bool, LamportError> {
+        let message_bits = bytes_to_bits(message_bytes, 0);
+        self.verify_signature(&message_bits, signature, public_key)
+    }
+
+    /// Verify a Lamport signature for a single bit
+    ///
+    /// This is a convenience wrapper around `verify_signature` for verifying individual bits.
+    /// Commonly used for garbled circuits where wire labels are verified bit by bit.
+    ///
+    /// # Arguments
+    /// * `message_bit` - The single bit that was allegedly signed
+    /// * `signature` - The signature to verify
+    /// * `public_key` - The public key to verify against (must have message_bit_length = 1)
+    ///
+    /// # Returns
+    /// True if the signature is valid, false otherwise
+    pub fn verify_signature_bit(
+        &self,
+        message_bit: bool,
+        signature: &LamportSignature,
+        public_key: &LamportPublicKey,
+    ) -> Result<bool, LamportError> {
+        let message_bits = [message_bit];
+        self.verify_signature(&message_bits, signature, public_key)
     }
 
     /// Helper function to generate a hash using HMAC for key derivation
@@ -1347,5 +1437,201 @@ mod tests {
             .unwrap();
 
         assert!(is_valid);
+    }
+
+    #[test]
+    fn test_lamport_sign_and_verify_bytes() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+
+        // Sign a 32-byte SHA256 digest (common use case)
+        let message_bytes = [0u8; 32]; // Example: a zero-filled digest
+        let message_bit_length = 256;
+
+        let private_key = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, 0)
+            .unwrap();
+        let public_key = private_key.public_key().unwrap();
+
+        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+
+        let is_valid = lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key)
+            .unwrap();
+
+        assert!(is_valid);
+
+        // Verify that wrong message fails
+        let wrong_message = [1u8; 32];
+        let is_valid = lamport
+            .verify_signature_bytes(&wrong_message, &signature, &public_key)
+            .unwrap();
+
+        assert!(!is_valid);
+    }
+
+    #[test]
+    fn test_bytes_and_bits_methods_equivalent() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+        let message_bytes = b"Test message";
+        let message_bit_length = message_bytes.len() * 8;
+
+        let private_key = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, 0)
+            .unwrap();
+        let public_key = private_key.public_key().unwrap();
+
+        // Sign with bytes method
+        let sig_bytes = lamport.sign_message_bytes(message_bytes, &private_key).unwrap();
+
+        // Verify bytes signature with bytes method
+        assert!(lamport.verify_signature_bytes(message_bytes, &sig_bytes, &public_key).unwrap());
+
+        // Verify bytes signature with bits method (should also work)
+        let message_bits = bytes_to_bits(message_bytes, 0);
+        assert!(lamport.verify_signature(&message_bits, &sig_bytes, &public_key).unwrap());
+    }
+
+    #[test]
+    fn test_sign_bytes_various_lengths() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+
+        // Test with various message lengths
+        for byte_length in [1, 8, 16, 20, 32] {
+            let message_bytes = vec![0xABu8; byte_length];
+            let message_bit_length = byte_length * 8;
+
+            let private_key = lamport
+                .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, byte_length as u32)
+                .unwrap();
+            let public_key = private_key.public_key().unwrap();
+
+            let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+
+            let is_valid = lamport
+                .verify_signature_bytes(&message_bytes, &signature, &public_key)
+                .unwrap();
+
+            assert!(is_valid, "Failed for byte_length={}", byte_length);
+        }
+    }
+
+    #[test]
+    fn test_verify_bytes_detects_tampering() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+        let message_bytes = [0x42u8; 32];
+        let message_bit_length = 256;
+
+        let private_key = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, 0)
+            .unwrap();
+        let public_key = private_key.public_key().unwrap();
+
+        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+
+        // Original message should verify
+        assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+
+        // Tampered message (single bit flip) should fail
+        let mut tampered_message = message_bytes;
+        tampered_message[0] = 0x43; // Change one byte
+        assert!(!lamport.verify_signature_bytes(&tampered_message, &signature, &public_key).unwrap());
+
+        // Completely different message should fail
+        let different_message = [0xFFu8; 32];
+        assert!(!lamport.verify_signature_bytes(&different_message, &signature, &public_key).unwrap());
+    }
+
+    #[test]
+    fn test_sign_and_verify_single_bit() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+
+        // Generate a key for signing single bits (message_bit_length = 1)
+        let private_key_bit0 = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, 1, 0)
+            .unwrap();
+        let public_key_bit0 = private_key_bit0.public_key().unwrap();
+
+        // Test signing bit value 0
+        let signature_0 = lamport.sign_message_bit(false, &private_key_bit0).unwrap();
+        assert!(lamport.verify_signature_bit(false, &signature_0, &public_key_bit0).unwrap());
+        assert!(!lamport.verify_signature_bit(true, &signature_0, &public_key_bit0).unwrap());
+
+        // Generate another key for signing bit value 1
+        let private_key_bit1 = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, 1, 1)
+            .unwrap();
+        let public_key_bit1 = private_key_bit1.public_key().unwrap();
+
+        // Test signing bit value 1
+        let signature_1 = lamport.sign_message_bit(true, &private_key_bit1).unwrap();
+        assert!(lamport.verify_signature_bit(true, &signature_1, &public_key_bit1).unwrap());
+        assert!(!lamport.verify_signature_bit(false, &signature_1, &public_key_bit1).unwrap());
+    }
+
+    #[test]
+    fn test_bit_methods_equivalent_to_array_methods() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_12345678901234567890";
+
+        let private_key = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, 1, 0)
+            .unwrap();
+        let public_key = private_key.public_key().unwrap();
+
+        // Sign using bit method
+        let sig_bit = lamport.sign_message_bit(true, &private_key).unwrap();
+
+        // Verify using array method
+        let message_bits = [true];
+        assert!(lamport.verify_signature(&message_bits, &sig_bit, &public_key).unwrap());
+
+        // Verify using bit method
+        assert!(lamport.verify_signature_bit(true, &sig_bit, &public_key).unwrap());
+    }
+
+    #[test]
+    fn test_garbled_circuit_wire_label_scenario() {
+        // Simulate a garbled circuit scenario where we need to sign individual wire labels
+        let lamport = Lamport::new();
+        let master_secret = b"garbled_circuit_master_secret_123456789";
+
+        // Generate keys for multiple wire labels (each is 1 bit)
+        let mut keys = Vec::new();
+        let mut pubkeys = Vec::new();
+        for i in 0..5 {
+            let key = lamport
+                .generate_private_key(master_secret, LamportType::SHA256, 1, i)
+                .unwrap();
+            let pubkey = key.public_key().unwrap();
+            keys.push(key);
+            pubkeys.push(pubkey);
+        }
+
+        // Simulate wire values: [true, false, true, true, false]
+        let wire_values = [true, false, true, true, false];
+
+        // Sign each wire value
+        let mut signatures = Vec::new();
+        for (i, &wire_value) in wire_values.iter().enumerate() {
+            let sig = lamport.sign_message_bit(wire_value, &keys[i]).unwrap();
+            signatures.push(sig);
+        }
+
+        // Verify each wire value
+        for (i, &wire_value) in wire_values.iter().enumerate() {
+            assert!(lamport
+                .verify_signature_bit(wire_value, &signatures[i], &pubkeys[i])
+                .unwrap());
+
+            // Verify that wrong bit value fails
+            assert!(!lamport
+                .verify_signature_bit(!wire_value, &signatures[i], &pubkeys[i])
+                .unwrap());
+        }
     }
 }

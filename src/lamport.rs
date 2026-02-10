@@ -4,7 +4,7 @@ use std::str::FromStr;
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-// use zeroize::Zeroize;
+// use zeroize::Zeroize; // TODO, keep ?
 
 use crate::errors::LamportError;
 
@@ -14,10 +14,10 @@ pub const RIPEMD160_SIZE: usize = 20;
 /// Lamport signature hash function types
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum LamportType {
-    // Based on some bitcoin script hash functions, but can be extended in the future if needed
-    // If needed HASH256 (two times sha256) or RIPMED160 (without sha256) could be added here as well
     SHA256,
-    HASH160,
+    RIPEMD160,
+    HASH160, // RIPEMD160(SHA256(x))
+    HASH256, // double SHA-256
 }
 
 pub trait HashFunction {
@@ -31,10 +31,18 @@ impl HashFunction for LamportType {
             LamportType::SHA256 => {
                 LamportHash::new(sha256::Hash::hash(data).as_byte_array().to_vec())
             }
+            LamportType::RIPEMD160 => {
+                LamportHash::new(ripemd160::Hash::hash(data).as_byte_array().to_vec())
+            }
             LamportType::HASH160 => {
                 let sha256 = sha256::Hash::hash(data);
                 let hash160 = ripemd160::Hash::hash(sha256.as_byte_array());
                 LamportHash::new(hash160.as_byte_array().to_vec())
+            }
+            LamportType::HASH256 => {
+                let sha256_1 = sha256::Hash::hash(data);
+                let sha256_2 = sha256::Hash::hash(sha256_1.as_byte_array());
+                LamportHash::new(sha256_2.as_byte_array().to_vec())
             }
         };
         hash
@@ -43,7 +51,9 @@ impl HashFunction for LamportType {
     fn hash_size(&self) -> usize {
         match self {
             LamportType::SHA256 => SHA256_SIZE,
+            LamportType::RIPEMD160 => RIPEMD160_SIZE,
             LamportType::HASH160 => RIPEMD160_SIZE,
+            LamportType::HASH256 => SHA256_SIZE,
         }
     }
 }
@@ -286,6 +296,7 @@ impl LamportPublicKey {
         Ok(())
     }
 
+    // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -302,17 +313,35 @@ impl LamportPublicKey {
         bytes
     }
 
+    // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits
+    pub fn to_bytes_splitted(&self) -> (Vec<u8>, Vec<u8>) {
+        let mut bytes_0s = Vec::new();
+        let mut bytes_1s = Vec::new();
+
+        // Serialize 0s
+        for hash in self.public_key_0s.iter() {
+            bytes_0s.extend_from_slice(&hash.hash);
+        }
+
+        // Serialize 1s
+        for hash in self.public_key_1s.iter() {
+            bytes_1s.extend_from_slice(&hash.hash);
+        }
+
+        (bytes_0s, bytes_1s)
+    }
+
     pub fn from_bytes(
-        bytes: &[u8],
+        bytes_0s_then_1s: &[u8],
         message_bit_length: usize,
         hash_type: LamportType,
     ) -> Result<Self, LamportError> {
         let hash_size = hash_type.hash_size();
         let expected_length = 2 * message_bit_length * hash_size;
 
-        if bytes.len() != expected_length {
+        if bytes_0s_then_1s.len() != expected_length {
             return Err(LamportError::InvalidPublicKeyLength(
-                bytes.len(),
+                bytes_0s_then_1s.len(),
                 expected_length,
             ));
         }
@@ -321,8 +350,46 @@ impl LamportPublicKey {
 
         // Split bytes into 0s and 1s sections
         let split_point = message_bit_length * hash_size;
-        let bytes_0s = &bytes[..split_point];
-        let bytes_1s = &bytes[split_point..];
+        let bytes_0s = &bytes_0s_then_1s[..split_point];
+        let bytes_1s = &bytes_0s_then_1s[split_point..];
+
+        for i in 0..message_bit_length {
+            let start = i * hash_size;
+            let end = start + hash_size;
+
+            let hash_0 = LamportHash::new(bytes_0s[start..end].to_vec());
+            let hash_1 = LamportHash::new(bytes_1s[start..end].to_vec());
+
+            public_key.push_key_pair(hash_0, hash_1)?;
+        }
+
+        Ok(public_key)
+    }
+
+    pub fn from_bytes_splitted(
+        bytes_0s: &[u8],
+        bytes_1s: &[u8],
+        message_bit_length: usize,
+        hash_type: LamportType,
+    ) -> Result<Self, LamportError> {
+        let hash_size = hash_type.hash_size();
+        let expected_length = message_bit_length * hash_size;
+
+        if bytes_0s.len() != expected_length {
+            return Err(LamportError::InvalidPublicKeyLength(
+                bytes_0s.len(),
+                expected_length,
+            ));
+        }
+
+        if bytes_1s.len() != expected_length {
+            return Err(LamportError::InvalidPublicKeyLength(
+                bytes_1s.len(),
+                expected_length,
+            ));
+        }
+
+        let mut public_key = LamportPublicKey::new(hash_type, None);
 
         for i in 0..message_bit_length {
             let start = i * hash_size;
@@ -438,7 +505,6 @@ pub struct LamportPrivateKey {
     derivation_index: u32, // TODO what to use if the key was imported and not derived?
 }
 
-// TODO create from bytes or import method?
 impl LamportPrivateKey {
     pub fn new(
         hash_type: LamportType,
@@ -469,20 +535,116 @@ impl LamportPrivateKey {
         Ok(public_key)
     }
 
-    pub fn to_bytes(&self) -> (Vec<u8>, Vec<u8>) {
+    // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        // Serialize 0s
+        for hash in self.private_key_0s.iter() {
+            bytes.extend_from_slice(&hash.hash);
+        }
+
+        // Serialize 1s
+        for hash in self.private_key_1s.iter() {
+            bytes.extend_from_slice(&hash.hash);
+        }
+
+        bytes
+    }
+
+    // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits
+    pub fn to_bytes_splitted(&self) -> (Vec<u8>, Vec<u8>) {
         let mut bytes_0s = Vec::new();
         let mut bytes_1s = Vec::new();
 
-        for hash_0 in self.private_key_0s.iter() {
-            bytes_0s.extend_from_slice(&hash_0.hash);
+        // Serialize 0s
+        for hash in self.private_key_0s.iter() {
+            bytes_0s.extend_from_slice(&hash.hash);
         }
 
-        for hash_1 in self.private_key_1s.iter() {
-            bytes_1s.extend_from_slice(&hash_1.hash);
+        // Serialize 1s
+        for hash in self.private_key_1s.iter() {
+            bytes_1s.extend_from_slice(&hash.hash);
         }
 
         (bytes_0s, bytes_1s)
     }
+
+    pub fn from_bytes(
+        bytes_0s_then_1s: &[u8],
+        message_bit_length: usize,
+        hash_type: LamportType,
+        derivation_index: u32,
+    ) -> Result<Self, LamportError> {
+        let hash_size = hash_type.hash_size();
+        let expected_length = 2 * message_bit_length * hash_size;
+
+        if bytes_0s_then_1s.len() != expected_length {
+            return Err(LamportError::InvalidPublicKeyLength(
+                bytes_0s_then_1s.len(),
+                expected_length,
+            ));
+        }
+
+        let mut private_key = LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+
+        // Split bytes into 0s and 1s sections
+        let split_point = message_bit_length * hash_size;
+        let bytes_0s = &bytes_0s_then_1s[..split_point];
+        let bytes_1s = &bytes_0s_then_1s[split_point..];
+
+        for i in 0..message_bit_length {
+            let start = i * hash_size;
+            let end = start + hash_size;
+
+            let hash_0 = LamportHash::new(bytes_0s[start..end].to_vec());
+            let hash_1 = LamportHash::new(bytes_1s[start..end].to_vec());
+
+            private_key.push_key_pair(hash_0, hash_1)?;
+        }
+
+        Ok(private_key)
+    }
+
+    pub fn from_bytes_splitted(
+        bytes_0s: &[u8],
+        bytes_1s: &[u8],
+        message_bit_length: usize,
+        hash_type: LamportType,
+        derivation_index: u32,
+    ) -> Result<Self, LamportError> {
+        let hash_size = hash_type.hash_size();
+        let expected_length = message_bit_length * hash_size;
+
+        if bytes_0s.len() != expected_length {
+            return Err(LamportError::InvalidPublicKeyLength(
+                bytes_0s.len(),
+                expected_length,
+            ));
+        }
+
+        if bytes_1s.len() != expected_length {
+            return Err(LamportError::InvalidPublicKeyLength(
+                bytes_1s.len(),
+                expected_length,
+            ));
+        }
+
+        let mut private_key = LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+
+        for i in 0..message_bit_length {
+            let start = i * hash_size;
+            let end = start + hash_size;
+
+            let hash_0 = LamportHash::new(bytes_0s[start..end].to_vec());
+            let hash_1 = LamportHash::new(bytes_1s[start..end].to_vec());
+
+            private_key.push_key_pair(hash_0, hash_1)?;
+        }
+
+        Ok(private_key)
+    }
+
 
     pub fn to_hashes(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let hashes_0s = self
@@ -511,6 +673,8 @@ impl LamportPrivateKey {
             .collect();
         Ok((hashes_0s?, hashes_1s?))
     }
+
+    // TODO to_hashes_string do we want this, its a secret ?
 
     pub fn len(&self) -> usize {
         self.private_key_0s.len()
@@ -665,12 +829,12 @@ impl Lamport {
     }
 
 
-    // TODO Sing and Verify by message bits, and also by messages bytes, as for many cases using SHA256 as hash function will imply that the message is really the message digest, obtained by hashing also the message, so it willl be 32 exact bytes
+    // TODO Sign and Verify by message bits, and also by messages bytes, as for many cases using SHA256 as hash function will imply that the message is really the message digest, obtained by hashing also the message, so it willl be 32 exact bytes
 
     /// Sign a message using a Lamport private key
     ///
     /// # Arguments
-    /// * `message_bits` - The message to sign as a vector of bits (0s and 1s)
+    /// * `message_bits` - The message to sign as a vector of bits (boolean array)
     /// * `private_key` - The private key to use for signing
     ///
     /// # Returns
@@ -681,7 +845,7 @@ impl Lamport {
     /// Reusing a Lamport private key allows attackers to forge signatures.
     pub fn sign_message(
         &self,
-        message_bits: &[u8], // TODO i prefer to be an array of booleans, as a bit is only 0 or 1
+        message_bits: &[bool],
         private_key: &LamportPrivateKey,
     ) -> Result<LamportSignature, LamportError> {
         if message_bits.len() != private_key.message_bit_length() {
@@ -695,12 +859,10 @@ impl Lamport {
 
         // For each bit, reveal the corresponding private key
         for (i, &bit) in message_bits.iter().enumerate() {
-            let revealed_key = if bit == 1 {
+            let revealed_key = if bit {
                 private_key.private_key_1_at(i)?.clone()
-            } else if bit == 0 {
-                private_key.private_key_0_at(i)?.clone()
             } else {
-                return Err(LamportError::InvalidBitValue(bit));
+                private_key.private_key_0_at(i)?.clone()
             };
 
             signature.push_revealed_key(revealed_key)?;
@@ -712,7 +874,7 @@ impl Lamport {
     /// Verify a Lamport signature
     ///
     /// # Arguments
-    /// * `message_bits` - The message that was allegedly signed (as bits)
+    /// * `message_bits` - The message that was allegedly signed (as boolean array)
     /// * `signature` - The signature to verify
     /// * `public_key` - The public key to verify against
     ///
@@ -720,7 +882,7 @@ impl Lamport {
     /// True if the signature is valid, false otherwise
     pub fn verify_signature(
         &self,
-        message_bits: &[u8], // TODO i prefer to be an array of booleans, as a bit is only 0 or 1
+        message_bits: &[bool],
         signature: &LamportSignature,
         public_key: &LamportPublicKey,
     ) -> Result<bool, LamportError> {
@@ -745,13 +907,10 @@ impl Lamport {
             let revealed_key = signature.revealed_key_at(i)?;
             let hash_of_revealed = hash_type.hash(&revealed_key.to_bytes());
 
-            let expected_public_key = if bit == 1 {
+            let expected_public_key = if bit {
                 public_key.public_key_1_at(i)?
-            } else if bit == 0 {
-                public_key.public_key_0_at(i)?
             } else {
-                warn!("Invalid bit value: {} (expected 0 or 1)", bit);
-                return Ok(false);
+                public_key.public_key_0_at(i)?
             };
 
             if hash_of_revealed != *expected_public_key {
@@ -788,13 +947,19 @@ impl Lamport {
 // TODO padding should be added as a parameter, to know how many start 0s are not part of the message, for the funcs that call using exactly all the bits that fits in that bytes padding will be 0
 /// Convert a byte array to a bit array
 /// Each byte is expanded to 8 bits (MSB first)
-pub fn bytes_to_bits(bytes: &[u8]) -> Vec<u8> {
+pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
     let mut bits = Vec::with_capacity(bytes.len() * 8);
 
     for byte in bytes {
         for bit_index in 0..8 {
             let bit = (byte >> (7 - bit_index)) & 1;
-            bits.push(bit);
+            bits.push(bit == 1);
+            // Example extracting bits from byte 0b10110011 (179 in decimal):
+            // bit_index=0: byte >> (7-0) = 0b10110011 >> 7 = 0b00000001, & 1 = 1 → bit = 1 (MSB, push true)
+            // bit_index=1: byte >> (7-1) = 0b10110011 >> 6 = 0b00000010, & 1 = 0 → bit = 0 (push false)
+            // ...
+            // bit_index=7: byte >> (7-7) = 0b10110011 >> 0 = 0b10110011, & 1 = 1 → bit = 1 (push true, LSB)
+            // Result: [true, false, true, true, false, false, true, true] representing bits from MSB to LSB
         }
     }
 
@@ -804,7 +969,7 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<u8> {
 // TODO padding should be added as a return value, to know how many start 0s of the 1st byte are not part of the message, for the cases converting bits mutiple of 8 the padding will be 0
 /// Convert a bit array back to bytes
 /// Every 8 bits are combined into one byte (MSB first)
-pub fn bits_to_bytes(bits: &[u8]) -> Result<Vec<u8>, LamportError> {
+pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>, LamportError> {
     if bits.len() % 8 != 0 {
         return Err(LamportError::InvalidBitLength(bits.len()));
     }
@@ -814,10 +979,15 @@ pub fn bits_to_bytes(bits: &[u8]) -> Result<Vec<u8>, LamportError> {
     for chunk in bits.chunks(8) {
         let mut byte = 0u8;
         for (i, &bit) in chunk.iter().enumerate() {
-            if bit > 1 {
-                return Err(LamportError::InvalidBitValue(bit));
+            if bit {
+                byte |= 1 << (7 - i); // bitwise or
+                // Example building byte 0b10110011 from bits [true, false, true, true, false, false, true, true]:
+                // i=0, bit=true:  1 << (7-0) = 1 << 7 = 0b10000000, byte |= 0b10000000 → byte = 0b10000000
+                // i=1, bit=false: skipped (if bit is false, don't set the bit)
+                // ...
+                // i=7, bit=true:  1 << (7-7) = 1 << 0 = 0b00000001, byte |= 0b00000001 → byte = 0b10110011
+                // Result: byte = 0b10110011 (179 in decimal)
             }
-            byte |= bit << (7 - i);
         }
         bytes.push(byte);
     }
@@ -830,7 +1000,7 @@ mod tests {
     use super::*;
 
 
-    // TODO in this test we assume we alsay have the hole byte filled with bits, we should create another tests, where we have 4 bits and padding, (filled with 0s at the begining) and 1 lonely bit with 7 0s as padding
+    // TODO in this test we assume we always have the hole byte filled with bits, we should create another tests, where we have 4 bits and padding, (filled with 0s at the begining) and 1 lonely bit with 7 0s as padding
     #[test]
     fn test_bytes_to_bits_and_back() {
         let original_bytes = vec![0b10110011, 0b01001100, 0xFF, 0x00];

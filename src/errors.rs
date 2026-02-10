@@ -22,6 +22,9 @@ pub enum KeyManagerError {
     #[error("Failed to create new Winternitz key")]
     WinternitzGenerationError(#[from] WinternitzError),
 
+    #[error("Failed to create new Lamport key")]
+    LamportGenerationError(#[from] LamportError),
+
     #[error("Failed to tweak secret key")]
     FailedToTweakKey(#[from] secp256k1::Error),
 
@@ -180,4 +183,40 @@ pub enum WinternitzError {
 
     #[error("Extra data in Winternitz Public Key missing {0}")]
     ExtraDataMissing(String),
+}
+
+#[derive(Error, Debug)]
+pub enum LamportError {
+    #[error("Index overflow: cannot generate more keys")]
+    IndexOverflow,
+
+    #[error("Invalid Lamport type {0}")]
+    InvalidLamportType(String),
+
+    #[error("Hash size of {0} bytes does not match expected size {1}")]
+    InvalidHashSize(usize, usize),
+
+    #[error("Hash size of {0} bytes does not match expected size {1}")]
+    HashSizeMismatch(usize, usize),
+
+    #[error("Signature length {0} bytes does not match expected length {1} bytes")]
+    InvalidSignatureLength(usize, usize),
+
+    #[error("Public key length {0} bytes does not match expected length {1} bytes")]
+    InvalidPublicKeyLength(usize, usize),
+
+    #[error("Extra data in Lamport Public Key missing {0}")]
+    ExtraDataMissing(String),
+
+    #[error("Index {0} out of bounds (length: {1})")]
+    IndexOutOfBounds(usize, usize),
+
+    #[error("Message length {0} bits does not match expected length {1} bits")]
+    MessageLengthMismatch(usize, usize),
+
+    #[error("Invalid bit value {0} (expected 0 or 1)")]
+    InvalidBitValue(u8),
+
+    #[error("Invalid bit length {0} (must be multiple of 8)")]
+    InvalidBitLength(usize),
 }

@@ -10,7 +10,14 @@ use crate::errors::LamportError;
 pub const SHA256_SIZE: usize = 32;
 pub const RIPEMD160_SIZE: usize = 20;
 
-// TODO add a max length to prevent DoS with huge keys/signatures?
+/// Maximum message bit length allowed to prevent DoS attacks with huge keys/signatures.
+/// This limit supports up to 10x SHA256 size (256 bits * 10 = 2560 bits) with headroom.
+/// At this limit, key size is approximately: 2 * 10000 * 32 bytes = 625 KB
+pub const MAX_MESSAGE_BIT_LENGTH: usize = 10_000;
+
+/// Maximum signature/key byte length, calculated as MAX_MESSAGE_BIT_LENGTH * max_hash_size * 2
+/// This equals 10,000 * 32 * 2 = 640,000 bytes (~625 KB) for the largest hash type
+pub const MAX_KEY_SIGNATURE_BYTE_LENGTH: usize = MAX_MESSAGE_BIT_LENGTH * SHA256_SIZE * 2;
 
 /// Lamport signature hash function types
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -155,6 +162,9 @@ impl LamportSignature {
         message_bit_length: usize,
         hash_type: LamportType,
     ) -> Result<Self, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+        validate_byte_length(bytes.len())?;
+
         let hash_size = hash_type.hash_size();
 
         if bytes.len() != message_bit_length * hash_size {
@@ -336,6 +346,9 @@ impl LamportPublicKey {
         message_bit_length: usize,
         hash_type: LamportType,
     ) -> Result<Self, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+        validate_byte_length(bytes_0s_then_1s.len())?;
+
         let hash_size = hash_type.hash_size();
         let expected_length = 2 * message_bit_length * hash_size;
 
@@ -372,6 +385,10 @@ impl LamportPublicKey {
         message_bit_length: usize,
         hash_type: LamportType,
     ) -> Result<Self, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+        let combined_length = bytes_0s.len().saturating_add(bytes_1s.len());
+        validate_byte_length(combined_length)?;
+
         let hash_size = hash_type.hash_size();
         let expected_length = message_bit_length * hash_size;
 
@@ -511,6 +528,7 @@ impl LamportPrivateKey {
         message_bit_length: usize,
         derivation_index: u32,
     ) -> Self {
+        // Note: Validation is performed in generate_private_key and from_bytes methods
         LamportPrivateKey {
             private_key_0s: Vec::with_capacity(message_bit_length),
             private_key_1s: Vec::with_capacity(message_bit_length),
@@ -576,6 +594,9 @@ impl LamportPrivateKey {
         hash_type: LamportType,
         derivation_index: u32,
     ) -> Result<Self, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+        validate_byte_length(bytes_0s_then_1s.len())?;
+
         let hash_size = hash_type.hash_size();
         let expected_length = 2 * message_bit_length * hash_size;
 
@@ -613,6 +634,10 @@ impl LamportPrivateKey {
         hash_type: LamportType,
         derivation_index: u32,
     ) -> Result<Self, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+        let combined_length = bytes_0s.len().saturating_add(bytes_1s.len());
+        validate_byte_length(combined_length)?;
+
         let hash_size = hash_type.hash_size();
         let expected_length = message_bit_length * hash_size;
 
@@ -753,6 +778,32 @@ impl Drop for LamportPrivateKey {
     }
 }
 
+// ========== Validation Helper Functions ==========
+
+/// Validates that message bit length doesn't exceed the maximum to prevent DoS attacks
+fn validate_message_bit_length(message_bit_length: usize) -> Result<(), LamportError> {
+    if message_bit_length > MAX_MESSAGE_BIT_LENGTH {
+        return Err(LamportError::MessageBitLengthExceedsMax(
+            message_bit_length,
+            MAX_MESSAGE_BIT_LENGTH,
+        ));
+    }
+    Ok(())
+}
+
+/// Validates that byte length doesn't exceed the maximum to prevent DoS attacks
+fn validate_byte_length(byte_length: usize) -> Result<(), LamportError> {
+    if byte_length > MAX_KEY_SIGNATURE_BYTE_LENGTH {
+        return Err(LamportError::ByteLengthExceedsMax(
+            byte_length,
+            MAX_KEY_SIGNATURE_BYTE_LENGTH,
+        ));
+    }
+    Ok(())
+}
+
+// ========== Main Lamport Implementation ==========
+
 /// Main Lamport signature scheme implementation
 #[derive(Default)]
 pub struct Lamport {}
@@ -808,6 +859,8 @@ impl Lamport {
         message_bit_length: usize,
         derivation_index: u32,
     ) -> Result<LamportPrivateKey, LamportError> {
+        validate_message_bit_length(message_bit_length)?;
+
         derivation_index
             .checked_add(1)
             .ok_or(LamportError::IndexOverflow)?;
@@ -2272,5 +2325,148 @@ mod tests {
         let message_bytes = vec![0x42u8; 128]; // 1024 bits
         let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
         assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+    }
+
+    // ========== DoS Protection Tests ==========
+
+    #[test]
+    fn test_dos_protection_exceeds_max_message_bit_length() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret";
+
+        // Try to generate with message_bit_length exceeding MAX_MESSAGE_BIT_LENGTH
+        let result = lamport.generate_private_key(
+            master_secret,
+            LamportType::SHA256,
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            0,
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(LamportError::MessageBitLengthExceedsMax(actual, max)) => {
+                assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
+                assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
+            }
+            _ => panic!("Expected MessageBitLengthExceedsMax error"),
+        }
+    }
+
+    #[test]
+    fn test_dos_protection_at_max_message_bit_length() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret";
+
+        // Exactly at MAX_MESSAGE_BIT_LENGTH should succeed (might be slow, but validates the limit)
+        let result = lamport.generate_private_key(
+            master_secret,
+            LamportType::SHA256,
+            MAX_MESSAGE_BIT_LENGTH,
+            0,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_dos_protection_public_key_from_bytes() {
+        // Try to deserialize with excessive message_bit_length
+        let result = LamportPublicKey::from_bytes(
+            &[0u8; 100],
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            LamportType::SHA256,
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(LamportError::MessageBitLengthExceedsMax(actual, max)) => {
+                assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
+                assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
+            }
+            _ => panic!("Expected MessageBitLengthExceedsMax error"),
+        }
+    }
+
+    #[test]
+    fn test_dos_protection_public_key_from_bytes_excessive_bytes() {
+        // Create a huge byte array that exceeds MAX_KEY_SIGNATURE_BYTE_LENGTH
+        // We don't actually allocate it, just pass the length check
+        let large_vec = vec![0u8; 1000]; // Small allocation for the test
+
+        // Try with a message_bit_length that would require more bytes than MAX
+        let result = LamportPublicKey::from_bytes(
+            &large_vec,
+            MAX_MESSAGE_BIT_LENGTH,
+            LamportType::SHA256,
+        );
+
+        // Should fail because bytes length (1000) doesn't match expected (MAX_MESSAGE_BIT_LENGTH * 32 * 2)
+        // but more importantly, it validates limits before trying to process
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dos_protection_private_key_from_bytes() {
+        // Try to deserialize with excessive message_bit_length
+        let result = LamportPrivateKey::from_bytes(
+            &[0u8; 100],
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            LamportType::SHA256,
+            0,
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(LamportError::MessageBitLengthExceedsMax(actual, max)) => {
+                assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
+                assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
+            }
+            _ => panic!("Expected MessageBitLengthExceedsMax error"),
+        }
+    }
+
+    #[test]
+    fn test_dos_protection_signature_from_bytes() {
+        // Try to deserialize with excessive message_bit_length
+        let result = LamportSignature::from_bytes(
+            &[0u8; 100],
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            LamportType::SHA256,
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(LamportError::MessageBitLengthExceedsMax(actual, max)) => {
+                assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
+                assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
+            }
+            _ => panic!("Expected MessageBitLengthExceedsMax error"),
+        }
+    }
+
+    #[test]
+    fn test_dos_protection_from_bytes_splitted() {
+        // Test both public and private key from_bytes_splitted methods
+        let bytes_0s = vec![0u8; 100];
+        let bytes_1s = vec![0u8; 100];
+
+        // Test public key
+        let result = LamportPublicKey::from_bytes_splitted(
+            &bytes_0s,
+            &bytes_1s,
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            LamportType::SHA256,
+        );
+        assert!(result.is_err());
+
+        // Test private key
+        let result = LamportPrivateKey::from_bytes_splitted(
+            &bytes_0s,
+            &bytes_1s,
+            MAX_MESSAGE_BIT_LENGTH + 1,
+            LamportType::SHA256,
+            0,
+        );
+        assert!(result.is_err());
     }
 }

@@ -219,4 +219,10 @@ pub enum LamportError {
 
     #[error("Invalid bit length {0} (must be multiple of 8)")]
     InvalidBitLength(usize),
+
+    #[error("Message bit length {0} exceeds maximum allowed length of {1} bits")]
+    MessageBitLengthExceedsMax(usize, usize),
+
+    #[error("Byte length {0} exceeds maximum allowed length of {1} bytes")]
+    ByteLengthExceedsMax(usize, usize),
 }

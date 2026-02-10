@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use serde::{Deserialize, Serialize};
-// use zeroize::Zeroize; // TODO, keep ?
+use zeroize::Zeroize;
 
 use crate::errors::LamportError;
 
@@ -80,12 +80,11 @@ pub struct LamportHash {
     hash: Vec<u8>,
 }
 
-// TODO do we want zeroize private key on drop? or left responsibility to the caller?
-// impl Zeroize for LamportHash {
-//     fn zeroize(&mut self) {
-//         self.hash.zeroize();
-//     }
-// }
+impl Zeroize for LamportHash {
+    fn zeroize(&mut self) {
+        self.hash.zeroize();
+    }
+}
 
 impl LamportHash {
     pub fn new(hash: Vec<u8>) -> Self {
@@ -673,7 +672,11 @@ impl LamportPrivateKey {
         Ok((hashes_0s?, hashes_1s?))
     }
 
-    // TODO to_hashes_string do we want this, its a secret ?
+    pub fn to_hashes_string(&self) -> (Vec<String>, Vec<String>) {
+        let hashes_0s = self.private_key_0s.iter().map(|hash| hash.to_hex()).collect();
+        let hashes_1s = self.private_key_1s.iter().map(|hash| hash.to_hex()).collect();
+        (hashes_0s, hashes_1s)
+    }
 
     pub fn len(&self) -> usize {
         self.private_key_0s.len()
@@ -736,18 +739,17 @@ impl LamportPrivateKey {
     }
 }
 
-// TODO do we want zeroize private key on drop? or left responsibility to the caller?
-// impl Drop for LamportPrivateKey {
-//     fn drop(&mut self) {
-//         // Zeroize the private keys on drop
-//         for hash in self.private_key_0s.iter_mut() {
-//             hash.hash.zeroize();
-//         }
-//         for hash in self.private_key_1s.iter_mut() {
-//             hash.hash.zeroize();
-//         }
-//     }
-// }
+impl Drop for LamportPrivateKey {
+    fn drop(&mut self) {
+        // Zeroize the private keys on drop
+        for hash in self.private_key_0s.iter_mut() {
+            hash.hash.zeroize();
+        }
+        for hash in self.private_key_1s.iter_mut() {
+            hash.hash.zeroize();
+        }
+    }
+}
 
 /// Main Lamport signature scheme implementation
 #[derive(Default)]

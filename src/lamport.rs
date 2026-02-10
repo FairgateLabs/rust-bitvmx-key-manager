@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use bitcoin::hashes::{ripemd160, sha256, Hash, HashEngine, Hmac, HmacEngine};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 // use zeroize::Zeroize; // TODO, keep ?
 
 use crate::errors::LamportError;
@@ -944,14 +943,36 @@ impl Lamport {
     }
 }
 
-// TODO padding should be added as a parameter, to know how many start 0s are not part of the message, for the funcs that call using exactly all the bits that fits in that bytes padding will be 0
 /// Convert a byte array to a bit array
 /// Each byte is expanded to 8 bits (MSB first)
-pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
-    let mut bits = Vec::with_capacity(bytes.len() * 8);
+///
+/// # Arguments
+/// * `bytes` - The byte array to convert
+/// * `padding` - Number of leading bits to skip in the first byte (0-7)
+///
+/// # Returns
+/// A vector of bools representing the bits, skipping the first `padding` bits
+///
+/// # Example
+/// ```
+/// // bytes = [0b00010110], padding = 3
+/// // Result skips first 3 bits: [true, false, true, true, false] (the bits "10110")
+/// ```
+pub fn bytes_to_bits(bytes: &[u8], padding: usize) -> Vec<bool> {
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+
+    let total_bits = bytes.len() * 8;
+    let mut bits = Vec::with_capacity(total_bits.saturating_sub(padding));
+    let mut bits_to_skip = padding;
 
     for byte in bytes {
         for bit_index in 0..8 {
+            if bits_to_skip > 0 {
+                bits_to_skip -= 1;
+                continue;
+            }
             let bit = (byte >> (7 - bit_index)) & 1;
             bits.push(bit == 1);
             // Example extracting bits from byte 0b10110011 (179 in decimal):
@@ -966,33 +987,64 @@ pub fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
     bits
 }
 
-// TODO padding should be added as a return value, to know how many start 0s of the 1st byte are not part of the message, for the cases converting bits mutiple of 8 the padding will be 0
 /// Convert a bit array back to bytes
 /// Every 8 bits are combined into one byte (MSB first)
-pub fn bits_to_bytes(bits: &[bool]) -> Result<Vec<u8>, LamportError> {
-    if bits.len() % 8 != 0 {
-        return Err(LamportError::InvalidBitLength(bits.len()));
+///
+/// # Returns
+/// A tuple containing:
+/// * The byte vector
+/// * The padding value (number of leading zeros added to make bits fit into bytes)
+///
+/// # Example
+/// ```
+/// // bits = [true, false, true, true, false] (5 bits: "10110")
+/// // Padding = 3, result bytes = [0b00010110]
+/// // Returns: (vec![0b00010110], 3)
+/// ```
+pub fn bits_to_bytes(bits: &[bool]) -> Result<(Vec<u8>, usize), LamportError> {
+    if bits.is_empty() {
+        return Ok((Vec::new(), 0));
     }
 
-    let mut bytes = Vec::with_capacity(bits.len() / 8);
+    // Calculate padding needed: how many zeros to prepend to make length a multiple of 8
+    let padding = (8 - (bits.len() % 8)) % 8; // double % for the case 8 - 0 = 8 which should be 0 padding
+    let total_bits = padding + bits.len();
+    let mut bytes = Vec::with_capacity(total_bits / 8);
 
-    for chunk in bits.chunks(8) {
-        let mut byte = 0u8;
-        for (i, &bit) in chunk.iter().enumerate() {
-            if bit {
-                byte |= 1 << (7 - i); // bitwise or
-                // Example building byte 0b10110011 from bits [true, false, true, true, false, false, true, true]:
-                // i=0, bit=true:  1 << (7-0) = 1 << 7 = 0b10000000, byte |= 0b10000000 → byte = 0b10000000
-                // i=1, bit=false: skipped (if bit is false, don't set the bit)
-                // ...
-                // i=7, bit=true:  1 << (7-7) = 1 << 0 = 0b00000001, byte |= 0b00000001 → byte = 0b10110011
-                // Result: byte = 0b10110011 (179 in decimal)
-            }
+    let mut current_byte = 0u8;
+    let mut bit_position = 0;
+
+    // Add padding zeros
+    for _ in 0..padding {
+        // bit is 0, so we don't need to set it (current_byte starts as 0)
+        bit_position += 1;
+        if bit_position == 8 {
+            bytes.push(current_byte);
+            current_byte = 0;
+            bit_position = 0;
         }
-        bytes.push(byte);
     }
 
-    Ok(bytes)
+    // Add actual bits
+    for &bit in bits {
+        if bit {
+            current_byte |= 1 << (7 - bit_position);
+            // Example building byte 0b10110011 from bits [true, false, true, true, false, false, true, true]:
+            // bit_position=0, bit=true:  1 << (7-0) = 1 << 7 = 0b10000000, byte |= 0b10000000 → byte = 0b10000000
+            // bit_position=1, bit=false: skipped (if bit is false, don't set the bit)
+            // ...
+            // bit_position=7, bit=true:  1 << (7-7) = 1 << 0 = 0b00000001, byte |= 0b00000001 → byte = 0b10110011
+            // Result: byte = 0b10110011 (179 in decimal)
+        }
+        bit_position += 1;
+        if bit_position == 8 {
+            bytes.push(current_byte);
+            current_byte = 0;
+            bit_position = 0;
+        }
+    }
+
+    Ok((bytes, padding))
 }
 
 #[cfg(test)]
@@ -1000,15 +1052,172 @@ mod tests {
     use super::*;
 
 
-    // TODO in this test we assume we always have the hole byte filled with bits, we should create another tests, where we have 4 bits and padding, (filled with 0s at the begining) and 1 lonely bit with 7 0s as padding
     #[test]
     fn test_bytes_to_bits_and_back() {
+        // Test with no padding (full bytes)
         let original_bytes = vec![0b10110011, 0b01001100, 0xFF, 0x00];
-        let bits = bytes_to_bits(&original_bytes);
+        let bits = bytes_to_bits(&original_bytes, 0);
         assert_eq!(bits.len(), 32);
 
-        let reconstructed_bytes = bits_to_bytes(&bits).unwrap();
+        let (reconstructed_bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 0);
         assert_eq!(original_bytes, reconstructed_bytes);
+    }
+
+    #[test]
+    fn test_bytes_to_bits_with_padding() {
+        // Test with 3 bits of padding
+        // bytes = [0b00010110], padding = 3
+        // Should skip first 3 bits and return the 5 bits: "10110"
+        let bytes = vec![0b00010110];
+        let bits = bytes_to_bits(&bytes, 3);
+        assert_eq!(bits.len(), 5);
+        assert_eq!(bits, vec![true, false, true, true, false]);
+
+        // Test with 7 bits of padding (1 bit remaining)
+        // bytes = [0b00000001], padding = 7
+        // Should return just 1 bit: "1"
+        let bytes = vec![0b00000001];
+        let bits = bytes_to_bits(&bytes, 7);
+        assert_eq!(bits.len(), 1);
+        assert_eq!(bits, vec![true]);
+
+        // Test with padding across multiple bytes
+        // bytes = [0b00001011, 0b01110011], padding = 4
+        // Should skip first 4 bits of first byte
+        let bytes = vec![0b00001011, 0b01110011];
+        let bits = bytes_to_bits(&bytes, 4);
+        assert_eq!(bits.len(), 12);
+        assert_eq!(
+            bits,
+            vec![true, false, true, true, false, true, true, true, false, false, true, true]
+        );
+    }
+
+    #[test]
+    fn test_bits_to_bytes_with_padding() {
+        // Test with 5 bits (requires 3 bits of padding)
+        // bits = [true, false, true, true, false] ("10110")
+        // Should produce bytes = [0b00010110], padding = 3
+        let bits = vec![true, false, true, true, false];
+        let (bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 3);
+        assert_eq!(bytes, vec![0b00010110]);
+
+        // Test roundtrip
+        let reconstructed_bits = bytes_to_bits(&bytes, padding);
+        assert_eq!(bits, reconstructed_bits);
+
+        // Test with 1 bit (requires 7 bits of padding)
+        let bits = vec![true];
+        let (bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 7);
+        assert_eq!(bytes, vec![0b00000001]);
+
+        // Test roundtrip
+        let reconstructed_bits = bytes_to_bits(&bytes, padding);
+        assert_eq!(bits, reconstructed_bits);
+
+        // Test with 0 padding (exact byte boundary)
+        let bits = vec![true, false, true, true, false, false, true, true];
+        let (bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 0);
+        assert_eq!(bytes, vec![0b10110011]);
+    }
+
+    #[test]
+    fn test_bits_to_bytes_with_padding_zero() {
+        // Test with 0 padding (exact byte boundary - 8 bits)
+        let bits = vec![true, false, true, true, false, false, true, true];
+        let (bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 0);
+        assert_eq!(bytes, vec![0b10110011]);
+
+        // Test roundtrip
+        let reconstructed_bits = bytes_to_bits(&bytes, padding);
+        assert_eq!(bits, reconstructed_bits);
+
+        // Test with 0 padding (exact byte boundary - 16 bits)
+        let bits = vec![
+            true, false, true, true, false, false, true, true,
+            false, true, false, false, true, true, false, false
+        ];
+        let (bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 0);
+        assert_eq!(bytes, vec![0b10110011, 0b01001100]);
+
+        // Test roundtrip
+        let reconstructed_bits = bytes_to_bits(&bytes, padding);
+        assert_eq!(bits, reconstructed_bits);
+    }
+
+    #[test]
+    fn test_padding_greater_than_8() {
+        // Test with padding = 10 (spans across multiple bytes)
+        // bytes = [0x00, 0x05] = [0b00000000, 0b00000101]
+        // Skip first 10 bits: all 8 bits from first byte + 2 bits from second byte
+        // Remaining 6 bits from second byte: "000101"
+        let bytes = vec![0x00, 0x05];
+        let bits = bytes_to_bits(&bytes, 10);
+        assert_eq!(bits.len(), 6);
+        assert_eq!(bits, vec![false, false, false, true, false, true]);
+
+        // Test roundtrip
+        let (reconstructed_bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 2); // 6 bits need 2 bits of padding to make 8
+        assert_eq!(reconstructed_bytes, vec![0b00000101]);
+        let final_bits = bytes_to_bits(&reconstructed_bytes, padding);
+        assert_eq!(bits, final_bits);
+
+        // Test with padding = 12 (1.5 bytes worth of padding)
+        // bytes = [0xFF, 0xFF, 0xFF] = 24 bits total
+        // Skip first 12 bits: all of first byte + half of second byte
+        // Remaining 12 bits: second half of 2nd byte + all of 3rd byte
+        let bytes = vec![0xFF, 0b11110101, 0xAA];
+        let bits = bytes_to_bits(&bytes, 12);
+        assert_eq!(bits.len(), 12);
+        assert_eq!(bits, vec![
+            false, true, false, true, // lower 4 bits of 0b11110101
+            true, false, true, false, true, false, true, false // 0xAA
+        ]);
+
+        // Test with padding = 15 (almost 2 bytes)
+        // bytes = [0x00, 0xFF, 0x01] = 24 bits total
+        // Skip first 15 bits
+        // Remaining 9 bits
+        let bytes = vec![0x00, 0xFF, 0x01];
+        let bits = bytes_to_bits(&bytes, 15);
+        assert_eq!(bits.len(), 9);
+        assert_eq!(bits, vec![true, false, false, false, false, false, false, false, true]);
+    }
+
+    #[test]
+    fn test_large_value_with_leading_zeros() {
+        // Simulate a u32 with value 5 (binary: 101)
+        // When serialized: [0x00, 0x00, 0x00, 0x05]
+        // That's 32 bits total, but only last 3 bits matter
+        // padding = 29 to skip the leading zeros
+        let value: u32 = 5;
+        let bytes = value.to_be_bytes();
+        let bits = bytes_to_bits(&bytes, 29);
+
+        assert_eq!(bits.len(), 3);
+        assert_eq!(bits, vec![true, false, true]); // "101" in binary
+
+        // Test roundtrip
+        let (reconstructed_bytes, padding) = bits_to_bytes(&bits).unwrap();
+        assert_eq!(padding, 5); // 3 bits need 5 bits padding to make 8
+        assert_eq!(reconstructed_bytes, vec![0b00000101]);
+        let final_bits = bytes_to_bits(&reconstructed_bytes, padding);
+        assert_eq!(bits, final_bits);
+
+        // Test with u16 value 7 (binary: 111)
+        let value: u16 = 7;
+        let bytes = value.to_be_bytes();
+        let bits = bytes_to_bits(&bytes, 13); // Skip 13 leading zeros
+
+        assert_eq!(bits.len(), 3);
+        assert_eq!(bits, vec![true, true, true]); // "111" in binary
     }
 
     #[test]
@@ -1035,11 +1244,11 @@ mod tests {
             .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, 0)
             .unwrap();
 
-        let public_key = private_key.public_key().unwrap();
+        let _public_key = private_key.public_key().unwrap();
 
         // Create a test message
         let message_bytes = b"Hello, Lamport!"; // 15 bytes = 120 bits
-        let message_bits = bytes_to_bits(message_bytes);
+        let message_bits = bytes_to_bits(message_bytes, 0);
 
         // For this test, we need a key with the right bit length
         let private_key_120 = lamport
@@ -1068,13 +1277,13 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         let message_bytes = b"Hello, Lamport!";
-        let message_bits = bytes_to_bits(message_bytes);
+        let message_bits = bytes_to_bits(message_bytes, 0);
 
         let signature = lamport.sign_message(&message_bits, &private_key).unwrap();
 
         // Try to verify with a different message
         let wrong_message_bytes = b"Wrong message!!";
-        let wrong_message_bits = bytes_to_bits(wrong_message_bytes);
+        let wrong_message_bits = bytes_to_bits(wrong_message_bytes, 0);
 
         let is_valid = lamport
             .verify_signature(&wrong_message_bits, &signature, &public_key)
@@ -1124,7 +1333,7 @@ mod tests {
 
         // Create a test message
         let message_bytes = b"Hello, HASH160!"; // 15 bytes = 120 bits
-        let message_bits = bytes_to_bits(message_bytes);
+        let message_bits = bytes_to_bits(message_bytes, 0);
 
         let private_key_120 = lamport
             .generate_private_key(master_secret, LamportType::HASH160, 120, 1)

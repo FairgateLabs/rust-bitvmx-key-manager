@@ -17,6 +17,13 @@ pub struct KeyStore {
     store: Rc<Storage>,
 }
 
+/* TODO, Possible optimization:
+saving byte arrays instead of base64 general_purpose::STANDARD.encode/decode will reduce database size and improve performance,
+but it would require changing the Storage trait to support byte arrays,
+and also adjusting the serialization/deserialization logic accordingly.
+This could be a future improvement to consider after evaluating the current implementation's performance and storage efficiency.
+*/
+
 impl KeyStore {
     const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
     const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
@@ -307,13 +314,10 @@ impl KeyStore {
     }
 
     fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
-        // TODO optimize storage format? hash the concatenation?
-        // TODO check if there is already e fun in the lamport object to do this formatting, to avoid code duplication and potential inconsistencies
-        format!(
-            "{}:{}",
-            Self::LAMPORT,
-            general_purpose::STANDARD.encode(public_key.to_bytes()), // TODO this could be long... save the has instead? research a bit.. if its not duplicating what rocksdb already does
-        )
+        // blake3 justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
+        let pubkey_bytes = public_key.to_bytes();
+        let hash = blake3::hash(&pubkey_bytes);
+        format!("{}:{}", Self::LAMPORT, hash.to_hex())
     }
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
@@ -340,7 +344,6 @@ impl KeyStore {
         public_key: &LamportPublicKey,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         // TODO test store and load
-        // TODO if we need splited 0s and 1s, format storake key and value, using to_bytes_splitted instead
         let pubk = Self::format_lamport_storage_key(public_key);
         let privk: Option<Zeroizing<String>> =
             self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
@@ -359,7 +362,7 @@ impl KeyStore {
                 public_key.hash_type(),
                 0,
             )?;
-            // TODO is ok using 0 derivation index for stored (imported) lamport keys?
+            // TODO use some mark for stored (imported) lamport keys
 
             return Ok(Some(private_key));
         }

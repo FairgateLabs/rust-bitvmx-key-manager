@@ -7955,7 +7955,7 @@ mod tests {
             use crate::lamport::HashFunction;
 
             let message_bit_length = 128;
-            let public_key =
+            let _public_key =
                 key_manager.next_lamport(message_bit_length, LamportType::HASH160)?;
 
             let message_bits = vec![true; message_bit_length];

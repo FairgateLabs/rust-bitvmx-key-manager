@@ -789,11 +789,6 @@ impl LamportPrivateKey {
         self.spent = true;
     }
 
-    // TODO set necessary?
-    // pub fn set_imported(&mut self, imported: bool) {
-    //     self.imported = imported;
-    // }
-
     fn push_key_pair(
         &mut self,
         hash_0: LamportHash,

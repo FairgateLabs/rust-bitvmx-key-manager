@@ -1726,10 +1726,6 @@ impl KeyManager {
         Ok(signature)
     }
 
-    // TODO write examples
-    // TODO mark imported used (similar to Winternitz)
-    // TODO check lamport extra data
-
     /// Exports the private key for a given public key.
     ///
     /// Note: Each public key uniquely maps to exactly one private key in the keystore.

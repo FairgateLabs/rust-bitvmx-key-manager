@@ -426,8 +426,6 @@ impl KeyStore {
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
 
-        // TODO - if prublic_key has imported in true, -> error, key marked as imported, here it must be derivated
-
         // Bitmap with block size of 1024 indices for efficiency
         // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
 

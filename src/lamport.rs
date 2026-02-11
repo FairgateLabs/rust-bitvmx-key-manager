@@ -312,6 +312,7 @@ impl LamportPublicKey {
     }
 
     // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
+    // we aware this is exporting only the keys without other attributes
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -329,6 +330,7 @@ impl LamportPublicKey {
     }
 
     // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits
+    // we aware this is exporting only the keys without other attributes
     pub fn to_bytes_splitted(&self) -> (Vec<u8>, Vec<u8>) {
         let mut bytes_0s = Vec::new();
         let mut bytes_1s = Vec::new();
@@ -593,6 +595,7 @@ impl LamportPrivateKey {
     }
 
     // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
+    // we aware this is exporting only the keys without other attributes
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -610,6 +613,7 @@ impl LamportPrivateKey {
     }
 
     // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits
+    // we aware this is exporting only the keys without other attributes
     pub fn to_bytes_splitted(&self) -> (Vec<u8>, Vec<u8>) {
         let mut bytes_0s = Vec::new();
         let mut bytes_1s = Vec::new();

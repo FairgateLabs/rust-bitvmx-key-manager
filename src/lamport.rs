@@ -1554,8 +1554,14 @@ mod tests {
             .unwrap();
 
         let bytes = public_key.to_bytes();
-        let reconstructed =
-            LamportPublicKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, false, Some(ExtraData::new(message_bit_length, Some(0)))).unwrap();
+        let reconstructed = LamportPublicKey::from_bytes(
+            &bytes,
+            message_bit_length,
+            LamportType::SHA256,
+            false,
+            Some(ExtraData::new(message_bit_length, Some(0))),
+        )
+        .unwrap();
 
         assert_eq!(public_key.len(), reconstructed.len());
         assert_eq!(public_key.to_bytes(), reconstructed.to_bytes());
@@ -2044,9 +2050,14 @@ mod tests {
             .unwrap();
 
         let bytes = private_key.to_bytes();
-        let reconstructed =
-            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, Some(0), false)
-                .unwrap();
+        let reconstructed = LamportPrivateKey::from_bytes(
+            &bytes,
+            message_bit_length,
+            LamportType::SHA256,
+            Some(0),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(private_key.len(), reconstructed.len());
         assert_eq!(private_key.to_bytes(), reconstructed.to_bytes());
@@ -2625,8 +2636,13 @@ mod tests {
         let large_vec = vec![0u8; 1000]; // Small allocation for the test
 
         // Try with a message_bit_length that would require more bytes than MAX
-        let result =
-            LamportPublicKey::from_bytes(&large_vec, MAX_MESSAGE_BIT_LENGTH, LamportType::SHA256, false, None);
+        let result = LamportPublicKey::from_bytes(
+            &large_vec,
+            MAX_MESSAGE_BIT_LENGTH,
+            LamportType::SHA256,
+            false,
+            None,
+        );
 
         // Should fail because bytes length (1000) doesn't match expected (MAX_MESSAGE_BIT_LENGTH * 32 * 2)
         // but more importantly, it validates limits before trying to process

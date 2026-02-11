@@ -372,7 +372,8 @@ impl KeyManager {
         let public_key = private_key.public_key()?;
 
         // store the lamport keys in a way that we can retrieve them for signing
-        self.keystore.store_lamport_imported_key(&private_key, &public_key)?;
+        self.keystore
+            .store_lamport_imported_key(&private_key, &public_key)?;
 
         Ok(public_key)
     }
@@ -996,12 +997,8 @@ impl KeyManager {
         let master_secret = self.keystore.load_lamport_seed()?;
 
         let lamport = crate::lamport::Lamport::new();
-        let public_key = lamport.generate_public_key(
-            &*master_secret,
-            key_type,
-            message_bit_length,
-            index,
-        )?;
+        let public_key =
+            lamport.generate_public_key(&*master_secret, key_type, message_bit_length, index)?;
 
         Ok(public_key)
     }
@@ -1447,20 +1444,14 @@ impl KeyManager {
         message_bits: &[bool],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-
-        if public_key.imported(){
+        if public_key.imported() {
             self.sign_lamport_message_by_pubkey_imported(message_bits, public_key)
-        }
-        else {
-            let index = public_key.derivation_index()
+        } else {
+            let index = public_key
+                .derivation_index()
                 .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-            self.sign_lamport_message_by_index(
-                message_bits,
-                public_key.hash_type(),
-                index,
-            )
+            self.sign_lamport_message_by_index(message_bits, public_key.hash_type(), index)
         }
-
     }
 
     // private
@@ -1469,30 +1460,30 @@ impl KeyManager {
         message_bits: &[bool],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-            let private_key = self
-                .keystore
-                .load_lamport_imported_key(public_key)?
-                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+        let private_key = self
+            .keystore
+            .load_lamport_imported_key(public_key)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-            let tx_id = self.begin_transaction();
-            // check if index was already used, if its error, if not mark and save
-            #[cfg(feature = "lamport_idx_check")]
-            match self
-                .keystore
-                .check_and_mark_lamport_used_imported(public_key, tx_id)
-            {
-                Ok(()) => {}
-                Err(e) => {
-                    self.rollback_transaction(tx_id)?;
-                    return Err(e);
-                }
+        let tx_id = self.begin_transaction();
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_used_imported(public_key, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
             }
+        }
 
-            let lamport = Lamport::new();
-            let sig = lamport.sign_message(message_bits, &private_key)?;
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message(message_bits, &private_key)?;
 
-            self.commit_transaction(tx_id)?;
-            Ok(sig)
+        self.commit_transaction(tx_id)?;
+        Ok(sig)
     }
 
     // For one-time lamport keys
@@ -1505,12 +1496,8 @@ impl KeyManager {
     ) -> Result<LamportSignature, KeyManagerError> {
         let master_secret = self.keystore.load_lamport_seed()?;
         let lamport = Lamport::new();
-        let private_key = lamport.generate_private_key(
-            &*master_secret,
-            key_type,
-            message_bits.len(),
-            index,
-        )?;
+        let private_key =
+            lamport.generate_private_key(&*master_secret, key_type, message_bits.len(), index)?;
 
         let tx_id = self.begin_transaction();
 
@@ -1553,17 +1540,13 @@ impl KeyManager {
         message_bytes: &[u8],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        if public_key.imported(){
+        if public_key.imported() {
             self.sign_lamport_message_bytes_by_pubkey_imported(message_bytes, public_key)
-        }
-        else {
-            let index = public_key.derivation_index()
+        } else {
+            let index = public_key
+                .derivation_index()
                 .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-            self.sign_lamport_message_bytes_by_index(
-                message_bytes,
-                public_key.hash_type(),
-                index,
-            )
+            self.sign_lamport_message_bytes_by_index(message_bytes, public_key.hash_type(), index)
         }
     }
 
@@ -1573,32 +1556,31 @@ impl KeyManager {
         message_bytes: &[u8],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-            let private_key = self
-                .keystore
-                .load_lamport_imported_key(public_key)?
-                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+        let private_key = self
+            .keystore
+            .load_lamport_imported_key(public_key)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-            let tx_id = self.begin_transaction();
-            // check if index was already used, if its error, if not mark and save
-            #[cfg(feature = "lamport_idx_check")]
-            match self
-                .keystore
-                .check_and_mark_lamport_used_imported(public_key, tx_id)
-            {
-                Ok(()) => {}
-                Err(e) => {
-                    self.rollback_transaction(tx_id)?;
-                    return Err(e);
-                }
+        let tx_id = self.begin_transaction();
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_used_imported(public_key, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
             }
+        }
 
-            let lamport = Lamport::new();
-            let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
 
-            self.commit_transaction(tx_id)?;
-            Ok(sig)
+        self.commit_transaction(tx_id)?;
+        Ok(sig)
     }
-
 
     // For one-time lamport keys
     // TODO: make this fun private to force sign by key? Protocol should store the key and not the index
@@ -1613,7 +1595,7 @@ impl KeyManager {
         let private_key = lamport.generate_private_key(
             &*master_secret,
             key_type,
-            message_bytes.len() * 8,  // Convert bytes to bits
+            message_bytes.len() * 8, // Convert bytes to bits
             index,
         )?;
 
@@ -1657,17 +1639,13 @@ impl KeyManager {
         message_bit: bool, // bool representing a bit false = 0, true = 1
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        if public_key.imported(){
+        if public_key.imported() {
             self.sign_lamport_bit_by_pubkey_imported(message_bit, public_key)
-        }
-        else {
-            let index = public_key.derivation_index()
+        } else {
+            let index = public_key
+                .derivation_index()
                 .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-            self.sign_lamport_bit_by_index(
-                message_bit,
-                public_key.hash_type(),
-                index,
-            )
+            self.sign_lamport_bit_by_index(message_bit, public_key.hash_type(), index)
         }
     }
 
@@ -1677,30 +1655,30 @@ impl KeyManager {
         message_bit: bool, // bool representing a bit false = 0, true = 1
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-            let private_key = self
-                .keystore
-                .load_lamport_imported_key(public_key)?
-                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+        let private_key = self
+            .keystore
+            .load_lamport_imported_key(public_key)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-            let tx_id = self.begin_transaction();
-            // check if index was already used, if its error, if not mark and save
-            #[cfg(feature = "lamport_idx_check")]
-            match self
-                .keystore
-                .check_and_mark_lamport_used_imported(public_key, tx_id)
-            {
-                Ok(()) => {}
-                Err(e) => {
-                    self.rollback_transaction(tx_id)?;
-                    return Err(e);
-                }
+        let tx_id = self.begin_transaction();
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_used_imported(public_key, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
             }
+        }
 
-            let lamport = Lamport::new();
-            let sig = lamport.sign_message_bit(message_bit, &private_key)?;
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message_bit(message_bit, &private_key)?;
 
-            self.commit_transaction(tx_id)?;
-            Ok(sig)
+        self.commit_transaction(tx_id)?;
+        Ok(sig)
     }
 
     // For one-time lamport keys
@@ -1716,7 +1694,7 @@ impl KeyManager {
         let private_key = lamport.generate_private_key(
             &*master_secret,
             key_type,
-            1,  // Single bit
+            1, // Single bit
             index,
         )?;
 
@@ -7155,10 +7133,8 @@ mod tests {
                     .collect();
 
                 // Sign the message using the imported key
-                let signature = key_manager.sign_lamport_message_by_pubkey(
-                    &message_bits,
-                    &imported_public_key,
-                )?;
+                let signature = key_manager
+                    .sign_lamport_message_by_pubkey(&message_bits, &imported_public_key)?;
 
                 // Verify the signature
                 assert!(
@@ -7237,7 +7213,8 @@ mod tests {
             rng.fill_bytes(&mut master_secret);
 
             // Generate a key for a single bit
-            let private_key = lamport.generate_private_key(&master_secret, LamportType::SHA256, 1, 0)?;
+            let private_key =
+                lamport.generate_private_key(&master_secret, LamportType::SHA256, 1, 0)?;
 
             // Extract bytes from private key for import
             let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
@@ -7251,8 +7228,7 @@ mod tests {
 
             // Test signing both bit values
             for bit_value in [false, true] {
-                let signature =
-                    key_manager.sign_lamport_bit_by_pubkey(bit_value, &public_key)?;
+                let signature = key_manager.sign_lamport_bit_by_pubkey(bit_value, &public_key)?;
 
                 assert_eq!(
                     signature.message_bit_length(),
@@ -7291,10 +7267,7 @@ mod tests {
             let message_bits = vec![true; 256];
             let result = key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key);
 
-            assert!(
-                result.is_err(),
-                "Should fail to sign with non-imported key"
-            );
+            assert!(result.is_err(), "Should fail to sign with non-imported key");
 
             if let Err(KeyManagerError::LamportKeyNotFound) = result {
                 // Expected error
@@ -7338,8 +7311,7 @@ mod tests {
 
             // Verify all keys can be retrieved and used for signing
             for (_original_private, public_key) in keys.iter() {
-                let message_bits: Vec<bool> =
-                    (0..256).map(|i| (i % 2) == 0).collect();
+                let message_bits: Vec<bool> = (0..256).map(|i| (i % 2) == 0).collect();
 
                 let signature =
                     key_manager.sign_lamport_message_by_pubkey(&message_bits, public_key)?;
@@ -7424,7 +7396,8 @@ mod tests {
 
             // Sign using index
             let message_bits = vec![true, false, true, false].repeat(32);
-            let signature = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 1)?;
+            let signature =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 1)?;
 
             // Verify signature
             assert!(lamport.verify_signature(&message_bits, &signature, &public_keys[1])?);
@@ -7443,7 +7416,11 @@ mod tests {
 
             // Sign a 32-byte message using index
             let message_bytes = [0x42u8; 32];
-            let signature = key_manager.sign_lamport_message_bytes_by_index(&message_bytes, LamportType::SHA256, 0)?;
+            let signature = key_manager.sign_lamport_message_bytes_by_index(
+                &message_bytes,
+                LamportType::SHA256,
+                0,
+            )?;
 
             // Verify signature
             assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_keys[0])?);
@@ -7461,11 +7438,13 @@ mod tests {
             let public_keys = key_manager.next_multiple_lamport(1, LamportType::SHA256, 2)?;
 
             // Sign bit 0 using index 0
-            let signature_0 = key_manager.sign_lamport_bit_by_index(false, LamportType::SHA256, 0)?;
+            let signature_0 =
+                key_manager.sign_lamport_bit_by_index(false, LamportType::SHA256, 0)?;
             assert!(lamport.verify_signature_bit(false, &signature_0, &public_keys[0])?);
 
             // Sign bit 1 using index 1
-            let signature_1 = key_manager.sign_lamport_bit_by_index(true, LamportType::SHA256, 1)?;
+            let signature_1 =
+                key_manager.sign_lamport_bit_by_index(true, LamportType::SHA256, 1)?;
             assert!(lamport.verify_signature_bit(true, &signature_1, &public_keys[1])?);
 
             Ok(())
@@ -7545,7 +7524,10 @@ mod tests {
             if let Err(KeyManagerError::LamportImportedKeyAlreadyUsed) = result {
                 // Expected error
             } else {
-                panic!("Expected LamportImportedKeyAlreadyUsed error, got {:?}", result);
+                panic!(
+                    "Expected LamportImportedKeyAlreadyUsed error, got {:?}",
+                    result
+                );
             }
 
             Ok(())
@@ -7562,10 +7544,12 @@ mod tests {
 
             // Sign once - should succeed
             let message_bits = vec![false; 256];
-            let _signature = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
+            let _signature =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
 
             // Try to sign again with the same key - should fail
-            let result = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0);
+            let result =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0);
 
             assert!(
                 result.is_err(),
@@ -7717,12 +7701,10 @@ mod tests {
 
             // Try to sign a message with wrong bit length (128 bits instead of 256)
             let wrong_message = vec![true; 128];
-            let result = key_manager.sign_lamport_message_by_index(&wrong_message, LamportType::SHA256, 0);
+            let result =
+                key_manager.sign_lamport_message_by_index(&wrong_message, LamportType::SHA256, 0);
 
-            assert!(
-                result.is_err(),
-                "Should fail with wrong message length"
-            );
+            assert!(result.is_err(), "Should fail with wrong message length");
 
             Ok(())
         })
@@ -7736,12 +7718,10 @@ mod tests {
 
             // Try to sign with non-existent index
             let message_bits = vec![true; 256];
-            let result = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 99);
+            let result =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 99);
 
-            assert!(
-                result.is_err(),
-                "Should fail with invalid index"
-            );
+            assert!(result.is_err(), "Should fail with invalid index");
 
             Ok(())
         })
@@ -7760,7 +7740,11 @@ mod tests {
             let mut signatures = Vec::new();
 
             for i in 0..10 {
-                let sig = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, i)?;
+                let sig = key_manager.sign_lamport_message_by_index(
+                    &message_bits,
+                    LamportType::SHA256,
+                    i,
+                )?;
                 signatures.push(sig);
             }
 
@@ -7798,12 +7782,14 @@ mod tests {
 
             for (idx, &byte_size) in byte_sizes.iter().enumerate() {
                 let bit_length = byte_size * 8;
-                let public_key =
-                    key_manager.next_lamport(bit_length, LamportType::SHA256)?;
+                let public_key = key_manager.next_lamport(bit_length, LamportType::SHA256)?;
 
                 let message_bytes = vec![0x42u8; byte_size];
-                let signature = key_manager
-                    .sign_lamport_message_bytes_by_index(&message_bytes, LamportType::SHA256, idx as u32)?;
+                let signature = key_manager.sign_lamport_message_bytes_by_index(
+                    &message_bytes,
+                    LamportType::SHA256,
+                    idx as u32,
+                )?;
 
                 assert!(
                     lamport.verify_signature_bytes(&message_bytes, &signature, &public_key)?,
@@ -7823,25 +7809,34 @@ mod tests {
 
             // Simulate a garbled circuit with 16 wires (each needs 1-bit signature)
             let wire_count = 16;
-            let wire_keys = key_manager.next_multiple_lamport(1, LamportType::SHA256, wire_count)?;
+            let wire_keys =
+                key_manager.next_multiple_lamport(1, LamportType::SHA256, wire_count)?;
 
             // Simulate wire values
             let wire_values = vec![
-                true, false, true, true, false, false, true, false, true, false, false, true,
-                true, false, true, false,
+                true, false, true, true, false, false, true, false, true, false, false, true, true,
+                false, true, false,
             ];
 
             // Sign each wire value
             let mut signatures = Vec::new();
             for i in 0..wire_count {
-                let sig = key_manager.sign_lamport_bit_by_index(wire_values[i as usize], LamportType::SHA256, i as u32)?;
+                let sig = key_manager.sign_lamport_bit_by_index(
+                    wire_values[i as usize],
+                    LamportType::SHA256,
+                    i as u32,
+                )?;
                 signatures.push(sig);
             }
 
             // Verify all wire signatures
             for i in 0..wire_count {
                 assert!(
-                    lamport.verify_signature_bit(wire_values[i as usize], &signatures[i as usize], &wire_keys[i as usize])?,
+                    lamport.verify_signature_bit(
+                        wire_values[i as usize],
+                        &signatures[i as usize],
+                        &wire_keys[i as usize]
+                    )?,
                     "Wire {} signature should verify",
                     i
                 );
@@ -7880,13 +7875,22 @@ mod tests {
             // All should work independently
             let message_bits = vec![true; 160];
 
-            let sig1 = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
+            let sig1 =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
             assert!(lamport.verify_signature(&message_bits, &sig1, &key_sha256)?);
 
-            let sig2 = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::RIPEMD160, 1)?;
+            let sig2 = key_manager.sign_lamport_message_by_index(
+                &message_bits,
+                LamportType::RIPEMD160,
+                1,
+            )?;
             assert!(lamport.verify_signature(&message_bits, &sig2, &key_ripemd160)?);
 
-            let sig3 = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::HASH160, 2)?;
+            let sig3 = key_manager.sign_lamport_message_by_index(
+                &message_bits,
+                LamportType::HASH160,
+                2,
+            )?;
             assert!(lamport.verify_signature(&message_bits, &sig3, &key_hash160)?);
 
             Ok(())
@@ -7955,11 +7959,14 @@ mod tests {
             use crate::lamport::HashFunction;
 
             let message_bit_length = 128;
-            let _public_key =
-                key_manager.next_lamport(message_bit_length, LamportType::HASH160)?;
+            let _public_key = key_manager.next_lamport(message_bit_length, LamportType::HASH160)?;
 
             let message_bits = vec![true; message_bit_length];
-            let signature = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::HASH160, 0)?;
+            let signature = key_manager.sign_lamport_message_by_index(
+                &message_bits,
+                LamportType::HASH160,
+                0,
+            )?;
 
             // Test signature properties
             assert_eq!(signature.len(), message_bit_length);
@@ -7996,7 +8003,11 @@ mod tests {
 
             for &idx in &test_indices {
                 let message_bits = vec![(idx % 2) == 0; 256];
-                let signature = key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, idx)?;
+                let signature = key_manager.sign_lamport_message_by_index(
+                    &message_bits,
+                    LamportType::SHA256,
+                    idx,
+                )?;
 
                 assert!(
                     lamport.verify_signature(&message_bits, &signature, &keys[idx as usize])?,

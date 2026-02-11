@@ -36,7 +36,7 @@ impl KeyStore {
     const NEXT_LAMPORT_INDEX_KEY: &str = "next_lamport_index"; // Key for storing the next lamport index
     const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
     const LAMPORT_INDEX_BLOCK_KEY: &str = "lamport_index_block"; // Key prefix for Lamport index bitmap blocks
-    // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+                                                                 // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
     const LAMPORT_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
@@ -395,7 +395,8 @@ impl KeyStore {
             }
 
             let key_bytes_part = parts[1];
-            let spent = parts[2].parse::<bool>()
+            let spent = parts[2]
+                .parse::<bool>()
                 .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
 
             let private_key_decoded = general_purpose::STANDARD
@@ -426,7 +427,6 @@ impl KeyStore {
         index: u32,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-
         // Bitmap with block size of 1024 indices for efficiency
         // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
 
@@ -468,7 +468,6 @@ impl KeyStore {
         public_key: &LamportPublicKey,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-
         // Check if the public key is marked as imported
         if !public_key.imported() {
             return Err(KeyManagerError::LamportKeyNotMarkedAsImported);

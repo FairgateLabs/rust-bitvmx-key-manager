@@ -1,4 +1,4 @@
-use crate::{errors::KeyManagerError, key_type::BitcoinKeyType, rsa::RSAKeyPair};
+use crate::{errors::KeyManagerError, key_type::BitcoinKeyType, lamport::{LamportPrivateKey, LamportPublicKey}, rsa::RSAKeyPair};
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
@@ -301,27 +301,35 @@ impl KeyStore {
         Ok(None)
     }
 
-    fn format_lamport_key(key_0s: &[[u8; 32]], key_1s: &[[u8; 32]]) -> String {
+    fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
     // TODO optimize storage format? hash the concatenation?
+    // TODO check if there is already e fun in the lamport object to do this formatting, to avoid code duplication and potential inconsistencies
         format!(
-            "{}:{}:{}",
+            "{}:{}",
             Self::LAMPORT,
-            general_purpose::STANDARD.encode(key_0s.concat()),
-            general_purpose::STANDARD.encode(key_1s.concat())
+            general_purpose::STANDARD.encode(public_key.to_bytes()), // TODO this could be long... save the has instead? research a bit.. if its not duplicating what rocksdb already does
         )
     }
 
-    pub fn store_lamport_key_sha256(&self, private_key_0s: Zeroizing<Vec<[u8; 32]>>, private_key_1s: Zeroizing<Vec<[u8; 32]>>, public_key_0s: Vec<[u8; 32]>, public_key_1s: Vec<[u8; 32]>) -> Result<(), KeyManagerError> {
-        // TODO discuss, winternitz key design decision was not to be stored, but lamport?
-        let pubk = Zeroizing::new(Self::format_lamport_key(&public_key_0s, &public_key_1s));
-        let privk = Zeroizing::new(Self::format_lamport_key(&private_key_0s, &private_key_1s));
+    fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
+        format!(
+            "{}:{}",
+            Self::LAMPORT,
+            general_purpose::STANDARD.encode(private_key.to_bytes()),
+        )
+    }
+
+    pub fn store_lamport_key(&self, private_key: &LamportPrivateKey, public_key: &LamportPublicKey) -> Result<(), KeyManagerError> {
+        let pubk = Self::format_lamport_storage_key(public_key);
+        let privk = Zeroizing::new(Self::format_lamport_storage_value(private_key));
         self.store.set(pubk, &(*privk), None)?;
         Ok(())
     }
 
-    pub fn load_lamport_key_sha256(&self, public_key_0s: Vec<[u8; 32]>, public_key_1s: Vec<[u8; 32]>) -> Result<Option<(Zeroizing<Vec<[u8; 32]>>, Zeroizing<Vec<[u8; 32]>>)>, KeyManagerError> {
+    pub fn load_lamport_key(&self, public_key: &LamportPublicKey) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         // TODO test store and load
-        let pubk = Self::format_lamport_key(&public_key_0s, &public_key_1s);
+        // TODO if we need splited 0s and 1s, format storake key and value, using to_bytes_splitted instead
+        let pubk = Self::format_lamport_storage_key(public_key);
         let privk: Option<Zeroizing<String>> =
             self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
 
@@ -330,32 +338,11 @@ impl KeyStore {
             if parts.len() != 3 || parts[0] != Self::LAMPORT {
                 return Err(KeyManagerError::InvalidLamportPrivateKey);
             }
-            let private_key_0s_decoded = general_purpose::STANDARD.decode(parts[1].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-            let private_key_1s_decoded = general_purpose::STANDARD.decode(parts[2].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let private_key_decoded = general_purpose::STANDARD.decode(parts[1].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let private_key = LamportPrivateKey::from_bytes(&private_key_decoded, public_key.message_bit_length()?, public_key.hash_type(), 0)?;
+            // TODO is ok using 0 derivation index for stored (imported) lamport keys?
 
-            if private_key_0s_decoded.len() % 32 != 0 || private_key_1s_decoded.len() % 32 != 0 {
-                return Err(KeyManagerError::InvalidLamportPrivateKey);
-            }
-
-            let private_key_0s = Zeroizing::new(private_key_0s_decoded
-                .chunks(32)
-                .map(|chunk| {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(chunk);
-                    arr
-                })
-                .collect());
-
-            let private_key_1s = Zeroizing::new(private_key_1s_decoded
-                .chunks(32)
-                .map(|chunk| {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(chunk);
-                    arr
-                })
-                .collect());
-
-            return Ok(Some((private_key_0s, private_key_1s)));
+            return Ok(Some(private_key));
         }
 
         Ok(None)

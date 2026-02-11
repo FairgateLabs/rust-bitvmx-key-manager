@@ -18,19 +18,13 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    errors::KeyManagerError,
-    key_store::KeyStore,
-    key_type::BitcoinKeyType,
-    musig2::{
+    errors::KeyManagerError, key_store::KeyStore, key_type::BitcoinKeyType, lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature}, musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    },
-    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
-    winternitz::{
-        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
-        WinternitzType,
-    },
+    }, rsa::{CryptoRng, OsRng, RSAKeyPair, Signature}, winternitz::{
+        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
+    }
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -320,31 +314,18 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
-    pub fn import_lamport_private_key_sha_256(
+    pub fn import_lamport_private_key(
         &self,
-        private_key_0s: Zeroizing<Vec<[u8; 32]>>, // Vector of private key parts representing the value 0
-        private_key_1s: Zeroizing<Vec<[u8; 32]>>, // Vector of private key parts representing the value 1
-    ) -> Result<(Vec<[u8; 32]>, Vec<[u8; 32]>), KeyManagerError> { // Returns the corresponding public key parts
-        if private_key_0s.len() != private_key_1s.len() {
-            return Err(KeyManagerError::InvalidLamportPrivateKey);
-        }
+        private_key: &LamportPrivateKey
+    ) -> Result<LamportPublicKey, KeyManagerError> { // Returns the corresponding public key
 
-        let mut public_key_0s: Vec<[u8; 32]> = Vec::new();
-        let mut public_key_1s: Vec<[u8; 32]> = Vec::new();
-
-        for i in 0..private_key_0s.len() {
-            let pub_0s = hashes::sha256::Hash::hash(&private_key_0s[i]).to_byte_array();
-            public_key_0s.push(pub_0s);
-
-            let pub_1s = hashes::sha256::Hash::hash(&private_key_1s[i]).to_byte_array();
-            public_key_1s.push(pub_1s);
-        }
-
-        self.keystore.store_lamport_key_sha256(private_key_0s, private_key_1s, public_key_0s.clone(), public_key_1s.clone())?;
+        let public_key = private_key.public_key()?;
+        self.keystore.store_lamport_key(private_key, &public_key)?;
         // store the lamport keys in a way that we can retrieve them for signing
         // TODO mark them as used after signing to prevent reuse, ambiguous for imports. we don't know if it was already used before importing???
+        // TODO for imports also track if already used to signpublic_key, even if we don't know its past (discussed with Martin)
 
-        Ok((public_key_0s, public_key_1s))
+        Ok(public_key)
     }
 
     /*********************************/
@@ -1235,89 +1216,88 @@ impl KeyManager {
         )
     }
 
-    // Use this fn if you want to sign an arbitrary lenght message, but take in mind that this is gruped by bytes,
-    // so you might neer to use padding, for the message and also when generating the keys
-    pub fn sign_lamport_raw_message_by_pubkey_sha256(
+    /// Sign a message
+    ///
+    /// # Arguments
+    /// * `message_bits` - The message to sign as a vector of bits (boolean array 0=false, 1=true)
+    /// * `public_key` - The public key to retrieve the private and use that for signing
+    ///
+    /// # Returns
+    /// The signature containing the revealed private key fragments
+    ///
+    /// # Security Critical
+    /// After calling this function, the private key MUST be marked as used and never reused.
+    /// Reusing a Lamport private key allows attackers to forge signatures.
+    pub fn sign_lamport_message_by_pubkey(
         &self,
-        message_bytes: &[u8],
-        public_key_0s: Vec<[u8; 32]>,
-        public_key_1s: Vec<[u8; 32]>,
-    ) -> Result<Vec<[u8; 32]>, KeyManagerError> {
+        message_bits: &[bool],
+        public_key: &LamportPublicKey
+    ) -> Result<LamportSignature, KeyManagerError> {
 
-        let (private_key_0s, private_key_1s) = self.keystore
-            .load_lamport_key_sha256(public_key_0s, public_key_1s)?
+        let private_key = self.keystore
+            .load_lamport_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-        let message_bits_length = message_bytes.len() * 8; // number of bits in the message
-        // Check that private key len is equal to message_bytes quantity of bits (8 bits per byte)
-        if private_key_0s.len() != message_bits_length || private_key_1s.len() != message_bits_length {
-            return Err(KeyManagerError::InvalidLamportPrivateKey);
-        }
-
-        let mut sig = Vec::with_capacity(message_bits_length);
-
-        // Iterate through each byte in the message
-        for byte in message_bytes.iter() {
-            // Process each bit in the byte (from most significant to least significant)
-            for bit_index in 0..8 {
-                // Example for first iteration (bit_index=0) with byte = 0b10110011:
-                // - byte >> (7 - 0) = 0b10110011 >> 7 = 0b00000001 (shift MSB to rightmost position)
-                // - mask: & 1 = & 0b00000001 (isolate the rightmost bit)
-                // - result: 0b00000001 & 0b00000001 = 1
-                // - bit = 1 (extracts the MSB)
-                let bit = (byte >> (7 - bit_index)) & 1;
-                let key_index = sig.len(); // Current position = number of keys already added
-
-                if bit == 1 {
-                    sig.push(private_key_1s[key_index]);
-                } else {
-                    sig.push(private_key_0s[key_index]);
-                }
-            }
-        }
-
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message(message_bits, &private_key)?;
         Ok(sig)
     }
 
-    // SHA-256 Lamport: expects 32-byte message digest
-    // Also could be used to group 256 garbled circuit wire labels in one signature, where each bit represent a label
-    pub fn sign_lamport_message_digest_by_pubkey_sha256(
+    /// Sign a message from bytes
+    ///
+    /// # Arguments
+    /// * `message_bytes` - The message to sign as bytes
+    /// * `public_key` - The public key to retrieve the private and use that for signing
+    ///
+    /// # Returns
+    /// The signature containing the revealed private key fragments
+    ///
+    /// # Security Critical
+    /// After calling this function, the private key MUST be marked as used and never reused.
+    /// Reusing a Lamport private key allows attackers to forge signatures.
+    ///
+    /// Use example: a SHA-256 Lamport usually expects 32-byte message digest (result of the sha 256)
+    /// Also could be used to group 256 garbled circuit wire labels in one signature, where each bit represent a label
+    pub fn sign_lamport_message_bytes_by_pubkey(
         &self,
-        message_bytes: &[u8; 32], // SHA-256 outputs a [u8; 32] in big-endian byte order according to the specification
-        public_key_0s: Vec<[u8; 32]>,
-        public_key_1s: Vec<[u8; 32]>,
-    ) -> Result<Vec<[u8; 32]>, KeyManagerError> {
-        // Simply delegate to the raw message signing method
-        self.sign_lamport_raw_message_by_pubkey_sha256(message_bytes, public_key_0s, public_key_1s)
-    }
-
-    // Can be used to sign a simple garbled circuit wire label
-    pub fn sign_lamport_bit_by_pubkey_sha256(
-        &self,
-        bit: bool, // bool representing a bit false = 0, true = 1
-        public_key_0: [u8; 32],
-        public_key_1: [u8; 32],
-    ) -> Result<[u8; 32], KeyManagerError> {
-
-        let public_key_0s = vec![public_key_0];
-        let public_key_1s = vec![public_key_1];
-
-        let (private_key_0s, private_key_1s) = self.keystore
-            .load_lamport_key_sha256(public_key_0s, public_key_1s)?
+        message_bytes: &[u8],
+        public_key: &LamportPublicKey
+    ) -> Result<LamportSignature, KeyManagerError> {
+        let private_key = self.keystore
+            .load_lamport_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-        // Validate that we retrieved the expected number of private keys
-        if private_key_0s.len() != 1 || private_key_1s.len() != 1 {
-            return Err(KeyManagerError::InvalidLamportPrivateKey);
-        }
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
+        Ok(sig)
+    }
 
-        // Get signature based on bit value
-        let sig = if bit {
-            private_key_1s[0]
-        } else {
-            private_key_0s[0]
-        };
+    /// Sign a single bit
+    ///
+    /// # Arguments
+    /// * `message_bit` - The single bit to sign - bool representing a bit false = 0, true = 1
+    /// * `public_key` - The public key to retrieve the private and use that for signing
+    ///
+    /// # Returns
+    /// The signature containing the revealed private key fragment
+    ///
+    /// # Security Critical
+    /// After calling this function, the private key MUST be marked as used and never reused.
+    /// Reusing a Lamport private key allows attackers to forge signatures.
+    ///
+    /// Example use case: to sign a simple garbled circuit wire label
+    pub fn sign_lamport_bit_by_pubkey(
+        &self,
+        message_bit: bool, // bool representing a bit false = 0, true = 1
+        public_key: &LamportPublicKey
+    ) -> Result<LamportSignature, KeyManagerError> {
 
+        let private_key = self.keystore
+            .load_lamport_key(public_key)?
+            .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+        let lamport = Lamport::new();
+        let sig = lamport.sign_message_bit(message_bit, &private_key)?;
         Ok(sig)
     }
 

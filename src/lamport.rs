@@ -265,7 +265,7 @@ pub struct LamportPublicKey {
     public_key_0s: Vec<LamportHash>,
     public_key_1s: Vec<LamportHash>,
     hash_type: LamportType,
-    extra_data: Option<ExtraData>,
+    extra_data: Option<ExtraData>, // TODO extract bit length from extra data to here, is a needed data?
 }
 
 impl LamportPublicKey {
@@ -519,13 +519,14 @@ pub struct LamportPrivateKey {
     private_key_1s: Vec<LamportHash>,
     hash_type: LamportType,
     message_bit_length: usize,
+    // TODO move to extra data? - in winternitz was only for public key, but as lamport is stored,.. rethink where i need that and why optional for this case
     derivation_index: u32, // TODO what to use if the key was imported and not derived?
 }
 
 impl LamportPrivateKey {
     pub fn new(
         hash_type: LamportType,
-        message_bit_length: usize,
+        message_bit_length: usize, // TODO needed?
         derivation_index: u32,
     ) -> Self {
         // Note: Validation is performed in generate_private_key and from_bytes methods
@@ -888,7 +889,7 @@ impl Lamport {
     /// Sign a message using a Lamport private key
     ///
     /// # Arguments
-    /// * `message_bits` - The message to sign as a vector of bits (boolean array)
+    /// * `message_bits` - The message to sign as a vector of bits (boolean array 0=false, 1=true)
     /// * `private_key` - The private key to use for signing
     ///
     /// # Returns
@@ -955,7 +956,7 @@ impl Lamport {
     /// Commonly used for garbled circuits where wire labels need to be signed bit by bit.
     ///
     /// # Arguments
-    /// * `message_bit` - The single bit to sign
+    /// * `message_bit` - The single bit to sign - bool representing a bit false = 0, true = 1
     /// * `private_key` - The private key to use for signing (must have message_bit_length = 1)
     ///
     /// # Returns
@@ -966,7 +967,7 @@ impl Lamport {
     /// Reusing a Lamport private key allows attackers to forge signatures.
     pub fn sign_message_bit(
         &self,
-        message_bit: bool,
+        message_bit: bool, // bool representing a bit false = 0, true = 1
         private_key: &LamportPrivateKey,
     ) -> Result<LamportSignature, LamportError> {
         let message_bits = [message_bit];

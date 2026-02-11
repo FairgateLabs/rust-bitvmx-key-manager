@@ -349,19 +349,30 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
-    // TODO is this import practical to final user?
     pub fn import_lamport_private_key(
         &self,
-        private_key: &LamportPrivateKey,
+        bytes_0s: &[u8],
+        bytes_1s: &[u8],
+        message_bit_length: usize,
+        hash_type: LamportType,
     ) -> Result<LamportPublicKey, KeyManagerError> {
         // Returns the corresponding public key
 
-        // TODO set imported to true
+        // Create private key from bytes with imported flag set to true
+        let private_key = LamportPrivateKey::from_bytes_splitted(
+            bytes_0s,
+            bytes_1s,
+            message_bit_length,
+            hash_type,
+            None, // derivation_index: None for imported keys
+            true, // imported: true
+        )?;
+
+        // Get the corresponding public key
         let public_key = private_key.public_key()?;
-        self.keystore.store_lamport_imported_key(private_key, &public_key)?;
+
         // store the lamport keys in a way that we can retrieve them for signing
-        // TODO mark them as used after signing to prevent reuse, ambiguous for imports. we don't know if it was already used before importing???
-        // TODO for imports also track if already used to signpublic_key, even if we don't know its past (discussed with Martin)
+        self.keystore.store_lamport_imported_key(&private_key, &public_key)?;
 
         Ok(public_key)
     }
@@ -7119,9 +7130,16 @@ mod tests {
                 )?;
                 let original_public_key = private_key.public_key()?;
 
+                // Extract bytes from private key for import
+                let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
                 // Import the key into the key manager
-                let imported_public_key =
-                    key_manager.import_lamport_private_key(&private_key)?;
+                let imported_public_key = key_manager.import_lamport_private_key(
+                    &bytes_0s,
+                    &bytes_1s,
+                    message_bit_length,
+                    hash_type,
+                )?;
 
                 // Verify the imported public key matches
                 assert_eq!(
@@ -7180,7 +7198,16 @@ mod tests {
             // Test SHA256 with 32-byte message (typical hash digest)
             let private_key =
                 lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, 0)?;
-            let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Extract bytes from private key for import
+            let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
+            let public_key = key_manager.import_lamport_private_key(
+                &bytes_0s,
+                &bytes_1s,
+                256,
+                LamportType::SHA256,
+            )?;
 
             // Sign a 32-byte message (simulating a SHA-256 hash)
             let mut message_bytes = [0u8; 32];
@@ -7211,7 +7238,16 @@ mod tests {
 
             // Generate a key for a single bit
             let private_key = lamport.generate_private_key(&master_secret, LamportType::SHA256, 1, 0)?;
-            let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Extract bytes from private key for import
+            let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
+            let public_key = key_manager.import_lamport_private_key(
+                &bytes_0s,
+                &bytes_1s,
+                1,
+                LamportType::SHA256,
+            )?;
 
             // Test signing both bit values
             for bit_value in [false, true] {
@@ -7287,7 +7323,16 @@ mod tests {
 
                 let private_key =
                     lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, i)?;
-                let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+                // Extract bytes from private key for import
+                let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
+                let public_key = key_manager.import_lamport_private_key(
+                    &bytes_0s,
+                    &bytes_1s,
+                    256,
+                    LamportType::SHA256,
+                )?;
                 keys.push((private_key, public_key));
             }
 
@@ -7473,7 +7518,16 @@ mod tests {
 
             let private_key =
                 lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, 0)?;
-            let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Extract bytes from private key for import
+            let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
+            let public_key = key_manager.import_lamport_private_key(
+                &bytes_0s,
+                &bytes_1s,
+                256,
+                LamportType::SHA256,
+            )?;
 
             // Sign once - should succeed
             let message_bits = vec![true; 256];
@@ -7615,7 +7669,16 @@ mod tests {
             rng.fill_bytes(&mut master_secret);
             let private_key =
                 lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, 0)?;
-            let imported_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Extract bytes from private key for import
+            let (bytes_0s, bytes_1s) = private_key.to_bytes_splitted();
+
+            let imported_key = key_manager.import_lamport_private_key(
+                &bytes_0s,
+                &bytes_1s,
+                256,
+                LamportType::SHA256,
+            )?;
 
             // Derive another key
             let derived_key2 = key_manager.next_lamport(256, LamportType::SHA256)?;

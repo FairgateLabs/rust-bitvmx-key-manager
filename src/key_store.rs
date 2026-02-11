@@ -406,6 +406,7 @@ impl KeyStore {
                 public_key.message_bit_length()?,
                 public_key.hash_type(),
                 None,
+                true, // imported: true for imported keys
             )?;
 
             // Set the spent flag

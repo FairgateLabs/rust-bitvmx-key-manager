@@ -636,7 +636,9 @@ impl LamportPrivateKey {
         message_bit_length: usize,
         hash_type: LamportType,
         derivation_index: Option<u32>,
+        imported: bool,
     ) -> Result<Self, LamportError> {
+        validate_imported_and_derivation_consistency(imported, derivation_index)?;
         validate_message_bit_length(message_bit_length)?;
         validate_byte_length(bytes_0s_then_1s.len())?;
 
@@ -652,6 +654,7 @@ impl LamportPrivateKey {
 
         let mut private_key =
             LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+        private_key.imported = imported;
 
         // Split bytes into 0s and 1s sections
         let split_point = message_bit_length * hash_size;
@@ -677,7 +680,9 @@ impl LamportPrivateKey {
         message_bit_length: usize,
         hash_type: LamportType,
         derivation_index: Option<u32>,
+        imported: bool,
     ) -> Result<Self, LamportError> {
+        validate_imported_and_derivation_consistency(imported, derivation_index)?;
         validate_message_bit_length(message_bit_length)?;
         let combined_length = bytes_0s.len().saturating_add(bytes_1s.len());
         validate_byte_length(combined_length)?;
@@ -701,6 +706,7 @@ impl LamportPrivateKey {
 
         let mut private_key =
             LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+        private_key.imported = imported;
 
         for i in 0..message_bit_length {
             let start = i * hash_size;
@@ -868,6 +874,25 @@ fn validate_byte_length(byte_length: usize) -> Result<(), LamportError> {
             byte_length,
             MAX_KEY_SIGNATURE_BYTE_LENGTH,
         ));
+    }
+    Ok(())
+}
+
+/// Validates consistency between imported flag and derivation_index:
+/// - Imported keys must have derivation_index = None
+/// - Derived keys must have a derivation_index value
+fn validate_imported_and_derivation_consistency(
+    imported: bool,
+    derivation_index: Option<u32>,
+) -> Result<(), LamportError> {
+    if imported {
+        if let Some(index) = derivation_index {
+            return Err(LamportError::ImportedKeyWithDerivationIndex(index));
+        }
+    } else {
+        if derivation_index.is_none() {
+            return Err(LamportError::DerivedKeyWithoutDerivationIndex);
+        }
     }
     Ok(())
 }
@@ -2020,7 +2045,7 @@ mod tests {
 
         let bytes = private_key.to_bytes();
         let reconstructed =
-            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, Some(0))
+            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, Some(0), false)
                 .unwrap();
 
         assert_eq!(private_key.len(), reconstructed.len());
@@ -2052,6 +2077,7 @@ mod tests {
             message_bit_length,
             LamportType::HASH160,
             Some(5),
+            false,
         )
         .unwrap();
 
@@ -2615,6 +2641,7 @@ mod tests {
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
             Some(0),
+            false,
         );
 
         assert!(result.is_err());
@@ -2670,6 +2697,7 @@ mod tests {
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
             Some(0),
+            false,
         );
         assert!(result.is_err());
     }

@@ -252,4 +252,10 @@ pub enum LamportError {
 
     #[error("Byte length {0} exceeds maximum allowed length of {1} bytes")]
     ByteLengthExceedsMax(usize, usize),
+
+    #[error("Imported keys cannot have a derivation index (found: {0})")]
+    ImportedKeyWithDerivationIndex(u32),
+
+    #[error("Derived keys must have a derivation index")]
+    DerivedKeyWithoutDerivationIndex,
 }

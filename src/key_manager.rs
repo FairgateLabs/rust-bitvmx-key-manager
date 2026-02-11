@@ -1733,6 +1733,7 @@ mod tests {
         errors::{KeyManagerError, WinternitzError},
         key_store::KeyStore,
         key_type::BitcoinKeyType,
+        lamport::{Lamport, LamportType},
         rsa::RSAKeyPair,
         verifier::SignatureVerifier,
         winternitz::{to_checksummed_message, WinternitzType},
@@ -6650,5 +6651,223 @@ mod tests {
 
         cleanup_storage(&keystore_path);
         Ok(())
+    }
+
+    #[test]
+    fn test_lamport_import_store_sign_load_cycle() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let lamport = Lamport::new();
+            let mut rng = rand::thread_rng();
+
+            // Test with different hash types and message lengths
+            let test_cases = vec![
+                (LamportType::SHA256, 256),
+                (LamportType::HASH160, 160),
+                (LamportType::RIPEMD160, 128),
+                (LamportType::HASH256, 256),
+            ];
+
+            for (hash_type, message_bit_length) in test_cases {
+                // Generate a master secret
+                let mut master_secret = [0u8; 32];
+                rng.fill_bytes(&mut master_secret);
+
+                // Generate a Lamport key
+                let private_key = lamport.generate_private_key(
+                    &master_secret,
+                    hash_type,
+                    message_bit_length,
+                    0,
+                )?;
+                let original_public_key = private_key.public_key()?;
+
+                // Import the key into the key manager
+                let imported_public_key =
+                    key_manager.import_lamport_private_key(&private_key)?;
+
+                // Verify the imported public key matches
+                assert_eq!(
+                    original_public_key.to_bytes(),
+                    imported_public_key.to_bytes(),
+                    "Imported public key should match for {:?}",
+                    hash_type
+                );
+
+                // Create a message to sign
+                let message_bits: Vec<bool> = (0..message_bit_length)
+                    .map(|_| (rng.next_u32() % 2) == 1)
+                    .collect();
+
+                // Sign the message using the imported key
+                let signature = key_manager.sign_lamport_message_by_pubkey(
+                    &message_bits,
+                    &imported_public_key,
+                )?;
+
+                // Verify the signature
+                assert!(
+                    lamport.verify_signature(&message_bits, &signature, &imported_public_key)?,
+                    "Signature verification should succeed for {:?}",
+                    hash_type
+                );
+
+                // Verify signature properties
+                assert_eq!(
+                    signature.message_bit_length(),
+                    message_bit_length,
+                    "Signature message length should match for {:?}",
+                    hash_type
+                );
+                assert_eq!(
+                    signature.hash_type(),
+                    hash_type,
+                    "Signature hash type should match"
+                );
+            }
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lamport_sign_bytes_roundtrip() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let lamport = Lamport::new();
+            let mut rng = rand::thread_rng();
+
+            // Generate a master secret
+            let mut master_secret = [0u8; 32];
+            rng.fill_bytes(&mut master_secret);
+
+            // Test SHA256 with 32-byte message (typical hash digest)
+            let private_key =
+                lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, 0)?;
+            let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Sign a 32-byte message (simulating a SHA-256 hash)
+            let mut message_bytes = [0u8; 32];
+            rng.fill_bytes(&mut message_bytes);
+
+            let signature =
+                key_manager.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key)?;
+
+            // Verify the signature
+            assert!(
+                lamport.verify_signature_bytes(&message_bytes, &signature, &public_key)?,
+                "Byte signature verification should succeed"
+            );
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lamport_sign_single_bit() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let lamport = Lamport::new();
+            let mut rng = rand::thread_rng();
+
+            // Generate a master secret
+            let mut master_secret = [0u8; 32];
+            rng.fill_bytes(&mut master_secret);
+
+            // Generate a key for a single bit
+            let private_key = lamport.generate_private_key(&master_secret, LamportType::SHA256, 1, 0)?;
+            let public_key = key_manager.import_lamport_private_key(&private_key)?;
+
+            // Test signing both bit values
+            for bit_value in [false, true] {
+                let signature =
+                    key_manager.sign_lamport_bit_by_pubkey(bit_value, &public_key)?;
+
+                assert_eq!(
+                    signature.message_bit_length(),
+                    1,
+                    "Signature should be for 1 bit"
+                );
+
+                // Verify the signature
+                assert!(
+                    lamport.verify_signature_bit(bit_value, &signature, &public_key)?,
+                    "Single bit signature verification should succeed for bit={}",
+                    bit_value
+                );
+            }
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lamport_key_not_found_error() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let lamport = Lamport::new();
+            let mut rng = rand::thread_rng();
+
+            // Generate a master secret
+            let mut master_secret = [0u8; 32];
+            rng.fill_bytes(&mut master_secret);
+
+            // Generate a key but don't import it
+            let private_key =
+                lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, 0)?;
+            let public_key = private_key.public_key()?;
+
+            // Try to sign with a non-imported key
+            let message_bits = vec![true; 256];
+            let result = key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key);
+
+            assert!(
+                result.is_err(),
+                "Should fail to sign with non-imported key"
+            );
+
+            if let Err(KeyManagerError::LamportKeyNotFound) = result {
+                // Expected error
+            } else {
+                panic!("Expected LamportKeyNotFound error");
+            }
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_lamport_storage_key_uniqueness() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let lamport = Lamport::new();
+            let mut rng = rand::thread_rng();
+
+            // Generate multiple keys and ensure they can all be stored and retrieved
+            let num_keys = 10;
+            let mut keys = Vec::new();
+
+            for i in 0..num_keys {
+                // Generate a unique master secret for each key
+                let mut master_secret = [0u8; 32];
+                rng.fill_bytes(&mut master_secret);
+
+                let private_key =
+                    lamport.generate_private_key(&master_secret, LamportType::SHA256, 256, i)?;
+                let public_key = key_manager.import_lamport_private_key(&private_key)?;
+                keys.push((private_key, public_key));
+            }
+
+            // Verify all keys can be retrieved and used for signing
+            for (_original_private, public_key) in keys.iter() {
+                let message_bits: Vec<bool> =
+                    (0..256).map(|i| (i % 2) == 0).collect();
+
+                let signature =
+                    key_manager.sign_lamport_message_by_pubkey(&message_bits, public_key)?;
+
+                assert!(
+                    lamport.verify_signature(&message_bits, &signature, public_key)?,
+                    "All stored keys should be retrievable and functional"
+                );
+            }
+
+            Ok(())
+        })
     }
 }

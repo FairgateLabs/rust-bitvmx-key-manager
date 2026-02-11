@@ -343,14 +343,13 @@ impl KeyStore {
         &self,
         public_key: &LamportPublicKey,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
-        // TODO test store and load
         let pubk = Self::format_lamport_storage_key(public_key);
         let privk: Option<Zeroizing<String>> =
             self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
 
         if let Some(privk) = privk {
             let parts: Vec<&str> = privk.split(':').collect();
-            if parts.len() != 3 || parts[0] != Self::LAMPORT {
+            if parts.len() != 2 || parts[0] != Self::LAMPORT {
                 return Err(KeyManagerError::InvalidLamportPrivateKey);
             }
             let private_key_decoded = general_purpose::STANDARD

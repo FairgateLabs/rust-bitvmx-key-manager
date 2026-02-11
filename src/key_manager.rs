@@ -63,12 +63,14 @@ impl KeyManager {
         - It adds support for:
             - Taproot keys.
             - Winternitz keys.
+            - Lamport keys.
             - RSA keys.
             - MuSig2 signing.
     */
     const ACCOUNT_DERIVATION_INDEX: u32 = 0; // Account - only one account supported up to now - fixed to 0
     const CHANGE_DERIVATION_INDEX: u32 = 0; // Change (0 for external, 1 for internal) - wont manage change up to now - fixed to 0
     const WINTERNITZ_PURPOSE_INDEX: u32 = 987; // Custom purpose index for Winternitz keys
+    const LAMPORT_PURPOSE_INDEX: u32 = 986; // Custom purpose index for Lamport keys
     const STARTING_DERIVATION_INDEX: u32 = 0; // Starting index for derivation
 
     pub fn new(
@@ -1309,6 +1311,11 @@ impl KeyManager {
         let sig = lamport.sign_message_bit(message_bit, &private_key)?;
         Ok(sig)
     }
+
+    // TODO add other lamport methods, like generation (based on what winternitz offer)
+    // TODO write examples
+    // TODO mark used
+    // TODO check lamport extra data
 
     /// Exports the private key for a given public key.
     ///

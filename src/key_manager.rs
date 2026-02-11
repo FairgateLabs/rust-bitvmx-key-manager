@@ -349,14 +349,16 @@ impl KeyManager {
         Ok(rsa_pubkey_pem)
     }
 
+    // TODO is this import practical to final user?
     pub fn import_lamport_private_key(
         &self,
         private_key: &LamportPrivateKey,
     ) -> Result<LamportPublicKey, KeyManagerError> {
         // Returns the corresponding public key
 
+        // TODO set imported to true
         let public_key = private_key.public_key()?;
-        self.keystore.store_lamport_key(private_key, &public_key)?;
+        self.keystore.store_lamport_imported_key(private_key, &public_key)?;
         // store the lamport keys in a way that we can retrieve them for signing
         // TODO mark them as used after signing to prevent reuse, ambiguous for imports. we don't know if it was already used before importing???
         // TODO for imports also track if already used to signpublic_key, even if we don't know its past (discussed with Martin)
@@ -1434,18 +1436,90 @@ impl KeyManager {
         message_bits: &[bool],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        // TODO do this if its imported key if not use by index
-        let private_key = self
-            .keystore
-            .load_lamport_key(public_key)?
-            .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message(message_bits, &private_key)?;
-        Ok(sig)
+        if public_key.imported(){
+            self.sign_lamport_message_by_pubkey_imported(message_bits, public_key)
+        }
+        else {
+            let index = public_key.derivation_index()
+                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+            self.sign_lamport_message_by_index(
+                message_bits,
+                public_key.hash_type(),
+                index,
+            )
+        }
+
     }
 
-    // TODO add ign_lamport_message_by_index
+    // private
+    fn sign_lamport_message_by_pubkey_imported(
+        &self,
+        message_bits: &[bool],
+        public_key: &LamportPublicKey,
+    ) -> Result<LamportSignature, KeyManagerError> {
+            let private_key = self
+                .keystore
+                .load_lamport_imported_key(public_key)?
+                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+            let tx_id = self.begin_transaction();
+            // check if index was already used, if its error, if not mark and save
+            #[cfg(feature = "lamport_idx_check")]
+            match self
+                .keystore
+                .check_and_mark_lamport_used_imported(public_key, tx_id)
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(e);
+                }
+            }
+
+            let lamport = Lamport::new();
+            let sig = lamport.sign_message(message_bits, &private_key)?;
+
+            self.commit_transaction(tx_id)?;
+            Ok(sig)
+    }
+
+    // For one-time lamport keys
+    pub fn sign_lamport_message_by_index(
+        &self,
+        message_bits: &[bool],
+        key_type: LamportType,
+        index: u32,
+    ) -> Result<LamportSignature, KeyManagerError> {
+        let master_secret = self.keystore.load_lamport_seed()?;
+        let lamport = Lamport::new();
+        let private_key = lamport.generate_private_key(
+            &*master_secret,
+            key_type,
+            message_bits.len(),
+            index,
+        )?;
+
+        let tx_id = self.begin_transaction();
+
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_index_used_derivated(index, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
+            }
+        }
+
+        let signature = lamport.sign_message(message_bits, &private_key)?;
+
+        self.commit_transaction(tx_id)?;
+        Ok(signature)
+    }
 
     /// Sign a message from bytes
     ///
@@ -1467,18 +1541,88 @@ impl KeyManager {
         message_bytes: &[u8],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        // TODO do this if its imported key if not use by index
-        let private_key = self
-            .keystore
-            .load_lamport_key(public_key)?
-            .ok_or(KeyManagerError::LamportKeyNotFound)?;
-
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
-        Ok(sig)
+        if public_key.imported(){
+            self.sign_lamport_message_bytes_by_pubkey_imported(message_bytes, public_key)
+        }
+        else {
+            let index = public_key.derivation_index()
+                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+            self.sign_lamport_message_bytes_by_index(
+                message_bytes,
+                public_key.hash_type(),
+                index,
+            )
+        }
     }
 
-    // TODO add sign_lamport_message_bytes_by_index
+    // private
+    fn sign_lamport_message_bytes_by_pubkey_imported(
+        &self,
+        message_bytes: &[u8],
+        public_key: &LamportPublicKey,
+    ) -> Result<LamportSignature, KeyManagerError> {
+            let private_key = self
+                .keystore
+                .load_lamport_imported_key(public_key)?
+                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+            let tx_id = self.begin_transaction();
+            // check if index was already used, if its error, if not mark and save
+            #[cfg(feature = "lamport_idx_check")]
+            match self
+                .keystore
+                .check_and_mark_lamport_used_imported(public_key, tx_id)
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(e);
+                }
+            }
+
+            let lamport = Lamport::new();
+            let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
+
+            self.commit_transaction(tx_id)?;
+            Ok(sig)
+    }
+
+    // For one-time lamport keys
+    pub fn sign_lamport_message_bytes_by_index(
+        &self,
+        message_bytes: &[u8],
+        key_type: LamportType,
+        index: u32,
+    ) -> Result<LamportSignature, KeyManagerError> {
+        let master_secret = self.keystore.load_lamport_seed()?;
+        let lamport = Lamport::new();
+        let private_key = lamport.generate_private_key(
+            &*master_secret,
+            key_type,
+            message_bytes.len() * 8,  // Convert bytes to bits
+            index,
+        )?;
+
+        let tx_id = self.begin_transaction();
+
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_index_used_derivated(index, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
+            }
+        }
+
+        let signature = lamport.sign_message_bytes(message_bytes, &private_key)?;
+
+        self.commit_transaction(tx_id)?;
+        Ok(signature)
+    }
 
     /// Sign a single bit
     ///
@@ -1499,18 +1643,88 @@ impl KeyManager {
         message_bit: bool, // bool representing a bit false = 0, true = 1
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        // TODO do this if its imported key if not use by index
-        let private_key = self
-            .keystore
-            .load_lamport_key(public_key)?
-            .ok_or(KeyManagerError::LamportKeyNotFound)?;
-
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message_bit(message_bit, &private_key)?;
-        Ok(sig)
+        if public_key.imported(){
+            self.sign_lamport_bit_by_pubkey_imported(message_bit, public_key)
+        }
+        else {
+            let index = public_key.derivation_index()
+                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+            self.sign_lamport_bit_by_index(
+                message_bit,
+                public_key.hash_type(),
+                index,
+            )
+        }
     }
 
-    // TODO add sign_lamport_bit_by_pubkey
+    // private
+    fn sign_lamport_bit_by_pubkey_imported(
+        &self,
+        message_bit: bool, // bool representing a bit false = 0, true = 1
+        public_key: &LamportPublicKey,
+    ) -> Result<LamportSignature, KeyManagerError> {
+            let private_key = self
+                .keystore
+                .load_lamport_imported_key(public_key)?
+                .ok_or(KeyManagerError::LamportKeyNotFound)?;
+
+            let tx_id = self.begin_transaction();
+            // check if index was already used, if its error, if not mark and save
+            #[cfg(feature = "lamport_idx_check")]
+            match self
+                .keystore
+                .check_and_mark_lamport_used_imported(public_key, tx_id)
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(e);
+                }
+            }
+
+            let lamport = Lamport::new();
+            let sig = lamport.sign_message_bit(message_bit, &private_key)?;
+
+            self.commit_transaction(tx_id)?;
+            Ok(sig)
+    }
+
+    // For one-time lamport keys
+    pub fn sign_lamport_bit_by_index(
+        &self,
+        message_bit: bool,
+        key_type: LamportType,
+        index: u32,
+    ) -> Result<LamportSignature, KeyManagerError> {
+        let master_secret = self.keystore.load_lamport_seed()?;
+        let lamport = Lamport::new();
+        let private_key = lamport.generate_private_key(
+            &*master_secret,
+            key_type,
+            1,  // Single bit
+            index,
+        )?;
+
+        let tx_id = self.begin_transaction();
+
+        // check if index was already used, if its error, if not mark and save
+        #[cfg(feature = "lamport_idx_check")]
+        match self
+            .keystore
+            .check_and_mark_lamport_index_used_derivated(index, tx_id)
+        {
+            Ok(()) => {}
+            Err(e) => {
+                self.rollback_transaction(tx_id)?;
+                return Err(e);
+            }
+        }
+
+        let signature = lamport.sign_message_bit(message_bit, &private_key)?;
+
+        self.commit_transaction(tx_id)?;
+        Ok(signature)
+    }
 
     // TODO write examples
     // TODO mark imported used (similar to Winternitz)

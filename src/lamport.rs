@@ -240,11 +240,11 @@ impl LamportSignature {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtraData {
     message_bit_length: usize,
-    derivation_index: u32, // TODO what to use if the key was imported and not derived?
+    derivation_index: Option<u32>,
 }
 
 impl ExtraData {
-    pub fn new(message_bit_length: usize, derivation_index: u32) -> Self {
+    pub fn new(message_bit_length: usize, derivation_index: Option<u32>) -> Self {
         ExtraData {
             message_bit_length,
             derivation_index,
@@ -255,7 +255,7 @@ impl ExtraData {
         self.message_bit_length
     }
 
-    pub fn derivation_index(&self) -> u32 {
+    pub fn derivation_index(&self) -> Option<u32> {
         self.derivation_index
     }
 }
@@ -268,7 +268,8 @@ pub struct LamportPublicKey {
     public_key_0s: Vec<LamportHash>,
     public_key_1s: Vec<LamportHash>,
     hash_type: LamportType,
-    extra_data: Option<ExtraData>, // TODO extract bit length from extra data to here, is a needed data?
+    imported: bool, // if the key was imported or derived. imported = true, derive = false
+    extra_data: Option<ExtraData>,
 }
 
 impl LamportPublicKey {
@@ -281,6 +282,7 @@ impl LamportPublicKey {
             public_key_0s: Vec::new(),
             public_key_1s: Vec::new(),
             hash_type,
+            imported: false,
             extra_data,
         }
     }
@@ -348,6 +350,8 @@ impl LamportPublicKey {
         bytes_0s_then_1s: &[u8],
         message_bit_length: usize,
         hash_type: LamportType,
+        imported: bool,
+        extra_data: Option<ExtraData>,
     ) -> Result<Self, LamportError> {
         validate_message_bit_length(message_bit_length)?;
         validate_byte_length(bytes_0s_then_1s.len())?;
@@ -362,7 +366,8 @@ impl LamportPublicKey {
             ));
         }
 
-        let mut public_key = LamportPublicKey::new(hash_type, None);
+        let mut public_key = LamportPublicKey::new(hash_type, extra_data);
+        public_key.imported = imported;
 
         // Split bytes into 0s and 1s sections
         let split_point = message_bit_length * hash_size;
@@ -387,6 +392,8 @@ impl LamportPublicKey {
         bytes_1s: &[u8],
         message_bit_length: usize,
         hash_type: LamportType,
+        imported: bool,
+        extra_data: Option<ExtraData>,
     ) -> Result<Self, LamportError> {
         validate_message_bit_length(message_bit_length)?;
         let combined_length = bytes_0s.len().saturating_add(bytes_1s.len());
@@ -409,7 +416,8 @@ impl LamportPublicKey {
             ));
         }
 
-        let mut public_key = LamportPublicKey::new(hash_type, None);
+        let mut public_key = LamportPublicKey::new(hash_type, extra_data);
+        public_key.imported = imported;
 
         for i in 0..message_bit_length {
             let start = i * hash_size;
@@ -499,16 +507,14 @@ impl LamportPublicKey {
         Ok(message_bit_length)
     }
 
-    pub fn derivation_index(&self) -> Result<u32, LamportError> {
-        let derivation_index = self
-            .extra_data
+    pub fn derivation_index(&self) -> Option<u32> {
+        self.extra_data
             .as_ref()
-            .ok_or(LamportError::ExtraDataMissing(
-                "derivation_index".to_string(),
-            ))?
-            .derivation_index;
+            .and_then(|extra| extra.derivation_index)
+    }
 
-        Ok(derivation_index)
+    pub fn imported(&self) -> bool {
+        self.imported
     }
 
     fn public_key_0_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
@@ -542,15 +548,16 @@ pub struct LamportPrivateKey {
     private_key_1s: Vec<LamportHash>,
     hash_type: LamportType,
     message_bit_length: usize,
-    // TODO move to extra data? - in winternitz was only for public key, but as lamport is stored,.. rethink where i need that and why optional for this case
-    derivation_index: u32, // TODO what to use if the key was imported and not derived?
+    imported: bool, // if the key was imported or derived. imported = true, derive = false
+    derivation_index: Option<u32>, // None if the key was imported and not derived
+    spent: bool, // if the key was already used to sign. once spent = true, it should never be used again for signing
 }
 
 impl LamportPrivateKey {
     pub fn new(
         hash_type: LamportType,
-        message_bit_length: usize, // TODO needed?
-        derivation_index: u32,
+        message_bit_length: usize,
+        derivation_index: Option<u32>,
     ) -> Self {
         // Note: Validation is performed in generate_private_key and from_bytes methods
         LamportPrivateKey {
@@ -558,7 +565,9 @@ impl LamportPrivateKey {
             private_key_1s: Vec::with_capacity(message_bit_length),
             hash_type,
             message_bit_length,
+            imported: false,
             derivation_index,
+            spent: false,
         }
     }
 
@@ -570,6 +579,9 @@ impl LamportPrivateKey {
                 self.derivation_index,
             )),
         );
+
+        // Copy the imported flag from private key to public key
+        public_key.imported = self.imported;
 
         for i in 0..self.private_key_0s.len() {
             let pub_0 = self.hash_type.hash(&self.private_key_0s[i].to_bytes());
@@ -619,7 +631,7 @@ impl LamportPrivateKey {
         bytes_0s_then_1s: &[u8],
         message_bit_length: usize,
         hash_type: LamportType,
-        derivation_index: u32,
+        derivation_index: Option<u32>,
     ) -> Result<Self, LamportError> {
         validate_message_bit_length(message_bit_length)?;
         validate_byte_length(bytes_0s_then_1s.len())?;
@@ -660,7 +672,7 @@ impl LamportPrivateKey {
         bytes_1s: &[u8],
         message_bit_length: usize,
         hash_type: LamportType,
-        derivation_index: u32,
+        derivation_index: Option<u32>,
     ) -> Result<Self, LamportError> {
         validate_message_bit_length(message_bit_length)?;
         let combined_length = bytes_0s.len().saturating_add(bytes_1s.len());
@@ -757,13 +769,30 @@ impl LamportPrivateKey {
         self.hash_type
     }
 
-    pub fn derivation_index(&self) -> u32 {
+    pub fn derivation_index(&self) -> Option<u32> {
         self.derivation_index
     }
 
     pub fn message_bit_length(&self) -> usize {
         self.message_bit_length
     }
+
+    pub fn imported(&self) -> bool {
+        self.imported
+    }
+
+    pub fn spent(&self) -> bool {
+        self.spent
+    }
+
+    pub fn mark_spent(&mut self) {
+        self.spent = true;
+    }
+
+    // TODO set necessary?
+    // pub fn set_imported(&mut self, imported: bool) {
+    //     self.imported = imported;
+    // }
 
     fn push_key_pair(
         &mut self,
@@ -855,7 +884,6 @@ impl Lamport {
         Lamport {}
     }
 
-    // TODO what deriv index to use if the key was imported and not derived?
     /// Generate a Lamport public key from a master secret
     ///
     /// # Arguments
@@ -883,8 +911,6 @@ impl Lamport {
         Ok(public_key)
     }
 
-    // TODO what deriv index to use if the key was imported and not derived?
-    // TODO do we know if it was already used when importing?
     /// Generate a Lamport private key from a master secret
     ///
     /// # Arguments
@@ -912,7 +938,7 @@ impl Lamport {
             .ok_or(LamportError::IndexOverflow)?;
 
         let mut private_key =
-            LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+            LamportPrivateKey::new(hash_type, message_bit_length, Some(derivation_index));
 
         let hash_size = hash_type.hash_size();
 
@@ -1505,7 +1531,7 @@ mod tests {
 
         let bytes = public_key.to_bytes();
         let reconstructed =
-            LamportPublicKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256).unwrap();
+            LamportPublicKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, false, Some(ExtraData::new(message_bit_length, Some(0)))).unwrap();
 
         assert_eq!(public_key.len(), reconstructed.len());
         assert_eq!(public_key.to_bytes(), reconstructed.to_bytes());
@@ -1910,7 +1936,7 @@ mod tests {
     #[test]
     fn test_error_invalid_public_key_length() {
         let bytes = vec![0u8; 100]; // Wrong length
-        let result = LamportPublicKey::from_bytes(&bytes, 256, LamportType::SHA256);
+        let result = LamportPublicKey::from_bytes(&bytes, 256, LamportType::SHA256, false, None);
         assert!(result.is_err());
         if let Err(LamportError::InvalidPublicKeyLength(got, expected)) = result {
             assert_eq!(got, 100);
@@ -1966,8 +1992,7 @@ mod tests {
         assert!(matches!(result, Err(LamportError::ExtraDataMissing(_))));
 
         let result = public_key.derivation_index();
-        assert!(result.is_err());
-        assert!(matches!(result, Err(LamportError::ExtraDataMissing(_))));
+        assert!(result.is_none());
     }
 
     #[test]
@@ -1996,7 +2021,7 @@ mod tests {
 
         let bytes = private_key.to_bytes();
         let reconstructed =
-            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, 0)
+            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, Some(0))
                 .unwrap();
 
         assert_eq!(private_key.len(), reconstructed.len());
@@ -2027,7 +2052,7 @@ mod tests {
             &bytes_1s,
             message_bit_length,
             LamportType::HASH160,
-            5,
+            Some(5),
         )
         .unwrap();
 
@@ -2055,6 +2080,8 @@ mod tests {
             &bytes_1s,
             message_bit_length,
             LamportType::SHA256,
+            false,
+            Some(ExtraData::new(message_bit_length, Some(7))),
         )
         .unwrap();
 
@@ -2207,10 +2234,10 @@ mod tests {
 
     #[test]
     fn test_extra_data_getters() {
-        let extra_data = ExtraData::new(256, 42);
+        let extra_data = ExtraData::new(256, Some(42));
 
         assert_eq!(extra_data.message_bit_length(), 256);
-        assert_eq!(extra_data.derivation_index(), 42);
+        assert_eq!(extra_data.derivation_index(), Some(42));
     }
 
     #[test]
@@ -2349,7 +2376,7 @@ mod tests {
         assert_eq!(private_key.len(), message_bit_length);
         assert!(!private_key.is_empty());
         assert_eq!(private_key.message_bit_length(), message_bit_length);
-        assert_eq!(private_key.derivation_index(), 7);
+        assert_eq!(private_key.derivation_index(), Some(7));
         assert_eq!(private_key.hash_type(), LamportType::HASH160);
     }
 
@@ -2552,6 +2579,8 @@ mod tests {
             &[0u8; 100],
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
+            false,
+            None,
         );
 
         assert!(result.is_err());
@@ -2572,7 +2601,7 @@ mod tests {
 
         // Try with a message_bit_length that would require more bytes than MAX
         let result =
-            LamportPublicKey::from_bytes(&large_vec, MAX_MESSAGE_BIT_LENGTH, LamportType::SHA256);
+            LamportPublicKey::from_bytes(&large_vec, MAX_MESSAGE_BIT_LENGTH, LamportType::SHA256, false, None);
 
         // Should fail because bytes length (1000) doesn't match expected (MAX_MESSAGE_BIT_LENGTH * 32 * 2)
         // but more importantly, it validates limits before trying to process
@@ -2586,7 +2615,7 @@ mod tests {
             &[0u8; 100],
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
-            0,
+            Some(0),
         );
 
         assert!(result.is_err());
@@ -2630,6 +2659,8 @@ mod tests {
             &bytes_1s,
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
+            false,
+            None,
         );
         assert!(result.is_err());
 
@@ -2639,7 +2670,7 @@ mod tests {
             &bytes_1s,
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
-            0,
+            Some(0),
         );
         assert!(result.is_err());
     }

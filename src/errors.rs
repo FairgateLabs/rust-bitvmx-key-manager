@@ -112,6 +112,9 @@ pub enum KeyManagerError {
     #[error("Lamport key not found")]
     LamportKeyNotFound,
 
+    #[error("Lamport key derivation index not found")]
+    LamportKeyDerivationIndexNotFound,
+
     #[error("Invalid RSA key size: {0}")]
     InvalidRSAKeySize(String),
 
@@ -132,6 +135,15 @@ pub enum KeyManagerError {
 
     #[error("Lamport index {0} has already been used")]
     LamportIndexAlreadyUsed(u32),
+
+    #[error("Lamport imported key has already been used")]
+    LamportImportedKeyAlreadyUsed,
+
+    #[error("Lamport key is not marked as imported")]
+    LamportKeyNotMarkedAsImported,
+
+    #[error("Lamport private key not found")]
+    LamportPrivateKeyNotFound,
 
     #[error("Corrupted Lamport index bitmap")]
     CorruptedLamportIndexBitmap,

@@ -17,7 +17,7 @@ pub struct KeyStore {
     store: Rc<Storage>,
 }
 
-/* TODO, Possible optimization:
+/* Dev Note: Possible optimization:
 saving byte arrays instead of base64 general_purpose::STANDARD.encode/decode will reduce database size and improve performance,
 but it would require changing the Storage trait to support byte arrays,
 and also adjusting the serialization/deserialization logic accordingly.
@@ -358,13 +358,15 @@ impl KeyStore {
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
         format!(
-            "{}:{}",
+            "{}:{}:{}",
             Self::LAMPORT,
             general_purpose::STANDARD.encode(private_key.to_bytes()),
+            private_key.spent(),
         )
     }
 
-    pub fn store_lamport_key(
+    // we are not storing derived keys
+    pub fn store_lamport_imported_key(
         &self,
         private_key: &LamportPrivateKey,
         public_key: &LamportPublicKey,
@@ -375,7 +377,8 @@ impl KeyStore {
         Ok(())
     }
 
-    pub fn load_lamport_key(
+    // we are not storing derived keys
+    pub fn load_lamport_imported_key(
         &self,
         public_key: &LamportPublicKey,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
@@ -385,19 +388,30 @@ impl KeyStore {
 
         if let Some(privk) = privk {
             let parts: Vec<&str> = privk.split(':').collect();
-            if parts.len() != 2 || parts[0] != Self::LAMPORT {
+
+            // Expected format: lamport:base64_key:spent
+            if parts.len() != 3 || parts[0] != Self::LAMPORT {
                 return Err(KeyManagerError::InvalidLamportPrivateKey);
             }
-            let private_key_decoded = general_purpose::STANDARD
-                .decode(parts[1].as_bytes())
+
+            let key_bytes_part = parts[1];
+            let spent = parts[2].parse::<bool>()
                 .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-            let private_key = LamportPrivateKey::from_bytes(
+
+            let private_key_decoded = general_purpose::STANDARD
+                .decode(key_bytes_part.as_bytes())
+                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let mut private_key = LamportPrivateKey::from_bytes(
                 &private_key_decoded,
                 public_key.message_bit_length()?,
                 public_key.hash_type(),
-                0,
+                None,
             )?;
-            // TODO use some mark for stored (imported) lamport keys
+
+            // Set the spent flag
+            if spent {
+                private_key.mark_spent();
+            }
 
             return Ok(Some(private_key));
         }
@@ -405,14 +419,15 @@ impl KeyStore {
         Ok(None)
     }
 
-
-    // TODO, ask if is derivated use this func, if it was imported marj in some other way
     // this index is independent of the index used for key derivation, it is marked when used in a signature
-    pub fn check_and_mark_lamport_index_used(
+    pub fn check_and_mark_lamport_index_used_derivated(
         &self,
         index: u32,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
+
+        // TODO - if prublic_key has imported in true, -> error, key marked as imported, here it must be derivated
+
         // Bitmap with block size of 1024 indices for efficiency
         // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
 
@@ -445,6 +460,42 @@ impl KeyStore {
 
         // Store the updated block back to storage
         self.store.set(block_key, block, transaction_id)?;
+
+        Ok(())
+    }
+
+    pub fn check_and_mark_lamport_used_imported(
+        &self,
+        public_key: &LamportPublicKey,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+
+        // Check if the public key is marked as imported
+        if !public_key.imported() {
+            return Err(KeyManagerError::LamportKeyNotMarkedAsImported);
+        }
+
+        // Load the key from storage
+        let optional_private_key = self.load_lamport_imported_key(public_key)?;
+
+        // Check if the key exists
+        let mut private_key = match optional_private_key {
+            Some(key) => key,
+            None => return Err(KeyManagerError::LamportPrivateKeyNotFound),
+        };
+
+        // Check if the key was already used to sign (spent)
+        if private_key.spent() {
+            return Err(KeyManagerError::LamportImportedKeyAlreadyUsed);
+        }
+
+        // Mark the key as spent
+        private_key.mark_spent();
+
+        // Store the updated key
+        let pubk = Self::format_lamport_storage_key(public_key);
+        let privk = Zeroizing::new(Self::format_lamport_storage_value(&private_key));
+        self.store.set(pubk, &(*privk), transaction_id)?;
 
         Ok(())
     }

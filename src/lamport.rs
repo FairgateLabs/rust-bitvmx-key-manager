@@ -230,7 +230,10 @@ impl LamportSignature {
     fn revealed_key_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.revealed_keys
             .get(index)
-            .ok_or(LamportError::IndexOutOfBounds(index, self.revealed_keys.len()))
+            .ok_or(LamportError::IndexOutOfBounds(
+                index,
+                self.revealed_keys.len(),
+            ))
     }
 }
 
@@ -436,16 +439,30 @@ impl LamportPublicKey {
     }
 
     pub fn to_array_hashes(&self) -> Result<(Vec<[u8; 32]>, Vec<[u8; 32]>), LamportError> {
-        let hashes_0s: Result<Vec<[u8; 32]>, LamportError> =
-            self.public_key_0s.iter().map(|hash| hash.to_array()).collect();
-        let hashes_1s: Result<Vec<[u8; 32]>, LamportError> =
-            self.public_key_1s.iter().map(|hash| hash.to_array()).collect();
+        let hashes_0s: Result<Vec<[u8; 32]>, LamportError> = self
+            .public_key_0s
+            .iter()
+            .map(|hash| hash.to_array())
+            .collect();
+        let hashes_1s: Result<Vec<[u8; 32]>, LamportError> = self
+            .public_key_1s
+            .iter()
+            .map(|hash| hash.to_array())
+            .collect();
         Ok((hashes_0s?, hashes_1s?))
     }
 
     pub fn to_hashes_string(&self) -> (Vec<String>, Vec<String>) {
-        let hashes_0s = self.public_key_0s.iter().map(|hash| hash.to_hex()).collect();
-        let hashes_1s = self.public_key_1s.iter().map(|hash| hash.to_hex()).collect();
+        let hashes_0s = self
+            .public_key_0s
+            .iter()
+            .map(|hash| hash.to_hex())
+            .collect();
+        let hashes_1s = self
+            .public_key_1s
+            .iter()
+            .map(|hash| hash.to_hex())
+            .collect();
         (hashes_0s, hashes_1s)
     }
 
@@ -497,13 +514,19 @@ impl LamportPublicKey {
     fn public_key_0_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.public_key_0s
             .get(index)
-            .ok_or(LamportError::IndexOutOfBounds(index, self.public_key_0s.len()))
+            .ok_or(LamportError::IndexOutOfBounds(
+                index,
+                self.public_key_0s.len(),
+            ))
     }
 
     fn public_key_1_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.public_key_1s
             .get(index)
-            .ok_or(LamportError::IndexOutOfBounds(index, self.public_key_1s.len()))
+            .ok_or(LamportError::IndexOutOfBounds(
+                index,
+                self.public_key_1s.len(),
+            ))
     }
 }
 
@@ -542,7 +565,10 @@ impl LamportPrivateKey {
     pub fn public_key(&self) -> Result<LamportPublicKey, LamportError> {
         let mut public_key = LamportPublicKey::new(
             self.hash_type,
-            Some(ExtraData::new(self.message_bit_length, self.derivation_index)),
+            Some(ExtraData::new(
+                self.message_bit_length,
+                self.derivation_index,
+            )),
         );
 
         for i in 0..self.private_key_0s.len() {
@@ -608,7 +634,8 @@ impl LamportPrivateKey {
             ));
         }
 
-        let mut private_key = LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+        let mut private_key =
+            LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
 
         // Split bytes into 0s and 1s sections
         let split_point = message_bit_length * hash_size;
@@ -656,7 +683,8 @@ impl LamportPrivateKey {
             ));
         }
 
-        let mut private_key = LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
+        let mut private_key =
+            LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
 
         for i in 0..message_bit_length {
             let start = i * hash_size;
@@ -670,7 +698,6 @@ impl LamportPrivateKey {
 
         Ok(private_key)
     }
-
 
     pub fn to_hashes(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let hashes_0s = self
@@ -701,8 +728,16 @@ impl LamportPrivateKey {
     }
 
     pub fn to_hashes_string(&self) -> (Vec<String>, Vec<String>) {
-        let hashes_0s = self.private_key_0s.iter().map(|hash| hash.to_hex()).collect();
-        let hashes_1s = self.private_key_1s.iter().map(|hash| hash.to_hex()).collect();
+        let hashes_0s = self
+            .private_key_0s
+            .iter()
+            .map(|hash| hash.to_hex())
+            .collect();
+        let hashes_1s = self
+            .private_key_1s
+            .iter()
+            .map(|hash| hash.to_hex())
+            .collect();
         (hashes_0s, hashes_1s)
     }
 
@@ -757,13 +792,19 @@ impl LamportPrivateKey {
     fn private_key_0_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.private_key_0s
             .get(index)
-            .ok_or(LamportError::IndexOutOfBounds(index, self.private_key_0s.len()))
+            .ok_or(LamportError::IndexOutOfBounds(
+                index,
+                self.private_key_0s.len(),
+            ))
     }
 
     fn private_key_1_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.private_key_1s
             .get(index)
-            .ok_or(LamportError::IndexOutOfBounds(index, self.private_key_1s.len()))
+            .ok_or(LamportError::IndexOutOfBounds(
+                index,
+                self.private_key_1s.len(),
+            ))
     }
 }
 
@@ -832,8 +873,12 @@ impl Lamport {
         message_bit_length: usize,
         derivation_index: u32,
     ) -> Result<LamportPublicKey, LamportError> {
-        let private_key =
-            self.generate_private_key(master_secret, hash_type, message_bit_length, derivation_index)?;
+        let private_key = self.generate_private_key(
+            master_secret,
+            hash_type,
+            message_bit_length,
+            derivation_index,
+        )?;
         let public_key = LamportPublicKey::from(private_key)?;
         Ok(public_key)
     }
@@ -874,17 +919,18 @@ impl Lamport {
         // Generate key pairs for each bit position
         for i in 0..message_bit_length {
             // Generate private key for bit value 0
-            let priv_key_0 = self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 0);
+            let priv_key_0 =
+                self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 0);
 
             // Generate private key for bit value 1
-            let priv_key_1 = self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 1);
+            let priv_key_1 =
+                self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 1);
 
             private_key.push_key_pair(priv_key_0, priv_key_1)?;
         }
 
         Ok(private_key)
     }
-
 
     /// Sign a message using a Lamport private key
     ///
@@ -1199,7 +1245,6 @@ pub fn bits_to_bytes(bits: &[bool]) -> Result<(Vec<u8>, usize), LamportError> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_bytes_to_bits_and_back() {
         // Test with no padding (full bytes)
@@ -1287,8 +1332,8 @@ mod tests {
 
         // Test with 0 padding (exact byte boundary - 16 bits)
         let bits = vec![
-            true, false, true, true, false, false, true, true,
-            false, true, false, false, true, true, false, false
+            true, false, true, true, false, false, true, true, false, true, false, false, true,
+            true, false, false,
         ];
         let (bytes, padding) = bits_to_bytes(&bits).unwrap();
         assert_eq!(padding, 0);
@@ -1324,10 +1369,13 @@ mod tests {
         let bytes = vec![0xFF, 0b11110101, 0xAA];
         let bits = bytes_to_bits(&bytes, 12);
         assert_eq!(bits.len(), 12);
-        assert_eq!(bits, vec![
-            false, true, false, true, // lower 4 bits of 0b11110101
-            true, false, true, false, true, false, true, false // 0xAA
-        ]);
+        assert_eq!(
+            bits,
+            vec![
+                false, true, false, true, // lower 4 bits of 0b11110101
+                true, false, true, false, true, false, true, false // 0xAA
+            ]
+        );
 
         // Test with padding = 15 (almost 2 bytes)
         // bytes = [0x00, 0xFF, 0x01] = 24 bits total
@@ -1336,7 +1384,10 @@ mod tests {
         let bytes = vec![0x00, 0xFF, 0x01];
         let bits = bytes_to_bits(&bytes, 15);
         assert_eq!(bits.len(), 9);
-        assert_eq!(bits, vec![true, false, false, false, false, false, false, false, true]);
+        assert_eq!(
+            bits,
+            vec![true, false, false, false, false, false, false, false, true]
+        );
     }
 
     #[test]
@@ -1404,7 +1455,9 @@ mod tests {
             .unwrap();
         let public_key_120 = private_key_120.public_key().unwrap();
 
-        let signature = lamport.sign_message(&message_bits, &private_key_120).unwrap();
+        let signature = lamport
+            .sign_message(&message_bits, &private_key_120)
+            .unwrap();
 
         let is_valid = lamport
             .verify_signature(&message_bits, &signature, &public_key_120)
@@ -1451,7 +1504,8 @@ mod tests {
             .unwrap();
 
         let bytes = public_key.to_bytes();
-        let reconstructed = LamportPublicKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256).unwrap();
+        let reconstructed =
+            LamportPublicKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256).unwrap();
 
         assert_eq!(public_key.len(), reconstructed.len());
         assert_eq!(public_key.to_bytes(), reconstructed.to_bytes());
@@ -1459,10 +1513,22 @@ mod tests {
 
     #[test]
     fn test_lamport_type_parsing() {
-        assert_eq!(LamportType::from_str("SHA256").unwrap(), LamportType::SHA256);
-        assert_eq!(LamportType::from_str("sha256").unwrap(), LamportType::SHA256);
-        assert_eq!(LamportType::from_str("HASH160").unwrap(), LamportType::HASH160);
-        assert_eq!(LamportType::from_str("hash160").unwrap(), LamportType::HASH160);
+        assert_eq!(
+            LamportType::from_str("SHA256").unwrap(),
+            LamportType::SHA256
+        );
+        assert_eq!(
+            LamportType::from_str("sha256").unwrap(),
+            LamportType::SHA256
+        );
+        assert_eq!(
+            LamportType::from_str("HASH160").unwrap(),
+            LamportType::HASH160
+        );
+        assert_eq!(
+            LamportType::from_str("hash160").unwrap(),
+            LamportType::HASH160
+        );
         assert!(LamportType::from_str("INVALID").is_err());
     }
 
@@ -1488,7 +1554,9 @@ mod tests {
             .unwrap();
         let public_key_120 = private_key_120.public_key().unwrap();
 
-        let signature = lamport.sign_message(&message_bits, &private_key_120).unwrap();
+        let signature = lamport
+            .sign_message(&message_bits, &private_key_120)
+            .unwrap();
 
         let is_valid = lamport
             .verify_signature(&message_bits, &signature, &public_key_120)
@@ -1511,7 +1579,9 @@ mod tests {
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
         let is_valid = lamport
             .verify_signature_bytes(&message_bytes, &signature, &public_key)
@@ -1541,14 +1611,20 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         // Sign with bytes method
-        let sig_bytes = lamport.sign_message_bytes(message_bytes, &private_key).unwrap();
+        let sig_bytes = lamport
+            .sign_message_bytes(message_bytes, &private_key)
+            .unwrap();
 
         // Verify bytes signature with bytes method
-        assert!(lamport.verify_signature_bytes(message_bytes, &sig_bytes, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature_bytes(message_bytes, &sig_bytes, &public_key)
+            .unwrap());
 
         // Verify bytes signature with bits method (should also work)
         let message_bits = bytes_to_bits(message_bytes, 0);
-        assert!(lamport.verify_signature(&message_bits, &sig_bytes, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature(&message_bits, &sig_bytes, &public_key)
+            .unwrap());
     }
 
     #[test]
@@ -1562,11 +1638,18 @@ mod tests {
             let message_bit_length = byte_length * 8;
 
             let private_key = lamport
-                .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, byte_length as u32)
+                .generate_private_key(
+                    master_secret,
+                    LamportType::SHA256,
+                    message_bit_length,
+                    byte_length as u32,
+                )
                 .unwrap();
             let public_key = private_key.public_key().unwrap();
 
-            let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+            let signature = lamport
+                .sign_message_bytes(&message_bytes, &private_key)
+                .unwrap();
 
             let is_valid = lamport
                 .verify_signature_bytes(&message_bytes, &signature, &public_key)
@@ -1588,19 +1671,27 @@ mod tests {
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
         // Original message should verify
-        assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key)
+            .unwrap());
 
         // Tampered message (single bit flip) should fail
         let mut tampered_message = message_bytes;
         tampered_message[0] = 0x43; // Change one byte
-        assert!(!lamport.verify_signature_bytes(&tampered_message, &signature, &public_key).unwrap());
+        assert!(!lamport
+            .verify_signature_bytes(&tampered_message, &signature, &public_key)
+            .unwrap());
 
         // Completely different message should fail
         let different_message = [0xFFu8; 32];
-        assert!(!lamport.verify_signature_bytes(&different_message, &signature, &public_key).unwrap());
+        assert!(!lamport
+            .verify_signature_bytes(&different_message, &signature, &public_key)
+            .unwrap());
     }
 
     #[test]
@@ -1616,8 +1707,12 @@ mod tests {
 
         // Test signing bit value 0
         let signature_0 = lamport.sign_message_bit(false, &private_key_bit0).unwrap();
-        assert!(lamport.verify_signature_bit(false, &signature_0, &public_key_bit0).unwrap());
-        assert!(!lamport.verify_signature_bit(true, &signature_0, &public_key_bit0).unwrap());
+        assert!(lamport
+            .verify_signature_bit(false, &signature_0, &public_key_bit0)
+            .unwrap());
+        assert!(!lamport
+            .verify_signature_bit(true, &signature_0, &public_key_bit0)
+            .unwrap());
 
         // Generate another key for signing bit value 1
         let private_key_bit1 = lamport
@@ -1627,8 +1722,12 @@ mod tests {
 
         // Test signing bit value 1
         let signature_1 = lamport.sign_message_bit(true, &private_key_bit1).unwrap();
-        assert!(lamport.verify_signature_bit(true, &signature_1, &public_key_bit1).unwrap());
-        assert!(!lamport.verify_signature_bit(false, &signature_1, &public_key_bit1).unwrap());
+        assert!(lamport
+            .verify_signature_bit(true, &signature_1, &public_key_bit1)
+            .unwrap());
+        assert!(!lamport
+            .verify_signature_bit(false, &signature_1, &public_key_bit1)
+            .unwrap());
     }
 
     #[test]
@@ -1646,10 +1745,14 @@ mod tests {
 
         // Verify using array method
         let message_bits = [true];
-        assert!(lamport.verify_signature(&message_bits, &sig_bit, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature(&message_bits, &sig_bit, &public_key)
+            .unwrap());
 
         // Verify using bit method
-        assert!(lamport.verify_signature_bit(true, &sig_bit, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature_bit(true, &sig_bit, &public_key)
+            .unwrap());
     }
 
     #[test]
@@ -1710,13 +1813,19 @@ mod tests {
         assert_eq!(public_key.hash_type(), LamportType::RIPEMD160);
 
         let message_bytes = [0x42u8; 20]; // Sign a 20-byte message
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
-        assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key)
+            .unwrap());
 
         // Test with wrong message
         let wrong_message = [0x43u8; 20];
-        assert!(!lamport.verify_signature_bytes(&wrong_message, &signature, &public_key).unwrap());
+        assert!(!lamport
+            .verify_signature_bytes(&wrong_message, &signature, &public_key)
+            .unwrap());
     }
 
     #[test]
@@ -1734,13 +1843,19 @@ mod tests {
         assert_eq!(public_key.hash_type(), LamportType::HASH256);
 
         let message_bytes = [0xAAu8; 32]; // Sign a 32-byte message
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
-        assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+        assert!(lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key)
+            .unwrap());
 
         // Test with wrong message
         let wrong_message = [0xBBu8; 32];
-        assert!(!lamport.verify_signature_bytes(&wrong_message, &signature, &public_key).unwrap());
+        assert!(!lamport
+            .verify_signature_bytes(&wrong_message, &signature, &public_key)
+            .unwrap());
     }
 
     #[test]
@@ -1762,8 +1877,18 @@ mod tests {
                 .unwrap();
             let public_key = private_key.public_key().unwrap();
 
-            assert_eq!(public_key.hash_size(), expected_size, "Hash type: {:?}", hash_type);
-            assert_eq!(private_key.hash_size(), expected_size, "Hash type: {:?}", hash_type);
+            assert_eq!(
+                public_key.hash_size(),
+                expected_size,
+                "Hash type: {:?}",
+                hash_type
+            );
+            assert_eq!(
+                private_key.hash_size(),
+                expected_size,
+                "Hash type: {:?}",
+                hash_type
+            );
         }
     }
 
@@ -1870,18 +1995,20 @@ mod tests {
             .unwrap();
 
         let bytes = private_key.to_bytes();
-        let reconstructed = LamportPrivateKey::from_bytes(
-            &bytes,
-            message_bit_length,
-            LamportType::SHA256,
-            0,
-        )
-        .unwrap();
+        let reconstructed =
+            LamportPrivateKey::from_bytes(&bytes, message_bit_length, LamportType::SHA256, 0)
+                .unwrap();
 
         assert_eq!(private_key.len(), reconstructed.len());
         assert_eq!(private_key.to_bytes(), reconstructed.to_bytes());
-        assert_eq!(private_key.message_bit_length(), reconstructed.message_bit_length());
-        assert_eq!(private_key.derivation_index(), reconstructed.derivation_index());
+        assert_eq!(
+            private_key.message_bit_length(),
+            reconstructed.message_bit_length()
+        );
+        assert_eq!(
+            private_key.derivation_index(),
+            reconstructed.derivation_index()
+        );
     }
 
     #[test]
@@ -1905,7 +2032,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(private_key.to_bytes(), reconstructed.to_bytes());
-        assert_eq!(private_key.derivation_index(), reconstructed.derivation_index());
+        assert_eq!(
+            private_key.derivation_index(),
+            reconstructed.derivation_index()
+        );
     }
 
     #[test]
@@ -1942,19 +2072,20 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 16]; // 128 bits
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
         let bytes = signature.to_bytes();
-        let reconstructed = LamportSignature::from_bytes(
-            &bytes,
-            message_bit_length,
-            LamportType::SHA256,
-        )
-        .unwrap();
+        let reconstructed =
+            LamportSignature::from_bytes(&bytes, message_bit_length, LamportType::SHA256).unwrap();
 
         assert_eq!(signature.len(), reconstructed.len());
         assert_eq!(signature.to_bytes(), reconstructed.to_bytes());
-        assert_eq!(signature.message_bit_length(), reconstructed.message_bit_length());
+        assert_eq!(
+            signature.message_bit_length(),
+            reconstructed.message_bit_length()
+        );
     }
 
     // ========== Array Conversion Tests ==========
@@ -2007,7 +2138,9 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 2]; // 16 bits
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
         let result = signature.to_array_hashes();
         assert!(result.is_ok());
@@ -2039,7 +2172,9 @@ mod tests {
 
         // Test signature to_hashes
         let message_bytes = [0x42u8; 1];
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
         let sig_hashes = signature.to_hashes();
         assert_eq!(sig_hashes.len(), message_bit_length);
     }
@@ -2086,7 +2221,12 @@ mod tests {
         let derivation_index = 99;
 
         let private_key = lamport
-            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, derivation_index)
+            .generate_private_key(
+                master_secret,
+                LamportType::SHA256,
+                message_bit_length,
+                derivation_index,
+            )
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 
@@ -2108,7 +2248,9 @@ mod tests {
             .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, 0)
             .unwrap();
         let message_bytes = [0x42u8; 16];
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key_sha256).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key_sha256)
+            .unwrap();
 
         // Try to verify with a HASH160 public key (different hash type)
         let private_key_hash160 = lamport
@@ -2117,7 +2259,9 @@ mod tests {
         let public_key_hash160 = private_key_hash160.public_key().unwrap();
 
         // This should fail because hash types don't match
-        let is_valid = lamport.verify_signature_bytes(&message_bytes, &signature, &public_key_hash160).unwrap();
+        let is_valid = lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key_hash160)
+            .unwrap();
         assert!(!is_valid);
     }
 
@@ -2182,7 +2326,9 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 8];
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
 
         assert_eq!(signature.len(), message_bit_length);
         assert!(!signature.is_empty());
@@ -2234,12 +2380,27 @@ mod tests {
     #[test]
     fn test_lamport_type_parsing_all_variants() {
         // Test case insensitivity
-        assert_eq!(LamportType::from_str("SHA256").unwrap(), LamportType::SHA256);
-        assert_eq!(LamportType::from_str("sha256").unwrap(), LamportType::SHA256);
-        assert_eq!(LamportType::from_str("SHa256").unwrap(), LamportType::SHA256);
+        assert_eq!(
+            LamportType::from_str("SHA256").unwrap(),
+            LamportType::SHA256
+        );
+        assert_eq!(
+            LamportType::from_str("sha256").unwrap(),
+            LamportType::SHA256
+        );
+        assert_eq!(
+            LamportType::from_str("SHa256").unwrap(),
+            LamportType::SHA256
+        );
 
-        assert_eq!(LamportType::from_str("HASH160").unwrap(), LamportType::HASH160);
-        assert_eq!(LamportType::from_str("hash160").unwrap(), LamportType::HASH160);
+        assert_eq!(
+            LamportType::from_str("HASH160").unwrap(),
+            LamportType::HASH160
+        );
+        assert_eq!(
+            LamportType::from_str("hash160").unwrap(),
+            LamportType::HASH160
+        );
 
         // Test invalid types
         assert!(LamportType::from_str("RIPEMD160").is_err());
@@ -2280,10 +2441,20 @@ mod tests {
 
         // Generate the same key twice
         let key1 = lamport
-            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, derivation_index)
+            .generate_private_key(
+                master_secret,
+                LamportType::SHA256,
+                message_bit_length,
+                derivation_index,
+            )
             .unwrap();
         let key2 = lamport
-            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, derivation_index)
+            .generate_private_key(
+                master_secret,
+                LamportType::SHA256,
+                message_bit_length,
+                derivation_index,
+            )
             .unwrap();
 
         // They should be identical
@@ -2304,7 +2475,8 @@ mod tests {
         assert!(result.is_err());
 
         // u32::MAX - 1 should succeed
-        let result = lamport.generate_private_key(master_secret, LamportType::SHA256, 8, u32::MAX - 1);
+        let result =
+            lamport.generate_private_key(master_secret, LamportType::SHA256, 8, u32::MAX - 1);
         assert!(result.is_ok());
     }
 
@@ -2324,8 +2496,12 @@ mod tests {
 
         // Sign and verify a large message
         let message_bytes = vec![0x42u8; 128]; // 1024 bits
-        let signature = lamport.sign_message_bytes(&message_bytes, &private_key).unwrap();
-        assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_key).unwrap());
+        let signature = lamport
+            .sign_message_bytes(&message_bytes, &private_key)
+            .unwrap();
+        assert!(lamport
+            .verify_signature_bytes(&message_bytes, &signature, &public_key)
+            .unwrap());
     }
 
     // ========== DoS Protection Tests ==========
@@ -2395,11 +2571,8 @@ mod tests {
         let large_vec = vec![0u8; 1000]; // Small allocation for the test
 
         // Try with a message_bit_length that would require more bytes than MAX
-        let result = LamportPublicKey::from_bytes(
-            &large_vec,
-            MAX_MESSAGE_BIT_LENGTH,
-            LamportType::SHA256,
-        );
+        let result =
+            LamportPublicKey::from_bytes(&large_vec, MAX_MESSAGE_BIT_LENGTH, LamportType::SHA256);
 
         // Should fail because bytes length (1000) doesn't match expected (MAX_MESSAGE_BIT_LENGTH * 32 * 2)
         // but more importantly, it validates limits before trying to process

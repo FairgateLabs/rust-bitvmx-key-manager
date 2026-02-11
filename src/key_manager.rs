@@ -18,13 +18,20 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    errors::KeyManagerError, key_store::KeyStore, key_type::BitcoinKeyType, lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature}, musig2::{
+    errors::KeyManagerError,
+    key_store::KeyStore,
+    key_type::BitcoinKeyType,
+    lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature},
+    musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
         types::MessageId,
-    }, rsa::{CryptoRng, OsRng, RSAKeyPair, Signature}, winternitz::{
-        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
-    }
+    },
+    rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
+    winternitz::{
+        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
+        WinternitzType,
+    },
 };
 
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
@@ -316,8 +323,9 @@ impl KeyManager {
 
     pub fn import_lamport_private_key(
         &self,
-        private_key: &LamportPrivateKey
-    ) -> Result<LamportPublicKey, KeyManagerError> { // Returns the corresponding public key
+        private_key: &LamportPrivateKey,
+    ) -> Result<LamportPublicKey, KeyManagerError> {
+        // Returns the corresponding public key
 
         let public_key = private_key.public_key()?;
         self.keystore.store_lamport_key(private_key, &public_key)?;
@@ -1231,10 +1239,10 @@ impl KeyManager {
     pub fn sign_lamport_message_by_pubkey(
         &self,
         message_bits: &[bool],
-        public_key: &LamportPublicKey
+        public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-
-        let private_key = self.keystore
+        let private_key = self
+            .keystore
             .load_lamport_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
@@ -1261,9 +1269,10 @@ impl KeyManager {
     pub fn sign_lamport_message_bytes_by_pubkey(
         &self,
         message_bytes: &[u8],
-        public_key: &LamportPublicKey
+        public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-        let private_key = self.keystore
+        let private_key = self
+            .keystore
             .load_lamport_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
 
@@ -1289,10 +1298,10 @@ impl KeyManager {
     pub fn sign_lamport_bit_by_pubkey(
         &self,
         message_bit: bool, // bool representing a bit false = 0, true = 1
-        public_key: &LamportPublicKey
+        public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
-
-        let private_key = self.keystore
+        let private_key = self
+            .keystore
             .load_lamport_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
 

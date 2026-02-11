@@ -1,4 +1,9 @@
-use crate::{errors::KeyManagerError, key_type::BitcoinKeyType, lamport::{LamportPrivateKey, LamportPublicKey}, rsa::RSAKeyPair};
+use crate::{
+    errors::KeyManagerError,
+    key_type::BitcoinKeyType,
+    lamport::{LamportPrivateKey, LamportPublicKey},
+    rsa::RSAKeyPair,
+};
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
@@ -302,8 +307,8 @@ impl KeyStore {
     }
 
     fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
-    // TODO optimize storage format? hash the concatenation?
-    // TODO check if there is already e fun in the lamport object to do this formatting, to avoid code duplication and potential inconsistencies
+        // TODO optimize storage format? hash the concatenation?
+        // TODO check if there is already e fun in the lamport object to do this formatting, to avoid code duplication and potential inconsistencies
         format!(
             "{}:{}",
             Self::LAMPORT,
@@ -319,14 +324,21 @@ impl KeyStore {
         )
     }
 
-    pub fn store_lamport_key(&self, private_key: &LamportPrivateKey, public_key: &LamportPublicKey) -> Result<(), KeyManagerError> {
+    pub fn store_lamport_key(
+        &self,
+        private_key: &LamportPrivateKey,
+        public_key: &LamportPublicKey,
+    ) -> Result<(), KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key);
         let privk = Zeroizing::new(Self::format_lamport_storage_value(private_key));
         self.store.set(pubk, &(*privk), None)?;
         Ok(())
     }
 
-    pub fn load_lamport_key(&self, public_key: &LamportPublicKey) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
+    pub fn load_lamport_key(
+        &self,
+        public_key: &LamportPublicKey,
+    ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         // TODO test store and load
         // TODO if we need splited 0s and 1s, format storake key and value, using to_bytes_splitted instead
         let pubk = Self::format_lamport_storage_key(public_key);
@@ -338,8 +350,15 @@ impl KeyStore {
             if parts.len() != 3 || parts[0] != Self::LAMPORT {
                 return Err(KeyManagerError::InvalidLamportPrivateKey);
             }
-            let private_key_decoded = general_purpose::STANDARD.decode(parts[1].as_bytes()).map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-            let private_key = LamportPrivateKey::from_bytes(&private_key_decoded, public_key.message_bit_length()?, public_key.hash_type(), 0)?;
+            let private_key_decoded = general_purpose::STANDARD
+                .decode(parts[1].as_bytes())
+                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let private_key = LamportPrivateKey::from_bytes(
+                &private_key_decoded,
+                public_key.message_bit_length()?,
+                public_key.hash_type(),
+                0,
+            )?;
             // TODO is ok using 0 derivation index for stored (imported) lamport keys?
 
             return Ok(Some(private_key));

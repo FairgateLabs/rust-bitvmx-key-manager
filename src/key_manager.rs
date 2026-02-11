@@ -21,7 +21,7 @@ use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
     key_type::BitcoinKeyType,
-    lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature},
+    lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType},
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
@@ -195,6 +195,32 @@ impl KeyManager {
             Err(KeyManagerError::WinternitzSeedNotFound) => {
                 // No Winternitz seed stored, generate and store it
                 keystore.store_winternitz_seed(expected_winternitz_seed)?;
+            }
+            Err(e) => return Err(e), // Propagate storage/decryption errors
+        }
+
+        // Validate or generate Lamport seed - similar to key derivation seed validation
+        // The Lamport seed is derived from the key derivation seed, so we validate it to detect corruption.
+        let expected_lamport_seed = {
+            let key_derivation_seed = keystore.load_key_derivation_seed()?;
+            Self::derive_lamport_master_seed(
+                secp.clone(),
+                &*key_derivation_seed,
+                network,
+                Self::ACCOUNT_DERIVATION_INDEX,
+            )?
+        };
+
+        match keystore.load_lamport_seed() {
+            Ok(stored_lamport_seed) => {
+                // Validate that the stored Lamport seed matches what would be derived from key derivation seed
+                if *stored_lamport_seed != *expected_lamport_seed {
+                    return Err(KeyManagerError::CorruptedLamportSeed);
+                }
+            }
+            Err(KeyManagerError::LamportSeedNotFound) => {
+                // No Lamport seed stored, generate and store it
+                keystore.store_lamport_seed(expected_lamport_seed)?;
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
         }
@@ -499,6 +525,36 @@ impl KeyManager {
         let secret_32_bytes = Zeroizing::new(account_xpriv.private_key.secret_bytes());
 
         // Return the private key bytes as master seed for Winternitz
+        Ok(secret_32_bytes)
+    }
+
+    // Lamport uses BIP-39/BIP-44 style derivation with a hardened custom purpose path for lamport:
+    fn derive_lamport_master_seed(
+        secp: secp256k1::Secp256k1<All>,
+        key_derivation_seed: &[u8],
+        network: Network,
+        account: u32,
+    ) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
+        // Dev note: Using coin type as it's nice to differentiate by network, lamport are OT,
+        // so they should not be repeated across different networks, to avoid a kind of "take from testnet and use in mainnet" attack
+        let lamport_full_derivation_path = Self::build_bip44_derivation_path(
+            Self::LAMPORT_PURPOSE_INDEX,
+            Self::get_bitcoin_coin_type_by_network(network),
+            account,
+            Self::CHANGE_DERIVATION_INDEX,
+            0, // index does not matter here
+        );
+
+        let hardened_lamport_account_derivation_path =
+            Self::extract_account_level_path(&lamport_full_derivation_path);
+
+        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let account_xpriv =
+            master_xpriv.derive_priv(&secp, &hardened_lamport_account_derivation_path)?;
+
+        let secret_32_bytes = Zeroizing::new(account_xpriv.private_key.secret_bytes());
+
+        // Return the private key bytes as master seed for Lamport
         Ok(secret_32_bytes)
     }
 
@@ -910,6 +966,141 @@ impl KeyManager {
         Ok(pubkeys)
     }
 
+    /// Derives a Lamport OT key at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_lamport`](Self::next_lamport) instead. **
+    ///
+    /// The `next_lamport` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    fn derive_lamport(
+        &self,
+        message_bit_length: usize,
+        key_type: LamportType,
+        index: u32,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        let master_secret = self.keystore.load_lamport_seed()?;
+
+        let lamport = crate::lamport::Lamport::new();
+        let public_key = lamport.generate_public_key(
+            &*master_secret,
+            key_type,
+            message_bit_length,
+            index,
+        )?;
+
+        Ok(public_key)
+    }
+
+    /// Generates the next Lamport OT key in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Lamport key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_lamport`](Self::derive_lamport).
+    ///
+    /// The function automatically tracks and increments the derivation index for each Lamport type and message bit length combination, ensuring that:
+    /// - Each call generates a unique Lamport key
+    /// - No derivation indices are accidentally reused
+    /// - The sequence of generated keys is deterministic and recoverable
+    /// - Different message bit lengths for the same Lamport type have separate index counters
+    ///
+    pub fn next_lamport(
+        &self,
+        message_bit_length: usize,
+        key_type: LamportType,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        let index = {
+            let tx_id = self.begin_transaction();
+
+            let index = self.next_lamport_index()?;
+            self.keystore.store_next_lamport_index(index + 1, tx_id)?;
+
+            self.commit_transaction(tx_id)?;
+
+            index
+        };
+
+        let pubkey = self.derive_lamport(message_bit_length, key_type, index)?;
+        Ok(pubkey)
+    }
+
+    fn next_lamport_index(&self) -> Result<u32, KeyManagerError> {
+        match self.keystore.load_next_lamport_index() {
+            Ok(stored_index) => Ok(stored_index),
+            Err(KeyManagerError::NextLamportIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
+            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
+        }
+    }
+
+    /// Derives n Lamport OT key starting at a specific derivation index using BIP-39/BIP-44 hierarchical deterministic (HD) derivation.
+    ///
+    /// ** Usage of this function is discouraged in favor of [`next_multiple_lamport`](Self::next_multiple_lamport) instead. **
+    ///
+    /// The `next_multiple_lamport` function provides a secure index management by automatically tracking
+    /// the next available derivation index, preventing accidental key reuse and simplifying
+    /// key generation workflows.
+    ///
+    fn derive_multiple_lamport(
+        &self,
+        message_bit_length: usize,
+        key_type: LamportType,
+        initial_index: u32,
+        number_of_keys: u32,
+    ) -> Result<Vec<crate::lamport::LamportPublicKey>, KeyManagerError> {
+        let master_secret = self.keystore.load_lamport_seed()?;
+
+        let mut public_keys = Vec::new();
+
+        for index in initial_index..initial_index + number_of_keys {
+            let lamport = crate::lamport::Lamport::new();
+            let public_key = lamport.generate_public_key(
+                &*master_secret,
+                key_type,
+                message_bit_length,
+                index,
+            )?;
+            public_keys.push(public_key);
+        }
+
+        Ok(public_keys)
+    }
+
+    /// Generates the next n Lamport OT keys in sequence using automatic index management and BIP-39/BIP-44 HD derivation.
+    ///
+    /// This is the **recommended** function for Lamport key generation as it provides automatic index management,
+    /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_multiple_lamport`](Self::derive_multiple_lamport).
+    ///
+    pub fn next_multiple_lamport(
+        &self,
+        message_bit_length: usize,
+        key_type: LamportType,
+        number_of_keys: u32,
+    ) -> Result<Vec<crate::lamport::LamportPublicKey>, KeyManagerError> {
+        // Dev note: Only the index increment is transactional to minimize database lock time.
+        // if key derivation fails, the index is wasted, this is not an issue in One Time Use keys
+        let initial_index = {
+            let tx_id = self.begin_transaction();
+
+            let initial_index = self.next_lamport_index()?;
+            self.keystore
+                .store_next_lamport_index(initial_index + number_of_keys, tx_id)?;
+
+            self.commit_transaction(tx_id)?;
+
+            initial_index
+        };
+
+        let pubkeys = self.derive_multiple_lamport(
+            message_bit_length,
+            key_type,
+            initial_index,
+            number_of_keys,
+        )?;
+        Ok(pubkeys)
+    }
+
     // Dev note: this key is not related to the key derivation seed used for HD wallets
     // In the future we can find a way to securely derive it from a mnemonic too
     pub fn generate_rsa_keypair<R: RngCore + CryptoRng>(
@@ -1243,6 +1434,7 @@ impl KeyManager {
         message_bits: &[bool],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
+        // TODO do this if its imported key if not use by index
         let private_key = self
             .keystore
             .load_lamport_key(public_key)?
@@ -1252,6 +1444,8 @@ impl KeyManager {
         let sig = lamport.sign_message(message_bits, &private_key)?;
         Ok(sig)
     }
+
+    // TODO add ign_lamport_message_by_index
 
     /// Sign a message from bytes
     ///
@@ -1273,6 +1467,7 @@ impl KeyManager {
         message_bytes: &[u8],
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
+        // TODO do this if its imported key if not use by index
         let private_key = self
             .keystore
             .load_lamport_key(public_key)?
@@ -1282,6 +1477,8 @@ impl KeyManager {
         let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
         Ok(sig)
     }
+
+    // TODO add sign_lamport_message_bytes_by_index
 
     /// Sign a single bit
     ///
@@ -1302,6 +1499,7 @@ impl KeyManager {
         message_bit: bool, // bool representing a bit false = 0, true = 1
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
+        // TODO do this if its imported key if not use by index
         let private_key = self
             .keystore
             .load_lamport_key(public_key)?
@@ -1312,9 +1510,10 @@ impl KeyManager {
         Ok(sig)
     }
 
-    // TODO add other lamport methods, like generation (based on what winternitz offer)
+    // TODO add sign_lamport_bit_by_pubkey
+
     // TODO write examples
-    // TODO mark used
+    // TODO mark imported used (similar to Winternitz)
     // TODO check lamport extra data
 
     /// Exports the private key for a given public key.

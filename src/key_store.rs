@@ -28,14 +28,19 @@ impl KeyStore {
     const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
     const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
     const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
+    const LAMPORT_KEY: &str = "lamport_seed"; // Key to use in the database for the Lamport seed
     const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
     const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
     const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
+    const NEXT_LAMPORT_INDEX_KEY: &str = "next_lamport_index"; // Key for storing the next lamport index
     const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
-                                                                       // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+    const LAMPORT_INDEX_BLOCK_KEY: &str = "lamport_index_block"; // Key prefix for Lamport index bitmap blocks
+    // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
+    const LAMPORT_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
+    const LAMPORT_CHECK_BLOCK_BYTES: usize = (Self::LAMPORT_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
     const LAMPORT: &str = "lamport"; // Key prefix for Lamport pubkeys
 
     pub fn new(store: Rc<Storage>) -> Self {
@@ -167,6 +172,25 @@ impl KeyStore {
         }
     }
 
+    pub fn store_next_lamport_index(
+        &self,
+        index: u32,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+        // best practice: never reuse the index, as it can compromise security, even if the hash type changes
+        // this will store the next lamport index
+        self.store
+            .set(Self::NEXT_LAMPORT_INDEX_KEY, index, transaction_id)?;
+        Ok(())
+    }
+
+    pub fn load_next_lamport_index(&self) -> Result<u32, KeyManagerError> {
+        match self.store.get(Self::NEXT_LAMPORT_INDEX_KEY)? {
+            Some(next_index) => Ok(next_index),
+            None => Err(KeyManagerError::NextLamportIndexNotFound),
+        }
+    }
+
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
         let phrase = Zeroizing::new(mnemonic.to_string()); // normalized space-separated phrase
         self.store.set(Self::MNEMONIC_KEY, &(*phrase), None)?;
@@ -204,6 +228,18 @@ impl KeyStore {
         match self.store.get(Self::WINTERNITZ_KEY)? {
             Some(entry) => Ok(Zeroizing::new(entry)),
             None => Err(KeyManagerError::WinternitzSeedNotFound),
+        }
+    }
+
+    pub fn store_lamport_seed(&self, seed: Zeroizing<[u8; 32]>) -> Result<(), KeyManagerError> {
+        self.store.set(Self::LAMPORT_KEY, *seed, None)?;
+        Ok(())
+    }
+
+    pub fn load_lamport_seed(&self) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
+        match self.store.get(Self::LAMPORT_KEY)? {
+            Some(entry) => Ok(Zeroizing::new(entry)),
+            None => Err(KeyManagerError::LamportSeedNotFound),
         }
     }
 
@@ -367,5 +403,49 @@ impl KeyStore {
         }
 
         Ok(None)
+    }
+
+
+    // TODO, ask if is derivated use this func, if it was imported marj in some other way
+    // this index is independent of the index used for key derivation, it is marked when used in a signature
+    pub fn check_and_mark_lamport_index_used(
+        &self,
+        index: u32,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+        // Bitmap with block size of 1024 indices for efficiency
+        // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
+
+        let block_num = (index as u64) / Self::LAMPORT_CHECK_BLOCK_SIZE;
+        let bit_pos = (index as u64) % Self::LAMPORT_CHECK_BLOCK_SIZE;
+
+        let byte_index = (bit_pos / 8) as usize;
+        let bit_index = (bit_pos % 8) as u8;
+
+        // Load the block from storage (or create new if doesn't exist)
+        let block_key = format!("{}:{}", Self::LAMPORT_INDEX_BLOCK_KEY, block_num);
+        let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone())? {
+            Some(block) => block,
+            None => vec![0u8; Self::LAMPORT_CHECK_BLOCK_BYTES], // Create new empty block
+        };
+
+        // Validate block size
+        if block.len() != Self::LAMPORT_CHECK_BLOCK_BYTES {
+            return Err(KeyManagerError::CorruptedLamportIndexBitmap);
+        }
+
+        // Check if the bit is already set (index already used)
+        let mask = 1u8 << bit_index;
+        if block[byte_index] & mask != 0 {
+            return Err(KeyManagerError::LamportIndexAlreadyUsed(index));
+        }
+
+        // Mark the bit as used
+        block[byte_index] |= mask;
+
+        // Store the updated block back to storage
+        self.store.set(block_key, block, transaction_id)?;
+
+        Ok(())
     }
 }

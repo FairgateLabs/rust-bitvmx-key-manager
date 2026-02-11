@@ -73,11 +73,17 @@ pub enum KeyManagerError {
     #[error("Failed to load Next Winternitz index from key store")]
     NextWinternitzIndexNotFound,
 
+    #[error("Failed to load Next Lamport index from key store")]
+    NextLamportIndexNotFound,
+
     #[error("Failed to load Mnemonic passphrase from key store")]
     MnemonicPassphraseNotFound,
 
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
+
+    #[error("Failed to load Lamport seed from key store")]
+    LamportSeedNotFound,
 
     #[error("Failed to load the BIP39 key derivation seed from key store")]
     KeyDerivationSeedNotFound,
@@ -87,6 +93,9 @@ pub enum KeyManagerError {
 
     #[error("Corrupted Winternitz seed")]
     CorruptedWinternitzSeed,
+
+    #[error("Corrupted Lamport seed")]
+    CorruptedLamportSeed,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,
@@ -120,6 +129,12 @@ pub enum KeyManagerError {
 
     #[error("Corrupted Winternitz index bitmap")]
     CorruptedWinternitzIndexBitmap,
+
+    #[error("Lamport index {0} has already been used")]
+    LamportIndexAlreadyUsed(u32),
+
+    #[error("Corrupted Lamport index bitmap")]
+    CorruptedLamportIndexBitmap,
 }
 
 #[derive(Error, Debug)]

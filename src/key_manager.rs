@@ -8094,4 +8094,97 @@ mod tests {
             Ok(())
         })
     }
+
+    #[test]
+    fn test_lamport_10bit_sign_with_bits_and_bytes() -> Result<(), KeyManagerError> {
+        let lamport = Lamport::new();
+        let message_bit_length = 10;
+
+        // Create a 10-bit message: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
+        let message_bits: Vec<bool> = vec![true, false, true, false, true, false, true, false, true, false];
+
+        // Convert to bytes using Lamport's bits_to_bytes function (adds padding)
+        // 10 bits requires 6 padding bits to reach 16 bits (2 bytes)
+        let (message_bytes, padding) = crate::lamport::bits_to_bytes(&message_bits)?;
+        assert_eq!(padding, 6, "10 bits should require 6 bits of padding to reach 16 bits");
+        assert_eq!(message_bytes.len(), 2, "10 bits + 6 padding = 16 bits = 2 bytes");
+
+        // Use a fixed mnemonic for reproducibility
+        let test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let test_passphrase = "test_passphrase_10bit";
+
+        // Set up first key manager
+        let (keystore1, store1, keystore_path1, store_path1) = setup_test_environment()?;
+        let key_manager_config = TestKeyManagerConfig::new(
+            "regtest".to_string(),
+            Some(test_mnemonic.to_string()),
+            Some(test_passphrase.to_string()),
+        );
+        let key_manager1 = create_key_manager_from_config(&key_manager_config, keystore1, store1)?;
+
+        // Derive a key for 10-bit message at index 0
+        let public_key = key_manager1.derive_lamport(message_bit_length, LamportType::SHA256, 0)?;
+
+        // Sign using the bit-based method - THIS IS THE CORRECT METHOD for non-byte-aligned messages
+        let signature1 = key_manager1.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
+
+        // Verify the first signature
+        assert!(
+            lamport.verify_signature(&message_bits, &signature1, &public_key)?,
+            "Signature should verify with bit-based method"
+        );
+
+        // Clean up first key manager
+        drop(key_manager1);
+
+        // Set up second key manager with the same mnemonic but different storage
+        let (keystore2, store2, keystore_path2, store_path2) = setup_test_environment()?;
+        let key_manager2 = create_key_manager_from_config(&key_manager_config, keystore2, store2)?;
+
+        // Derive the same key (index 0, 10-bit message) - not marked as used in this storage
+        let public_key2 = key_manager2.derive_lamport(message_bit_length, LamportType::SHA256, 0)?;
+
+        // Verify we got the same public key
+        assert_eq!(
+            public_key.to_bytes(),
+            public_key2.to_bytes(),
+            "Public keys should match with same derivation parameters"
+        );
+
+        // IMPORTANT: Try to sign using the bytes-based method
+        // This SHOULD FAIL with MessageLengthMismatch because:
+        // - The public key is configured for 10-bit messages
+        // - message_bytes contains 2 bytes = 16 bits (including 6 padding bits)
+        // - 16 bits ≠ 10 bits → MessageLengthMismatch
+        //
+        // For message lengths that are NOT multiples of 8 bits, users MUST use:
+        // - sign_lamport_message_by_pubkey (bit-based method) ✓
+        //
+        // The byte-based method (sign_lamport_message_bytes_by_pubkey) is ONLY for:
+        // - Message lengths that are exact multiples of 8 bits (e.g., 8, 16, 24, 32, 256 bits)
+        let result = key_manager2.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key2);
+
+        // Assert that we get the expected MessageLengthMismatch error
+        assert!(
+            result.is_err(),
+            "Byte-based signing should fail for 10-bit message (not byte-aligned)"
+        );
+
+        match result {
+            Err(KeyManagerError::LamportGenerationError(
+                crate::errors::LamportError::MessageLengthMismatch(got, expected)
+            )) => {
+                assert_eq!(got, 16, "Got 16 bits from 2 bytes");
+                assert_eq!(expected, 10, "Expected 10 bits from key configuration");
+            }
+            _ => panic!("Expected MessageLengthMismatch error, got: {:?}", result),
+        }
+
+        // Clean up
+        drop(key_manager2);
+        cleanup_test_environment(&keystore_path1, &store_path1);
+        cleanup_test_environment(&keystore_path2, &store_path2);
+
+        Ok(())
+    }
 }

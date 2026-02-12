@@ -2757,4 +2757,226 @@ mod tests {
         );
         assert!(result.is_err());
     }
+
+    // ========== Serde Full Serialization Tests ==========
+
+    #[test]
+    fn test_serde_full_serialization_private_key() {
+        // Generate a private key with all attributes
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_for_serde";
+        let hash_type = LamportType::SHA256;
+        let message_bit_length = 256;
+        let derivation_index: u32 = 42;
+
+        let mut private_key = lamport.generate_private_key(
+            master_secret,
+            hash_type,
+            message_bit_length,
+            derivation_index,
+        )
+        .unwrap();
+
+        // Mark as spent to test that field
+        private_key.mark_spent();
+
+        // Serialize to JSON string (easy to save to file)
+        let serialized = serde_json::to_string(&private_key).unwrap();
+        println!("Serialized private key: {} bytes", serialized.len());
+
+        // Deserialize back
+        let deserialized: LamportPrivateKey = serde_json::from_str(&serialized).unwrap();
+
+        // Verify all attributes are preserved
+        assert_eq!(deserialized.hash_type(), hash_type);
+        assert_eq!(deserialized.message_bit_length(), message_bit_length);
+        assert_eq!(deserialized.derivation_index(), Some(derivation_index));
+        assert_eq!(deserialized.spent(), true);
+        assert_eq!(deserialized.imported(), false);
+
+        // Verify the key material is identical
+        assert_eq!(deserialized.to_bytes(), private_key.to_bytes());
+
+        // Also test pretty JSON format
+        let pretty_json = serde_json::to_string_pretty(&private_key).unwrap();
+        println!("Pretty JSON (first 200 chars):\n{}", &pretty_json[..200.min(pretty_json.len())]);
+    }
+
+    #[test]
+    fn test_serde_full_serialization_public_key() {
+        // Generate a public key with all attributes
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret_public";
+        let hash_type = LamportType::RIPEMD160;
+        let message_bit_length = 160;
+        let derivation_index: u32 = 123;
+
+        let public_key = lamport.generate_public_key(
+            master_secret,
+            hash_type,
+            message_bit_length,
+            derivation_index,
+        )
+        .unwrap();
+
+        // Serialize to JSON string
+        let serialized = serde_json::to_string(&public_key).unwrap();
+        println!("Serialized public key: {} bytes", serialized.len());
+
+        // Deserialize back
+        let deserialized: LamportPublicKey = serde_json::from_str(&serialized).unwrap();
+
+        // Verify all attributes are preserved
+        assert_eq!(deserialized.hash_type(), hash_type);
+        assert_eq!(deserialized.message_bit_length().unwrap(), message_bit_length);
+        assert_eq!(deserialized.derivation_index(), Some(derivation_index));
+        assert_eq!(deserialized.imported(), false);
+
+        // Verify the key material is identical
+        assert_eq!(deserialized.to_bytes(), public_key.to_bytes());
+    }
+
+    #[test]
+    fn test_serde_json_compact_vs_pretty() {
+        // Test JSON compact vs pretty printing
+        let lamport = Lamport::new();
+        let master_secret = b"test_json_formats";
+        let hash_type = LamportType::HASH256;
+        let message_bit_length = 256;
+        let derivation_index: u32 = 999;
+
+        let private_key = lamport.generate_private_key(
+            master_secret,
+            hash_type,
+            message_bit_length,
+            derivation_index,
+        )
+        .unwrap();
+
+        // Serialize to compact JSON
+        let compact_json = serde_json::to_string(&private_key).unwrap();
+        println!("Compact JSON: {} bytes", compact_json.len());
+
+        // Serialize to pretty JSON
+        let pretty_json = serde_json::to_string_pretty(&private_key).unwrap();
+        println!("Pretty JSON: {} bytes", pretty_json.len());
+
+        // Compare with to_bytes() (which only includes key material)
+        let key_bytes_only = private_key.to_bytes();
+        println!("to_bytes() only: {} bytes", key_bytes_only.len());
+        println!("JSON overhead: {} bytes", compact_json.len() - key_bytes_only.len());
+
+        // Deserialize from both formats
+        let from_compact: LamportPrivateKey = serde_json::from_str(&compact_json).unwrap();
+        let from_pretty: LamportPrivateKey = serde_json::from_str(&pretty_json).unwrap();
+
+        // Verify everything matches
+        assert_eq!(from_compact.hash_type(), private_key.hash_type());
+        assert_eq!(from_compact.message_bit_length(), private_key.message_bit_length());
+        assert_eq!(from_compact.derivation_index(), private_key.derivation_index());
+        assert_eq!(from_compact.to_bytes(), private_key.to_bytes());
+
+        assert_eq!(from_pretty.hash_type(), private_key.hash_type());
+        assert_eq!(from_pretty.to_bytes(), private_key.to_bytes());
+    }
+
+    #[test]
+    fn test_serde_imported_key_serialization() {
+        // Test serialization of an imported key (imported=true, derivation_index=None)
+        let hash_type = LamportType::SHA256;
+        let message_bit_length = 256;
+
+        // Create key bytes
+        let key_bytes = vec![0u8; 2 * message_bit_length * hash_type.hash_size()];
+
+        let private_key = LamportPrivateKey::from_bytes(
+            &key_bytes,
+            message_bit_length,
+            hash_type,
+            None, // No derivation index for imported key
+            true, // imported = true
+        )
+        .unwrap();
+
+        // Serialize and deserialize
+        let serialized = serde_json::to_string(&private_key).unwrap();
+        let deserialized: LamportPrivateKey = serde_json::from_str(&serialized).unwrap();
+
+        // Verify imported flag and None derivation_index are preserved
+        assert_eq!(deserialized.imported(), true);
+        assert_eq!(deserialized.derivation_index(), None);
+        assert_eq!(deserialized.hash_type(), hash_type);
+    }
+
+    #[test]
+    fn test_serde_file_persistence_simulation() {
+        // Simulate saving to file and loading
+        use std::collections::HashMap;
+
+        let lamport = Lamport::new();
+        let master_secret = b"file_persistence_test";
+        let hash_type = LamportType::SHA256;
+
+        // Generate multiple keys
+        let mut key_storage: HashMap<u32, String> = HashMap::new();
+
+        for idx in 0..5u32 {
+            let private_key = lamport.generate_private_key(
+                master_secret,
+                hash_type,
+                256,
+                idx,
+            )
+            .unwrap();
+
+            // "Save to file" (serialize to string)
+            let serialized = serde_json::to_string(&private_key).unwrap();
+            key_storage.insert(idx, serialized);
+        }
+
+        // "Load from file" (deserialize from string)
+        for idx in 0..5u32 {
+            let serialized = key_storage.get(&idx).unwrap();
+            let loaded_key: LamportPrivateKey = serde_json::from_str(serialized).unwrap();
+
+            assert_eq!(loaded_key.derivation_index(), Some(idx));
+            assert_eq!(loaded_key.hash_type(), hash_type);
+            assert_eq!(loaded_key.message_bit_length(), 256);
+            assert_eq!(loaded_key.imported(), false);
+        }
+
+        println!("Successfully persisted and loaded {} keys", key_storage.len());
+    }
+
+    #[test]
+    fn test_serde_round_trip_all_hash_types() {
+        // Test serialization works for all hash types
+        let lamport = Lamport::new();
+        let master_secret = b"all_hash_types_test";
+        let hash_types = vec![
+            LamportType::SHA256,
+            LamportType::RIPEMD160,
+            LamportType::HASH160,
+            LamportType::HASH256,
+        ];
+
+        for hash_type in hash_types {
+            let message_bit_length = hash_type.hash_size() * 8;
+            let private_key = lamport.generate_private_key(
+                master_secret,
+                hash_type,
+                message_bit_length,
+                0,
+            )
+            .unwrap();
+
+            // JSON serialization
+            let json_serialized = serde_json::to_string(&private_key).unwrap();
+            let json_deserialized: LamportPrivateKey = serde_json::from_str(&json_serialized).unwrap();
+            assert_eq!(json_deserialized.hash_type(), hash_type);
+            assert_eq!(json_deserialized.to_bytes(), private_key.to_bytes());
+            assert_eq!(json_deserialized.derivation_index(), Some(0));
+            assert_eq!(json_deserialized.message_bit_length(), message_bit_length);
+        }
+    }
 }

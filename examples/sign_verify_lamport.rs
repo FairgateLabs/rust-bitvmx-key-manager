@@ -4,8 +4,9 @@ use create::create_key_manager_example;
 
 use bitcoin::key::rand::RngCore;
 use bitcoin::secp256k1;
+use bitcoin::hashes::{sha256, Hash};
 
-use key_manager::lamport::{Lamport, LamportType};
+use key_manager::lamport::{bits_to_bytes, Lamport, LamportType};
 
 fn main() {
     // see function code, main is just a wrapper to run the example
@@ -44,4 +45,93 @@ fn sign_verify_lamport_example() {
         .unwrap();
     println!("(using next) Is signature valid: {:?}", is_valid);
     assert!(is_valid);
+
+    // --- Signing and verifying a 10-bit message using sign_lamport_message_by_pubkey
+
+    // Create a random 10-bit message
+    let message_bits: Vec<bool> = (0..10)
+        .map(|_| (rng.next_u32() % 2) == 1)
+        .collect();
+    println!("\n10-bit message: {:?}", message_bits);
+
+    // Get the Lamport public key with message bit length = 10
+    let lamport_pubkey_10bit = key_manager.next_lamport(10, LamportType::SHA256).unwrap();
+
+    // Create a Lamport signature for the message
+    let signature_10bit = key_manager
+        .sign_lamport_message_by_pubkey(&message_bits, &lamport_pubkey_10bit)
+        .unwrap();
+    println!(
+        "Lamport 10-bit signature: {:?}",
+        hex::encode(signature_10bit.to_bytes())
+    );
+
+    // Verify the signature
+    let is_valid_10bit = lamport
+        .verify_signature(&message_bits, &signature_10bit, &lamport_pubkey_10bit)
+        .unwrap();
+    println!("Is 10-bit signature valid: {:?}", is_valid_10bit);
+    assert!(is_valid_10bit);
+
+    // --- Signing and verifying a message using sign_lamport_message_bytes_by_pubkey
+
+    // Convert the 10-bit message to bytes
+    let (message_bytes, padding) = bits_to_bytes(&message_bits).unwrap();
+    println!(
+        "\nMessage as bytes (with {} padding bits): {:?}",
+        padding,
+        hex::encode(&message_bytes)
+    );
+
+    // Note: For bytes, we need 16 bits (2 bytes) as the message length
+    // since bits_to_bytes adds padding to make it a multiple of 8
+    let lamport_pubkey_bytes = key_manager.next_lamport(16, LamportType::SHA256).unwrap();
+
+    // Create a Lamport signature for the message bytes
+    let signature_bytes = key_manager
+        .sign_lamport_message_bytes_by_pubkey(&message_bytes, &lamport_pubkey_bytes)
+        .unwrap();
+    println!(
+        "Lamport byte signature: {:?}",
+        hex::encode(signature_bytes.to_bytes())
+    );
+
+    // Verify the signature
+    let is_valid_bytes = lamport
+        .verify_signature_bytes(&message_bytes, &signature_bytes, &lamport_pubkey_bytes)
+        .unwrap();
+    println!("Is byte signature valid: {:?}", is_valid_bytes);
+    assert!(is_valid_bytes);
+
+    // --- Signing and verifying a string message using SHA256 hash
+
+    // Define a string message
+    let message = "hi im the message to be signed with lamport :)";
+    println!("\n\nString message: {:?}", message);
+
+    // Hash the message with SHA256 to get a 32-byte digest
+    let message_hash = sha256::Hash::hash(message.as_bytes());
+    let message_digest = message_hash.to_byte_array();
+    println!("SHA256 digest: {:?}", hex::encode(message_digest));
+
+    // For a 32-byte digest, we need 256 bits (32 * 8) as the message length
+    let lamport_pubkey_string = key_manager.next_lamport(256, LamportType::SHA256).unwrap();
+
+    // Create a Lamport signature for the message digest
+    let signature_string = key_manager
+        .sign_lamport_message_bytes_by_pubkey(&message_digest, &lamport_pubkey_string)
+        .unwrap();
+    println!(
+        "Lamport signature for string message: {:?}",
+        hex::encode(signature_string.to_bytes())
+    );
+
+    // Verify the signature
+    let is_valid_string = lamport
+        .verify_signature_bytes(&message_digest, &signature_string, &lamport_pubkey_string)
+        .unwrap();
+    println!("Is string message signature valid: {:?}", is_valid_string);
+    assert!(is_valid_string);
+    println!("\n✓ String message signed and verified successfully!");
+
 }

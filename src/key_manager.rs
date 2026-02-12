@@ -8101,13 +8101,22 @@ mod tests {
         let message_bit_length = 10;
 
         // Create a 10-bit message: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
-        let message_bits: Vec<bool> = vec![true, false, true, false, true, false, true, false, true, false];
+        let message_bits: Vec<bool> = vec![
+            true, false, true, false, true, false, true, false, true, false,
+        ];
 
         // Convert to bytes using Lamport's bits_to_bytes function (adds padding)
         // 10 bits requires 6 padding bits to reach 16 bits (2 bytes)
         let (message_bytes, padding) = crate::lamport::bits_to_bytes(&message_bits)?;
-        assert_eq!(padding, 6, "10 bits should require 6 bits of padding to reach 16 bits");
-        assert_eq!(message_bytes.len(), 2, "10 bits + 6 padding = 16 bits = 2 bytes");
+        assert_eq!(
+            padding, 6,
+            "10 bits should require 6 bits of padding to reach 16 bits"
+        );
+        assert_eq!(
+            message_bytes.len(),
+            2,
+            "10 bits + 6 padding = 16 bits = 2 bytes"
+        );
 
         // Use a fixed mnemonic for reproducibility
         let test_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -8142,7 +8151,8 @@ mod tests {
         let key_manager2 = create_key_manager_from_config(&key_manager_config, keystore2, store2)?;
 
         // Derive the same key (index 0, 10-bit message) - not marked as used in this storage
-        let public_key2 = key_manager2.derive_lamport(message_bit_length, LamportType::SHA256, 0)?;
+        let public_key2 =
+            key_manager2.derive_lamport(message_bit_length, LamportType::SHA256, 0)?;
 
         // Verify we got the same public key
         assert_eq!(
@@ -8162,7 +8172,8 @@ mod tests {
         //
         // The byte-based method (sign_lamport_message_bytes_by_pubkey) is ONLY for:
         // - Message lengths that are exact multiples of 8 bits (e.g., 8, 16, 24, 32, 256 bits)
-        let result = key_manager2.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key2);
+        let result =
+            key_manager2.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key2);
 
         // Assert that we get the expected MessageLengthMismatch error
         assert!(
@@ -8172,7 +8183,7 @@ mod tests {
 
         match result {
             Err(KeyManagerError::LamportGenerationError(
-                crate::errors::LamportError::MessageLengthMismatch(got, expected)
+                crate::errors::LamportError::MessageLengthMismatch(got, expected),
             )) => {
                 assert_eq!(got, 16, "Got 16 bits from 2 bytes");
                 assert_eq!(expected, 10, "Expected 10 bits from key configuration");

@@ -2,9 +2,9 @@ mod create;
 
 use create::create_key_manager_example;
 
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::rand::RngCore;
 use bitcoin::secp256k1;
-use bitcoin::hashes::{sha256, Hash};
 
 use key_manager::lamport::{bits_to_bytes, Lamport, LamportType};
 
@@ -49,9 +49,7 @@ fn sign_verify_lamport_example() {
     // --- Signing and verifying a 10-bit message using sign_lamport_message_by_pubkey
 
     // Create a random 10-bit message
-    let message_bits: Vec<bool> = (0..10)
-        .map(|_| (rng.next_u32() % 2) == 1)
-        .collect();
+    let message_bits: Vec<bool> = (0..10).map(|_| (rng.next_u32() % 2) == 1).collect();
     println!("\n10-bit message: {:?}", message_bits);
 
     // Get the Lamport public key with message bit length = 10
@@ -88,7 +86,9 @@ fn sign_verify_lamport_example() {
 
     let message_bit_lenght_padded_to_use_bytes = message_bits.len() + padding as usize;
     // if the user want to use the bytes methods, it should indicate the message length with padding, otherwise will get an MessageLengthMismatch error at signing time
-    let lamport_pubkey_bytes = key_manager.next_lamport(message_bit_lenght_padded_to_use_bytes, LamportType::SHA256).unwrap();
+    let lamport_pubkey_bytes = key_manager
+        .next_lamport(message_bit_lenght_padded_to_use_bytes, LamportType::SHA256)
+        .unwrap();
 
     // Create a Lamport signature for the message bytes
     let signature_bytes = key_manager
@@ -136,5 +136,4 @@ fn sign_verify_lamport_example() {
     println!("Is string message signature valid: {:?}", is_valid_string);
     assert!(is_valid_string);
     println!("\n✓ String message signed and verified successfully!");
-
 }

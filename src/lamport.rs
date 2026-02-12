@@ -31,6 +31,7 @@ pub enum LamportType {
 pub trait HashFunction {
     fn hash(&self, data: &[u8]) -> LamportHash;
     fn hash_size(&self) -> usize;
+    fn hmac(&self, key: &[u8], data: &[u8]) -> Vec<u8>;
 }
 
 impl HashFunction for LamportType {
@@ -62,6 +63,37 @@ impl HashFunction for LamportType {
             LamportType::RIPEMD160 => RIPEMD160_SIZE,
             LamportType::HASH160 => RIPEMD160_SIZE,
             LamportType::HASH256 => SHA256_SIZE,
+        }
+    }
+
+    fn hmac(&self, key: &[u8], data: &[u8]) -> Vec<u8> {
+        match self {
+            LamportType::SHA256 => {
+                let mut engine = HmacEngine::<sha256::Hash>::new(key);
+                engine.input(data);
+                let hmac = Hmac::<sha256::Hash>::from_engine(engine);
+                hmac.as_byte_array().to_vec()
+            }
+            LamportType::RIPEMD160 => {
+                let mut engine = HmacEngine::<ripemd160::Hash>::new(key);
+                engine.input(data);
+                let hmac = Hmac::<ripemd160::Hash>::from_engine(engine);
+                hmac.as_byte_array().to_vec()
+            }
+            LamportType::HASH160 => {
+                // For HASH160, use SHA256 for HMAC, then truncate to RIPEMD160 size
+                let mut engine = HmacEngine::<sha256::Hash>::new(key);
+                engine.input(data);
+                let hmac = Hmac::<sha256::Hash>::from_engine(engine);
+                hmac.as_byte_array().to_vec()
+            }
+            LamportType::HASH256 => {
+                // For HASH256, use SHA256 for HMAC
+                let mut engine = HmacEngine::<sha256::Hash>::new(key);
+                engine.input(data);
+                let hmac = Hmac::<sha256::Hash>::from_engine(engine);
+                hmac.as_byte_array().to_vec()
+            }
         }
     }
 }
@@ -964,17 +996,25 @@ impl Lamport {
         let mut private_key =
             LamportPrivateKey::new(hash_type, message_bit_length, Some(derivation_index));
 
-        let hash_size = hash_type.hash_size();
-
         // Generate key pairs for each bit position
         for i in 0..message_bit_length {
-            // Generate private key for bit value 0
-            let priv_key_0 =
-                self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 0);
+            // Generate private key for bit value 0 (random number derived from master secret, hashed to obtain the necessary bytes)
+            let priv_key_0 = self.generate_priv_keys_randoms_using_hmac_hashing(
+                master_secret,
+                hash_type,
+                derivation_index,
+                i as u32,
+                0,
+            );
 
-            // Generate private key for bit value 1
-            let priv_key_1 =
-                self.generate_hash(master_secret, hash_size, derivation_index, i as u32, 1);
+            // Generate private key for bit value 1 (random number derived from master secret, hashed to obtain the necessary bytes)
+            let priv_key_1 = self.generate_priv_keys_randoms_using_hmac_hashing(
+                master_secret,
+                hash_type,
+                derivation_index,
+                i as u32,
+                1,
+            );
 
             private_key.push_key_pair(priv_key_0, priv_key_1)?;
         }
@@ -1165,25 +1205,25 @@ impl Lamport {
     }
 
     /// Helper function to generate a hash using HMAC for key derivation
-    fn generate_hash(
+    /// Uses the appropriate HMAC hash function based on the hash_type parameter
+    fn generate_priv_keys_randoms_using_hmac_hashing(
         &self,
         master_secret: &[u8],
-        key_size: usize,
+        hash_type: LamportType,
         derivation_index: u32,
         bit_index: u32,
         bit_value: u8, // 0 or 1
     ) -> LamportHash {
-        let mut engine = HmacEngine::<sha256::Hash>::new(master_secret);
         let input = [
             derivation_index.to_le_bytes(),
             bit_index.to_le_bytes(),
             [bit_value, 0, 0, 0],
         ]
         .concat();
-        engine.input(&input);
 
-        let hash = Hmac::<sha256::Hash>::from_engine(engine);
-        LamportHash::new(hash[..key_size].to_vec())
+        let hash_bytes = hash_type.hmac(master_secret, &input);
+        let hash_size = hash_type.hash_size();
+        LamportHash::new(hash_bytes[..hash_size].to_vec())
     }
 }
 

@@ -26,9 +26,7 @@ fn sign_verify_lamport_example() {
     // Using next - recommended
 
     // Get the Lamport public key with message bit length = 1 using the SHA-256 hash function
-    let lamport_pubkey = key_manager
-        .next_lamport(1, LamportType::SHA256)
-        .unwrap();
+    let lamport_pubkey = key_manager.next_lamport(1, LamportType::SHA256).unwrap();
 
     // Create a Lamport signature
     let signature = key_manager

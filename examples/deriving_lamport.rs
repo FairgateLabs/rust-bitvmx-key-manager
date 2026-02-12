@@ -22,5 +22,4 @@ fn key_gen_lamport_example() {
         "Lamport public key: {:?}",
         hex::encode(lamport_pubkey.to_bytes())
     );
-
 }

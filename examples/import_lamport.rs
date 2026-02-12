@@ -37,7 +37,12 @@ fn import_sign_verify_lamport_example() {
 
     // Get the Lamport public key with message bit length = 1 using the SHA-256 hash function
     let lamport_pubkey = key_manager
-        .import_lamport_private_key(&random_bytes_0, &random_bytes_1, 1usize, LamportType::SHA256)
+        .import_lamport_private_key(
+            &random_bytes_0,
+            &random_bytes_1,
+            1usize,
+            LamportType::SHA256,
+        )
         .unwrap();
 
     // Create a Lamport signature

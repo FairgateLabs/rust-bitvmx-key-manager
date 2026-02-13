@@ -4,7 +4,6 @@ use bip39::Mnemonic;
 use bitcoin::key::rand;
 use bitcoin::{key::rand::RngCore, secp256k1, PublicKey};
 use rand::Rng;
-use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
 
 pub fn random_bytes() -> [u8; 32] {
@@ -15,11 +14,14 @@ pub fn random_bytes() -> [u8; 32] {
 
 pub fn create_key_manager(
     store_keystore_path: &str,
-    encrypt: Option<Secret<String>>,
+    password: Option<String>,
 ) -> Result<KeyManager, anyhow::Error> {
-    let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
+    if let Some(parent) = std::path::Path::new(store_keystore_path).parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
 
-    let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
+    let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
+    let config = StorageConfig::new(store_keystore_path.to_string(), password);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
@@ -42,8 +44,8 @@ pub fn generate_random_string() -> String {
 
 pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
-    let password = "secret password_123__ABC".to_string();
-    let key_manager = create_key_manager(path.as_str(), Some(Secret::from(password)))?;
+    let password = Some("secret password_123__ABC".to_string());
+    let key_manager = create_key_manager(path.as_str(), password)?;
     let pub_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
     Ok((key_manager, pub_key))

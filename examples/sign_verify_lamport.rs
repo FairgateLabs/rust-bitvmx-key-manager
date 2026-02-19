@@ -31,7 +31,7 @@ fn sign_verify_lamport_example() {
 
     // Create a Lamport signature
     let signature = key_manager
-        .sign_lamport_bit_by_pubkey(message_bit, &lamport_pubkey)
+        .sign_lamport_message_by_pubkey(message_bit, &lamport_pubkey)
         .unwrap();
     println!(
         "(using next) Lamport signature: {:?}",
@@ -92,7 +92,7 @@ fn sign_verify_lamport_example() {
 
     // Create a Lamport signature for the message bytes
     let signature_bytes = key_manager
-        .sign_lamport_message_bytes_by_pubkey(&message_bytes, &lamport_pubkey_bytes)
+        .sign_lamport_message_by_pubkey(&message_bytes, &lamport_pubkey_bytes)
         .unwrap();
     println!(
         "Lamport byte signature: {:?}",
@@ -122,7 +122,7 @@ fn sign_verify_lamport_example() {
 
     // Create a Lamport signature for the message digest
     let signature_string = key_manager
-        .sign_lamport_message_bytes_by_pubkey(&message_digest, &lamport_pubkey_string)
+        .sign_lamport_message_by_pubkey(&message_digest, &lamport_pubkey_string)
         .unwrap();
     println!(
         "Lamport signature for string message: {:?}",

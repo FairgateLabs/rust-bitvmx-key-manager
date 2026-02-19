@@ -46,7 +46,7 @@ fn import_sign_verify_lamport_example() {
 
     // Create a Lamport signature
     let signature = key_manager
-        .sign_lamport_bit_by_pubkey(message_bit, &lamport_pubkey)
+        .sign_lamport_message_by_pubkey(message_bit, &lamport_pubkey)
         .unwrap();
     println!(
         "(using imported) Lamport signature: {:?}",

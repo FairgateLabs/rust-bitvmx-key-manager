@@ -110,7 +110,9 @@ impl FromStr for LamportType {
     fn from_str(input: &str) -> Result<LamportType, Self::Err> {
         match input.to_uppercase().as_str() {
             "SHA256" => Ok(LamportType::SHA256),
+            "RIPEMD160" => Ok(LamportType::RIPEMD160),
             "HASH160" => Ok(LamportType::HASH160),
+            "HASH256" => Ok(LamportType::HASH256),
             _ => Err(LamportError::InvalidLamportType(input.to_string())),
         }
     }
@@ -2461,9 +2463,25 @@ mod tests {
             LamportType::HASH160
         );
 
+        assert_eq!(
+            LamportType::from_str("RIPEMD160").unwrap(),
+            LamportType::RIPEMD160
+        );
+        assert_eq!(
+            LamportType::from_str("ripemd160").unwrap(),
+            LamportType::RIPEMD160
+        );
+
+        assert_eq!(
+            LamportType::from_str("HASH256").unwrap(),
+            LamportType::HASH256
+        );
+        assert_eq!(
+            LamportType::from_str("hash256").unwrap(),
+            LamportType::HASH256
+        );
+
         // Test invalid types
-        assert!(LamportType::from_str("RIPEMD160").is_err());
-        assert!(LamportType::from_str("HASH256").is_err());
         assert!(LamportType::from_str("MD5").is_err());
         assert!(LamportType::from_str("").is_err());
     }

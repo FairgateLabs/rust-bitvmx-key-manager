@@ -35,6 +35,12 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 - **Storage**: Keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed
 - **Rationale**: Storage scalability - Winternitz signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency
 
+#### Lamport One-Time Signature Keys
+
+- **HD Derivation**: Lamport keys are HD derived from the same master seed for consistency, adn are also able to be imported
+- **Storage**: Derived keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed, Imported keys are stored
+- **Rationale**: Storage scalability - Lamport signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency. Imported keys are stores, as there is no way to re generate them from the seed. The storage key is the public key compressed using blake3, private materials are fully stored
+
 #### RSA Keys
 
 - **Fresh Entropy**: RSA keys are generated using fresh entropy provided by the user, with **no correlation** to the HD mnemonic

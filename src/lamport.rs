@@ -382,38 +382,29 @@ impl LamportPublicKey {
         imported: bool,
         extra_data: Option<ExtraData>,
     ) -> Result<Self, LamportError> {
-        validate_message_bit_length(message_bit_length)?;
-        validate_byte_length(bytes_0s_then_1s.len())?;
-
         let hash_size = hash_type.hash_size();
-        let expected_length = 2 * message_bit_length * hash_size;
+        let expected_length = message_bit_length * hash_size * 2;
 
         if bytes_0s_then_1s.len() != expected_length {
             return Err(LamportError::InvalidPublicKeyLength(
                 bytes_0s_then_1s.len(),
-                expected_length,
+                message_bit_length * hash_size * 2,
             ));
         }
 
-        let mut public_key = LamportPublicKey::new(hash_type, extra_data);
-        public_key.imported = imported;
-
         // Split bytes into 0s and 1s sections
-        let split_point = message_bit_length * hash_size;
+        let split_point = expected_length / 2;
         let bytes_0s = &bytes_0s_then_1s[..split_point];
         let bytes_1s = &bytes_0s_then_1s[split_point..];
 
-        for i in 0..message_bit_length {
-            let start = i * hash_size;
-            let end = start + hash_size;
-
-            let hash_0 = LamportHash::new(bytes_0s[start..end].to_vec());
-            let hash_1 = LamportHash::new(bytes_1s[start..end].to_vec());
-
-            public_key.push_key_pair(hash_0, hash_1)?;
-        }
-
-        Ok(public_key)
+        Self::from_bytes_splitted(
+            bytes_0s,
+            bytes_1s,
+            message_bit_length,
+            hash_type,
+            imported,
+            extra_data,
+        )
     }
 
     pub fn from_bytes_splitted(

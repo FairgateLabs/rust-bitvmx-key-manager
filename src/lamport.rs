@@ -1651,9 +1651,7 @@ mod tests {
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         let is_valid = lamport
             .verify_signature(&message_bytes, &signature, &public_key)
@@ -1683,9 +1681,7 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         // Sign with bytes method
-        let sig_bytes = lamport
-            .sign_message(message_bytes, &private_key)
-            .unwrap();
+        let sig_bytes = lamport.sign_message(message_bytes, &private_key).unwrap();
 
         // Verify bytes signature with verify_signature (bytes)
         assert!(lamport
@@ -1719,9 +1715,7 @@ mod tests {
                 .unwrap();
             let public_key = private_key.public_key().unwrap();
 
-            let signature = lamport
-                .sign_message(&message_bytes, &private_key)
-                .unwrap();
+            let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
             let is_valid = lamport
                 .verify_signature(&message_bytes, &signature, &public_key)
@@ -1743,9 +1737,7 @@ mod tests {
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         // Original message should verify
         assert!(lamport
@@ -1885,9 +1877,7 @@ mod tests {
         assert_eq!(public_key.hash_type(), LamportType::RIPEMD160);
 
         let message_bytes = [0x42u8; 20]; // Sign a 20-byte message
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         assert!(lamport
             .verify_signature(&message_bytes, &signature, &public_key)
@@ -1915,9 +1905,7 @@ mod tests {
         assert_eq!(public_key.hash_type(), LamportType::HASH256);
 
         let message_bytes = [0xAAu8; 32]; // Sign a 32-byte message
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         assert!(lamport
             .verify_signature(&message_bytes, &signature, &public_key)
@@ -2151,9 +2139,7 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 16]; // 128 bits
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         let bytes = signature.to_bytes();
         let reconstructed =
@@ -2217,9 +2203,7 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 2]; // 16 bits
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         let result = signature.to_array_hashes();
         assert!(result.is_ok());
@@ -2251,9 +2235,7 @@ mod tests {
 
         // Test signature to_hashes
         let message_bytes = [0x42u8; 1];
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
         let sig_hashes = signature.to_hashes();
         assert_eq!(sig_hashes.len(), message_bit_length);
     }
@@ -2405,9 +2387,7 @@ mod tests {
             .unwrap();
 
         let message_bytes = [0x42u8; 8];
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         assert_eq!(signature.len(), message_bit_length);
         assert!(!signature.is_empty());
@@ -2575,9 +2555,7 @@ mod tests {
 
         // Sign and verify a large message
         let message_bytes = vec![0x42u8; 128]; // 1024 bits
-        let signature = lamport
-            .sign_message(&message_bytes, &private_key)
-            .unwrap();
+        let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
         assert!(lamport
             .verify_signature(&message_bytes, &signature, &public_key)
             .unwrap());
@@ -2745,13 +2723,14 @@ mod tests {
         let message_bit_length = 256;
         let derivation_index: u32 = 42;
 
-        let mut private_key = lamport.generate_private_key(
-            master_secret,
-            hash_type,
-            message_bit_length,
-            derivation_index,
-        )
-        .unwrap();
+        let mut private_key = lamport
+            .generate_private_key(
+                master_secret,
+                hash_type,
+                message_bit_length,
+                derivation_index,
+            )
+            .unwrap();
 
         // Mark as spent to test that field
         private_key.mark_spent();
@@ -2775,7 +2754,10 @@ mod tests {
 
         // Also test pretty JSON format
         let pretty_json = serde_json::to_string_pretty(&private_key).unwrap();
-        println!("Pretty JSON (first 200 chars):\n{}", &pretty_json[..200.min(pretty_json.len())]);
+        println!(
+            "Pretty JSON (first 200 chars):\n{}",
+            &pretty_json[..200.min(pretty_json.len())]
+        );
     }
 
     #[test]
@@ -2787,13 +2769,14 @@ mod tests {
         let message_bit_length = 160;
         let derivation_index: u32 = 123;
 
-        let public_key = lamport.generate_public_key(
-            master_secret,
-            hash_type,
-            message_bit_length,
-            derivation_index,
-        )
-        .unwrap();
+        let public_key = lamport
+            .generate_public_key(
+                master_secret,
+                hash_type,
+                message_bit_length,
+                derivation_index,
+            )
+            .unwrap();
 
         // Serialize to JSON string
         let serialized = serde_json::to_string(&public_key).unwrap();
@@ -2804,7 +2787,10 @@ mod tests {
 
         // Verify all attributes are preserved
         assert_eq!(deserialized.hash_type(), hash_type);
-        assert_eq!(deserialized.message_bit_length().unwrap(), message_bit_length);
+        assert_eq!(
+            deserialized.message_bit_length().unwrap(),
+            message_bit_length
+        );
         assert_eq!(deserialized.derivation_index(), Some(derivation_index));
         assert_eq!(deserialized.imported(), false);
 
@@ -2821,13 +2807,14 @@ mod tests {
         let message_bit_length = 256;
         let derivation_index: u32 = 999;
 
-        let private_key = lamport.generate_private_key(
-            master_secret,
-            hash_type,
-            message_bit_length,
-            derivation_index,
-        )
-        .unwrap();
+        let private_key = lamport
+            .generate_private_key(
+                master_secret,
+                hash_type,
+                message_bit_length,
+                derivation_index,
+            )
+            .unwrap();
 
         // Serialize to compact JSON
         let compact_json = serde_json::to_string(&private_key).unwrap();
@@ -2840,7 +2827,10 @@ mod tests {
         // Compare with to_bytes() (which only includes key material)
         let key_bytes_only = private_key.to_bytes();
         println!("to_bytes() only: {} bytes", key_bytes_only.len());
-        println!("JSON overhead: {} bytes", compact_json.len() - key_bytes_only.len());
+        println!(
+            "JSON overhead: {} bytes",
+            compact_json.len() - key_bytes_only.len()
+        );
 
         // Deserialize from both formats
         let from_compact: LamportPrivateKey = serde_json::from_str(&compact_json).unwrap();
@@ -2848,8 +2838,14 @@ mod tests {
 
         // Verify everything matches
         assert_eq!(from_compact.hash_type(), private_key.hash_type());
-        assert_eq!(from_compact.message_bit_length(), private_key.message_bit_length());
-        assert_eq!(from_compact.derivation_index(), private_key.derivation_index());
+        assert_eq!(
+            from_compact.message_bit_length(),
+            private_key.message_bit_length()
+        );
+        assert_eq!(
+            from_compact.derivation_index(),
+            private_key.derivation_index()
+        );
         assert_eq!(from_compact.to_bytes(), private_key.to_bytes());
 
         assert_eq!(from_pretty.hash_type(), private_key.hash_type());
@@ -2897,13 +2893,9 @@ mod tests {
         let mut key_storage: HashMap<u32, String> = HashMap::new();
 
         for idx in 0..5u32 {
-            let private_key = lamport.generate_private_key(
-                master_secret,
-                hash_type,
-                256,
-                idx,
-            )
-            .unwrap();
+            let private_key = lamport
+                .generate_private_key(master_secret, hash_type, 256, idx)
+                .unwrap();
 
             // "Save to file" (serialize to string)
             let serialized = serde_json::to_string(&private_key).unwrap();
@@ -2921,7 +2913,10 @@ mod tests {
             assert_eq!(loaded_key.imported(), false);
         }
 
-        println!("Successfully persisted and loaded {} keys", key_storage.len());
+        println!(
+            "Successfully persisted and loaded {} keys",
+            key_storage.len()
+        );
     }
 
     #[test]
@@ -2938,17 +2933,14 @@ mod tests {
 
         for hash_type in hash_types {
             let message_bit_length = hash_type.hash_size() * 8;
-            let private_key = lamport.generate_private_key(
-                master_secret,
-                hash_type,
-                message_bit_length,
-                0,
-            )
-            .unwrap();
+            let private_key = lamport
+                .generate_private_key(master_secret, hash_type, message_bit_length, 0)
+                .unwrap();
 
             // JSON serialization
             let json_serialized = serde_json::to_string(&private_key).unwrap();
-            let json_deserialized: LamportPrivateKey = serde_json::from_str(&json_serialized).unwrap();
+            let json_deserialized: LamportPrivateKey =
+                serde_json::from_str(&json_serialized).unwrap();
             assert_eq!(json_deserialized.hash_type(), hash_type);
             assert_eq!(json_deserialized.to_bytes(), private_key.to_bytes());
             assert_eq!(json_deserialized.derivation_index(), Some(0));

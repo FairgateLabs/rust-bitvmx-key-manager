@@ -21,7 +21,9 @@ use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
     key_type::BitcoinKeyType,
-    lamport::{Lamport, LamportMessage, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType},
+    lamport::{
+        Lamport, LamportMessage, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType,
+    },
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
@@ -29,7 +31,8 @@ use crate::{
     },
     rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
-        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
+        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
+        WinternitzType,
     },
 };
 
@@ -7049,7 +7052,8 @@ mod tests {
                     LamportType::SHA256,
                 )?;
 
-                let signature = key_manager.sign_lamport_message_by_pubkey(bit_value, &public_key)?;
+                let signature =
+                    key_manager.sign_lamport_message_by_pubkey(bit_value, &public_key)?;
 
                 assert_eq!(
                     signature.message_bit_length(),
@@ -7953,8 +7957,7 @@ mod tests {
         //
         // The byte-based method, (using message_bytes)  is ONLY for:
         // - Message lengths that are exact multiples of 8 bits (e.g., 8, 16, 24, 32, 256 bits)
-        let result =
-            key_manager2.sign_lamport_message_by_pubkey(&message_bytes, &public_key2);
+        let result = key_manager2.sign_lamport_message_by_pubkey(&message_bytes, &public_key2);
 
         // Assert that we get the expected MessageLengthMismatch error
         assert!(

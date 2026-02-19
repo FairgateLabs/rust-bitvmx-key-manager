@@ -1603,7 +1603,7 @@ impl KeyManager {
         }
 
         let lamport = Lamport::new();
-        let sig = lamport.sign_message_bytes(message_bytes, &private_key)?;
+        let sig = lamport.sign_message(message_bytes, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(sig)
@@ -1643,7 +1643,7 @@ impl KeyManager {
             }
         }
 
-        let signature = lamport.sign_message_bytes(message_bytes, &private_key)?;
+        let signature = lamport.sign_message(message_bytes, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
@@ -1713,7 +1713,7 @@ impl KeyManager {
         }
 
         let lamport = Lamport::new();
-        let sig = lamport.sign_message_bit(message_bit, &private_key)?;
+        let sig = lamport.sign_message(message_bit, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(sig)
@@ -1753,7 +1753,7 @@ impl KeyManager {
             }
         }
 
-        let signature = lamport.sign_message_bit(message_bit, &private_key)?;
+        let signature = lamport.sign_message(message_bit, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(signature)

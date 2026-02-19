@@ -1076,10 +1076,15 @@ impl Lamport {
         Ok(private_key)
     }
 
-    /// Sign a message using a Lamport private key
+    /// Sign a message using a Lamport private key.
+    ///
+    /// Accepts any message type that implements [`LamportMessage`]:
+    /// - `bool` — sign a single-bit message
+    /// - `&[bool]` / `&Vec<bool>` / `&[bool; N]` — sign a multi-bit message
+    /// - `&[u8]` / `&Vec<u8>` / `&[u8; N]` — sign a byte message (converted to bits internally)
     ///
     /// # Arguments
-    /// * `message_bits` - The message to sign as a vector of bits (boolean array 0=false, 1=true)
+    /// * `message` - The message to sign
     /// * `private_key` - The private key to use for signing
     ///
     /// # Returns
@@ -1088,11 +1093,13 @@ impl Lamport {
     /// # Security Critical
     /// After calling this function, the private key MUST be marked as used and never reused.
     /// Reusing a Lamport private key allows attackers to forge signatures.
-    pub fn sign_message(
+    pub fn sign_message<M: LamportMessage>(
         &self,
-        message_bits: &[bool],
+        message: M,
         private_key: &LamportPrivateKey,
     ) -> Result<LamportSignature, LamportError> {
+        let message_bits = message.into_message_bits();
+
         if message_bits.len() != private_key.message_bit_length() {
             return Err(LamportError::MessageLengthMismatch(
                 message_bits.len(),
@@ -1114,54 +1121,6 @@ impl Lamport {
         }
 
         Ok(signature)
-    }
-
-    /// Sign a message from bytes using a Lamport private key
-    ///
-    /// This is a convenience wrapper around `sign_message` that converts bytes to bits.
-    /// For most use cases (e.g., signing SHA256 digests), this is the preferred method.
-    ///
-    /// # Arguments
-    /// * `message_bytes` - The message to sign as bytes
-    /// * `private_key` - The private key to use for signing
-    ///
-    /// # Returns
-    /// The signature containing the revealed private key fragments
-    ///
-    /// # Security Critical
-    /// After calling this function, the private key MUST be marked as used and never reused.
-    /// Reusing a Lamport private key allows attackers to forge signatures.
-    pub fn sign_message_bytes(
-        &self,
-        message_bytes: &[u8],
-        private_key: &LamportPrivateKey,
-    ) -> Result<LamportSignature, LamportError> {
-        let message_bits = bytes_to_bits(message_bytes, 0);
-        self.sign_message(&message_bits, private_key)
-    }
-
-    /// Sign a single bit using a Lamport private key
-    ///
-    /// This is a convenience wrapper around `sign_message` for signing individual bits.
-    /// Commonly used for garbled circuits where wire labels need to be signed bit by bit.
-    ///
-    /// # Arguments
-    /// * `message_bit` - The single bit to sign - bool representing a bit false = 0, true = 1
-    /// * `private_key` - The private key to use for signing (must have message_bit_length = 1)
-    ///
-    /// # Returns
-    /// The signature containing the revealed private key fragment
-    ///
-    /// # Security Critical
-    /// After calling this function, the private key MUST be marked as used and never reused.
-    /// Reusing a Lamport private key allows attackers to forge signatures.
-    pub fn sign_message_bit(
-        &self,
-        message_bit: bool, // bool representing a bit false = 0, true = 1
-        private_key: &LamportPrivateKey,
-    ) -> Result<LamportSignature, LamportError> {
-        let message_bits = [message_bit];
-        self.sign_message(&message_bits, private_key)
     }
 
     /// Verify a Lamport signature.
@@ -1693,7 +1652,7 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         let is_valid = lamport
@@ -1725,7 +1684,7 @@ mod tests {
 
         // Sign with bytes method
         let sig_bytes = lamport
-            .sign_message_bytes(message_bytes, &private_key)
+            .sign_message(message_bytes, &private_key)
             .unwrap();
 
         // Verify bytes signature with verify_signature (bytes)
@@ -1761,7 +1720,7 @@ mod tests {
             let public_key = private_key.public_key().unwrap();
 
             let signature = lamport
-                .sign_message_bytes(&message_bytes, &private_key)
+                .sign_message(&message_bytes, &private_key)
                 .unwrap();
 
             let is_valid = lamport
@@ -1785,7 +1744,7 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         // Original message should verify
@@ -1819,7 +1778,7 @@ mod tests {
         let public_key_bit0 = private_key_bit0.public_key().unwrap();
 
         // Test signing bit value 0
-        let signature_0 = lamport.sign_message_bit(false, &private_key_bit0).unwrap();
+        let signature_0 = lamport.sign_message(false, &private_key_bit0).unwrap();
         assert!(lamport
             .verify_signature(false, &signature_0, &public_key_bit0)
             .unwrap());
@@ -1834,7 +1793,7 @@ mod tests {
         let public_key_bit1 = private_key_bit1.public_key().unwrap();
 
         // Test signing bit value 1
-        let signature_1 = lamport.sign_message_bit(true, &private_key_bit1).unwrap();
+        let signature_1 = lamport.sign_message(true, &private_key_bit1).unwrap();
         assert!(lamport
             .verify_signature(true, &signature_1, &public_key_bit1)
             .unwrap());
@@ -1854,7 +1813,7 @@ mod tests {
         let public_key = private_key.public_key().unwrap();
 
         // Sign using bit method
-        let sig_bit = lamport.sign_message_bit(true, &private_key).unwrap();
+        let sig_bit = lamport.sign_message(true, &private_key).unwrap();
 
         // Verify using array method
         let message_bits = [true];
@@ -1892,7 +1851,7 @@ mod tests {
         // Sign each wire value
         let mut signatures = Vec::new();
         for (i, &wire_value) in wire_values.iter().enumerate() {
-            let sig = lamport.sign_message_bit(wire_value, &keys[i]).unwrap();
+            let sig = lamport.sign_message(wire_value, &keys[i]).unwrap();
             signatures.push(sig);
         }
 
@@ -1927,7 +1886,7 @@ mod tests {
 
         let message_bytes = [0x42u8; 20]; // Sign a 20-byte message
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         assert!(lamport
@@ -1957,7 +1916,7 @@ mod tests {
 
         let message_bytes = [0xAAu8; 32]; // Sign a 32-byte message
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         assert!(lamport
@@ -2193,7 +2152,7 @@ mod tests {
 
         let message_bytes = [0x42u8; 16]; // 128 bits
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         let bytes = signature.to_bytes();
@@ -2259,7 +2218,7 @@ mod tests {
 
         let message_bytes = [0x42u8; 2]; // 16 bits
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         let result = signature.to_array_hashes();
@@ -2293,7 +2252,7 @@ mod tests {
         // Test signature to_hashes
         let message_bytes = [0x42u8; 1];
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
         let sig_hashes = signature.to_hashes();
         assert_eq!(sig_hashes.len(), message_bit_length);
@@ -2369,7 +2328,7 @@ mod tests {
             .unwrap();
         let message_bytes = [0x42u8; 16];
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key_sha256)
+            .sign_message(&message_bytes, &private_key_sha256)
             .unwrap();
 
         // Try to verify with a HASH160 public key (different hash type)
@@ -2447,7 +2406,7 @@ mod tests {
 
         let message_bytes = [0x42u8; 8];
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
 
         assert_eq!(signature.len(), message_bit_length);
@@ -2617,7 +2576,7 @@ mod tests {
         // Sign and verify a large message
         let message_bytes = vec![0x42u8; 128]; // 1024 bits
         let signature = lamport
-            .sign_message_bytes(&message_bytes, &private_key)
+            .sign_message(&message_bytes, &private_key)
             .unwrap();
         assert!(lamport
             .verify_signature(&message_bytes, &signature, &public_key)

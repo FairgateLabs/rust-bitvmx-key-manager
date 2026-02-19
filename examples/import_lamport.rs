@@ -55,8 +55,8 @@ fn import_sign_verify_lamport_example() {
 
     // Verify the signature
     let lamport = Lamport::new();
-    let is_valid = lamport
-        .verify_signature(message_bit, &signature, &lamport_pubkey)
+    let (is_valid, _reconstructed_msg) = lamport
+        .verify_signature(Some(message_bit), &signature, &lamport_pubkey)
         .unwrap();
     println!("(using imported) Is signature valid: {:?}", is_valid);
     assert!(is_valid);

@@ -1127,59 +1127,76 @@ impl Lamport {
 
     /// Verify a Lamport signature.
     ///
-    /// Accepts any message type that implements [`LamportMessage`]:
-    /// - `bool` — verify a single-bit message
-    /// - `&[bool]` / `&Vec<bool>` / `&[bool; N]` — verify a multi-bit message
-    /// - `&[u8]` / `&Vec<u8>` / `&[u8; N]` — verify a byte message (converted to bits internally)
+    /// Accepts an optional message type that implements [`LamportMessage`]:
+    /// - `Some(bool)` — verify a single-bit message
+    /// - `Some(&[bool])` / `Some(&Vec<bool>)` / `Some(&[bool; N])` — verify a multi-bit message
+    /// - `Some(&[u8])` / `Some(&Vec<u8>)` / `Some(&[u8; N])` — verify a byte message (converted to bits internally)
+    /// - `None` — skip message comparison; only reconstruct and return the message bits derived from the signature
     ///
     /// # Arguments
-    /// * `message` - The message that was allegedly signed
+    /// * `message` - The message that was allegedly signed, or `None` to skip comparison
     /// * `signature` - The signature to verify
     /// * `public_key` - The public key to verify against
     ///
     /// # Returns
-    /// `Ok(true)` if the signature is valid, `Ok(false)` otherwise
+    /// `Ok((true, Some(bits)))` if the signature is valid, where `bits` is the reconstructed message bits.
+    /// `Ok((false, None))` if any revealed key does not hash to a valid public key entry.
+    /// When `message` is `None`, the signature is validated structurally (each revealed key must hash
+    /// to either the 0 or 1 public key), and the reconstructed message bits are returned without
+    /// comparing against an expected value.
     pub fn verify_signature<M: LamportMessage>(
         &self,
-        message: M,
+        message: Option<M>,
         signature: &LamportSignature,
         public_key: &LamportPublicKey,
-    ) -> Result<bool, LamportError> {
-        let message_bits = message.into_message_bits();
+    ) -> Result<(bool, Option<Vec<bool>>), LamportError> {
 
-        if message_bits.len() != signature.message_bit_length() {
-            return Err(LamportError::MessageLengthMismatch(
-                message_bits.len(),
-                signature.message_bit_length(),
-            ));
-        }
+        // validate only if the message was provided
+        if message.is_some() {
+            let message_bits = message.clone().unwrap().into_message_bits();
 
-        if message_bits.len() != public_key.len() {
-            return Err(LamportError::MessageLengthMismatch(
-                message_bits.len(),
-                public_key.len(),
-            ));
+            if message_bits.len() != signature.message_bit_length() {
+                return Err(LamportError::MessageLengthMismatch(
+                    message_bits.len(),
+                    signature.message_bit_length(),
+                ));
+            }
+
+            if message_bits.len() != public_key.len() {
+                return Err(LamportError::MessageLengthMismatch(
+                    message_bits.len(),
+                    public_key.len(),
+                ));
+            }
         }
 
         let hash_type = public_key.hash_type();
 
-        // For each bit, verify the revealed key hashes to the correct public key
-        for (i, &bit) in message_bits.iter().enumerate() {
+        let mut reconstructed_message: Vec<bool> = Vec::with_capacity(public_key.len());
+        // For each signature revealed key, compare revealed key hashes to the correct public key reconstructing the message
+        for i in 0..public_key.len() {
             let revealed_key = signature.revealed_key_at(i)?;
             let hash_of_revealed = hash_type.hash(&revealed_key.to_bytes());
 
-            let expected_public_key = if bit {
-                public_key.public_key_1_at(i)?
+            if hash_of_revealed == *public_key.public_key_0_at(i)? {
+                // bit is 0
+                reconstructed_message.push(false);
+            } else if hash_of_revealed == *public_key.public_key_1_at(i)? {
+                // bit is 1
+                reconstructed_message.push(true);
             } else {
-                public_key.public_key_0_at(i)?
-            };
-
-            if hash_of_revealed != *expected_public_key {
-                return Ok(false);
+                return Ok((false, None));
             }
         }
 
-        Ok(true)
+        // check only if the message was provided
+        if let Some(m) = message {
+            if reconstructed_message != m.into_message_bits() {
+                return Ok((false, None));
+            }
+        }
+
+        Ok((true, Some(reconstructed_message)))
     }
 
     /// Helper function to generate a hash using HMAC for key derivation
@@ -1527,8 +1544,8 @@ mod tests {
             .sign_message(&message_bits, &private_key_120)
             .unwrap();
 
-        let is_valid = lamport
-            .verify_signature(&message_bits, &signature, &public_key_120)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&message_bits), &signature, &public_key_120)
             .unwrap();
 
         assert!(is_valid);
@@ -1554,8 +1571,8 @@ mod tests {
         let wrong_message_bytes = b"Wrong message!!";
         let wrong_message_bits = bytes_to_bits(wrong_message_bytes, 0);
 
-        let is_valid = lamport
-            .verify_signature(&wrong_message_bits, &signature, &public_key)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&wrong_message_bits), &signature, &public_key)
             .unwrap();
 
         assert!(!is_valid);
@@ -1632,8 +1649,8 @@ mod tests {
             .sign_message(&message_bits, &private_key_120)
             .unwrap();
 
-        let is_valid = lamport
-            .verify_signature(&message_bits, &signature, &public_key_120)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&message_bits), &signature, &public_key_120)
             .unwrap();
 
         assert!(is_valid);
@@ -1655,16 +1672,16 @@ mod tests {
 
         let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
-        let is_valid = lamport
-            .verify_signature(&message_bytes, &signature, &public_key)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&message_bytes), &signature, &public_key)
             .unwrap();
 
         assert!(is_valid);
 
         // Verify that wrong message fails
         let wrong_message = [1u8; 32];
-        let is_valid = lamport
-            .verify_signature(&wrong_message, &signature, &public_key)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&wrong_message), &signature, &public_key)
             .unwrap();
 
         assert!(!is_valid);
@@ -1687,14 +1704,16 @@ mod tests {
 
         // Verify bytes signature with verify_signature (bytes)
         assert!(lamport
-            .verify_signature(message_bytes, &sig_bytes, &public_key)
-            .unwrap());
+            .verify_signature(Some(message_bytes), &sig_bytes, &public_key)
+            .unwrap()
+            .0);
 
         // Verify bytes signature with verify_signature (bits) — should also work
         let message_bits = bytes_to_bits(message_bytes, 0);
         assert!(lamport
-            .verify_signature(&message_bits, &sig_bytes, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bits), &sig_bytes, &public_key)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -1719,8 +1738,8 @@ mod tests {
 
             let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
-            let is_valid = lamport
-                .verify_signature(&message_bytes, &signature, &public_key)
+            let (is_valid, _) = lamport
+                .verify_signature(Some(&message_bytes), &signature, &public_key)
                 .unwrap();
 
             assert!(is_valid, "Failed for byte_length={}", byte_length);
@@ -1743,21 +1762,24 @@ mod tests {
 
         // Original message should verify
         assert!(lamport
-            .verify_signature(&message_bytes, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bytes), &signature, &public_key)
+            .unwrap()
+            .0);
 
         // Tampered message (single bit flip) should fail
         let mut tampered_message = message_bytes;
         tampered_message[0] = 0x43; // Change one byte
         assert!(!lamport
-            .verify_signature(&tampered_message, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&tampered_message), &signature, &public_key)
+            .unwrap()
+            .0);
 
         // Completely different message should fail
         let different_message = [0xFFu8; 32];
         assert!(!lamport
-            .verify_signature(&different_message, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&different_message), &signature, &public_key)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -1774,11 +1796,13 @@ mod tests {
         // Test signing bit value 0
         let signature_0 = lamport.sign_message(false, &private_key_bit0).unwrap();
         assert!(lamport
-            .verify_signature(false, &signature_0, &public_key_bit0)
-            .unwrap());
+            .verify_signature(Some(false), &signature_0, &public_key_bit0)
+            .unwrap()
+            .0);
         assert!(!lamport
-            .verify_signature(true, &signature_0, &public_key_bit0)
-            .unwrap());
+            .verify_signature(Some(true), &signature_0, &public_key_bit0)
+            .unwrap()
+            .0);
 
         // Generate another key for signing bit value 1
         let private_key_bit1 = lamport
@@ -1789,11 +1813,13 @@ mod tests {
         // Test signing bit value 1
         let signature_1 = lamport.sign_message(true, &private_key_bit1).unwrap();
         assert!(lamport
-            .verify_signature(true, &signature_1, &public_key_bit1)
-            .unwrap());
+            .verify_signature(Some(true), &signature_1, &public_key_bit1)
+            .unwrap()
+            .0);
         assert!(!lamport
-            .verify_signature(false, &signature_1, &public_key_bit1)
-            .unwrap());
+            .verify_signature(Some(false), &signature_1, &public_key_bit1)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -1812,13 +1838,15 @@ mod tests {
         // Verify using array method
         let message_bits = [true];
         assert!(lamport
-            .verify_signature(&message_bits, &sig_bit, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bits), &sig_bit, &public_key)
+            .unwrap()
+            .0);
 
         // Verify using verify_signature with bool
         assert!(lamport
-            .verify_signature(true, &sig_bit, &public_key)
-            .unwrap());
+            .verify_signature(Some(true), &sig_bit, &public_key)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -1852,13 +1880,15 @@ mod tests {
         // Verify each wire value
         for (i, &wire_value) in wire_values.iter().enumerate() {
             assert!(lamport
-                .verify_signature(wire_value, &signatures[i], &pubkeys[i])
-                .unwrap());
+                .verify_signature(Some(wire_value), &signatures[i], &pubkeys[i])
+                .unwrap()
+                .0);
 
             // Verify that wrong bit value fails
             assert!(!lamport
-                .verify_signature(!wire_value, &signatures[i], &pubkeys[i])
-                .unwrap());
+                .verify_signature(Some(!wire_value), &signatures[i], &pubkeys[i])
+                .unwrap()
+                .0);
         }
     }
 
@@ -1882,14 +1912,16 @@ mod tests {
         let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         assert!(lamport
-            .verify_signature(&message_bytes, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bytes), &signature, &public_key)
+            .unwrap()
+            .0);
 
         // Test with wrong message
         let wrong_message = [0x43u8; 20];
         assert!(!lamport
-            .verify_signature(&wrong_message, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&wrong_message), &signature, &public_key)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -1910,14 +1942,16 @@ mod tests {
         let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
 
         assert!(lamport
-            .verify_signature(&message_bytes, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bytes), &signature, &public_key)
+            .unwrap()
+            .0);
 
         // Test with wrong message
         let wrong_message = [0xBBu8; 32];
         assert!(!lamport
-            .verify_signature(&wrong_message, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&wrong_message), &signature, &public_key)
+            .unwrap()
+            .0);
     }
 
     #[test]
@@ -2322,8 +2356,8 @@ mod tests {
         let public_key_hash160 = private_key_hash160.public_key().unwrap();
 
         // This should fail because hash types don't match
-        let is_valid = lamport
-            .verify_signature(&message_bytes, &signature, &public_key_hash160)
+        let (is_valid, _) = lamport
+            .verify_signature(Some(&message_bytes), &signature, &public_key_hash160)
             .unwrap();
         assert!(!is_valid);
     }
@@ -2575,8 +2609,9 @@ mod tests {
         let message_bytes = vec![0x42u8; 128]; // 1024 bits
         let signature = lamport.sign_message(&message_bytes, &private_key).unwrap();
         assert!(lamport
-            .verify_signature(&message_bytes, &signature, &public_key)
-            .unwrap());
+            .verify_signature(Some(&message_bytes), &signature, &public_key)
+            .unwrap()
+            .0);
     }
 
     // ========== DoS Protection Tests ==========

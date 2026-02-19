@@ -7234,7 +7234,7 @@ mod tests {
 
             // Verify the signature
             assert!(
-                lamport.verify_signature_bytes(&message_bytes, &signature, &public_key)?,
+                lamport.verify_signature(&message_bytes, &signature, &public_key)?,
                 "Byte signature verification should succeed"
             );
 
@@ -7278,7 +7278,7 @@ mod tests {
 
                 // Verify the signature
                 assert!(
-                    lamport.verify_signature_bit(bit_value, &signature, &public_key)?,
+                    lamport.verify_signature(bit_value, &signature, &public_key)?,
                     "Single bit signature verification should succeed for bit={}",
                     bit_value
                 );
@@ -7474,7 +7474,7 @@ mod tests {
             )?;
 
             // Verify signature
-            assert!(lamport.verify_signature_bytes(&message_bytes, &signature, &public_keys[0])?);
+            assert!(lamport.verify_signature(&message_bytes, &signature, &public_keys[0])?);
 
             Ok(())
         })
@@ -7491,12 +7491,12 @@ mod tests {
             // Sign bit 0 using index 0
             let signature_0 =
                 key_manager.sign_lamport_bit_by_index(false, LamportType::SHA256, 0)?;
-            assert!(lamport.verify_signature_bit(false, &signature_0, &public_keys[0])?);
+            assert!(lamport.verify_signature(false, &signature_0, &public_keys[0])?);
 
             // Sign bit 1 using index 1
             let signature_1 =
                 key_manager.sign_lamport_bit_by_index(true, LamportType::SHA256, 1)?;
-            assert!(lamport.verify_signature_bit(true, &signature_1, &public_keys[1])?);
+            assert!(lamport.verify_signature(true, &signature_1, &public_keys[1])?);
 
             Ok(())
         })
@@ -7867,7 +7867,7 @@ mod tests {
                 )?;
 
                 assert!(
-                    lamport.verify_signature_bytes(&message_bytes, &signature, &public_key)?,
+                    lamport.verify_signature(&message_bytes, &signature, &public_key)?,
                     "Byte size {} should work correctly",
                     byte_size
                 );
@@ -7907,7 +7907,7 @@ mod tests {
             // Verify all wire signatures
             for i in 0..wire_count {
                 assert!(
-                    lamport.verify_signature_bit(
+                    lamport.verify_signature(
                         wire_values[i as usize],
                         &signatures[i as usize],
                         &wire_keys[i as usize]
@@ -7918,7 +7918,7 @@ mod tests {
 
                 // Verify that wrong bit value fails
                 assert!(
-                    !lamport.verify_signature_bit(
+                    !lamport.verify_signature(
                         !wire_values[i as usize],
                         &signatures[i as usize],
                         &wire_keys[i as usize]

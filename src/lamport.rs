@@ -383,12 +383,12 @@ impl LamportPublicKey {
         extra_data: Option<ExtraData>,
     ) -> Result<Self, LamportError> {
         let hash_size = hash_type.hash_size();
-        let expected_length = message_bit_length * hash_size * 2;
+        let expected_length = 2 * message_bit_length * hash_size;
 
         if bytes_0s_then_1s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_0s_then_1s.len(),
-                message_bit_length * hash_size * 2,
+                expected_length,
             ));
         }
 
@@ -423,14 +423,14 @@ impl LamportPublicKey {
         let expected_length = message_bit_length * hash_size;
 
         if bytes_0s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_0s.len(),
                 expected_length,
             ));
         }
 
         if bytes_1s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_1s.len(),
                 expected_length,
             ));
@@ -615,19 +615,12 @@ impl LamportPrivateKey {
     // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
     // we aware this is exporting only the keys without other attributes
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let (bytes_0s, bytes_1s) = self.to_bytes_splitted();
 
-        // Serialize 0s
-        for hash in self.private_key_0s.iter() {
-            bytes.extend_from_slice(&hash.hash);
-        }
-
-        // Serialize 1s
-        for hash in self.private_key_1s.iter() {
-            bytes.extend_from_slice(&hash.hash);
-        }
-
-        bytes
+        let mut combined = Vec::with_capacity(bytes_0s.len() + bytes_1s.len());
+        combined.extend_from_slice(&bytes_0s);
+        combined.extend_from_slice(&bytes_1s);
+        combined
     }
 
     // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits
@@ -656,40 +649,29 @@ impl LamportPrivateKey {
         derivation_index: Option<u32>,
         imported: bool,
     ) -> Result<Self, LamportError> {
-        validate_imported_and_derivation_consistency(imported, derivation_index)?;
-        validate_message_bit_length(message_bit_length)?;
-        validate_byte_length(bytes_0s_then_1s.len())?;
-
         let hash_size = hash_type.hash_size();
         let expected_length = 2 * message_bit_length * hash_size;
 
         if bytes_0s_then_1s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_0s_then_1s.len(),
                 expected_length,
             ));
         }
 
-        let mut private_key =
-            LamportPrivateKey::new(hash_type, message_bit_length, derivation_index);
-        private_key.imported = imported;
-
         // Split bytes into 0s and 1s sections
-        let split_point = message_bit_length * hash_size;
+        let split_point = expected_length / 2;
         let bytes_0s = &bytes_0s_then_1s[..split_point];
         let bytes_1s = &bytes_0s_then_1s[split_point..];
 
-        for i in 0..message_bit_length {
-            let start = i * hash_size;
-            let end = start + hash_size;
-
-            let hash_0 = LamportHash::new(bytes_0s[start..end].to_vec());
-            let hash_1 = LamportHash::new(bytes_1s[start..end].to_vec());
-
-            private_key.push_key_pair(hash_0, hash_1)?;
-        }
-
-        Ok(private_key)
+        Self::from_bytes_splitted(
+            bytes_0s,
+            bytes_1s,
+            message_bit_length,
+            hash_type,
+            derivation_index,
+            imported,
+        )
     }
 
     pub fn from_bytes_splitted(
@@ -709,14 +691,14 @@ impl LamportPrivateKey {
         let expected_length = message_bit_length * hash_size;
 
         if bytes_0s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_0s.len(),
                 expected_length,
             ));
         }
 
         if bytes_1s.len() != expected_length {
-            return Err(LamportError::InvalidPublicKeyLength(
+            return Err(LamportError::InvalidKeyLength(
                 bytes_1s.len(),
                 expected_length,
             ));
@@ -2025,7 +2007,7 @@ mod tests {
         let bytes = vec![0u8; 100]; // Wrong length
         let result = LamportPublicKey::from_bytes(&bytes, 256, LamportType::SHA256, false, None);
         assert!(result.is_err());
-        if let Err(LamportError::InvalidPublicKeyLength(got, expected)) = result {
+        if let Err(LamportError::InvalidKeyLength(got, expected)) = result {
             assert_eq!(got, 100);
             assert_eq!(expected, 2 * 256 * 32);
         } else {

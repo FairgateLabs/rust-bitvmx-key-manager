@@ -230,7 +230,7 @@ pub enum LamportError {
     InvalidSignatureLength(usize, usize),
 
     #[error("Public key length {0} bytes does not match expected length {1} bytes")]
-    InvalidPublicKeyLength(usize, usize),
+    InvalidKeyLength(usize, usize),
 
     #[error("Extra data in Lamport Public Key missing {0}")]
     ExtraDataMissing(String),

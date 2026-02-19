@@ -101,7 +101,11 @@ fn sign_verify_lamport_example() {
 
     // Verify the signature
     let (is_valid_bytes, _reconstructed_msg_bytes) = lamport
-        .verify_signature(Some(&message_bytes), &signature_bytes, &lamport_pubkey_bytes)
+        .verify_signature(
+            Some(&message_bytes),
+            &signature_bytes,
+            &lamport_pubkey_bytes,
+        )
         .unwrap();
     println!("Is byte signature valid: {:?}", is_valid_bytes);
     assert!(is_valid_bytes);
@@ -131,7 +135,11 @@ fn sign_verify_lamport_example() {
 
     // Verify the signature
     let (is_valid_string, _reconstructed_msg_string) = lamport
-        .verify_signature(Some(&message_digest), &signature_string, &lamport_pubkey_string)
+        .verify_signature(
+            Some(&message_digest),
+            &signature_string,
+            &lamport_pubkey_string,
+        )
         .unwrap();
     println!("Is string message signature valid: {:?}", is_valid_string);
     assert!(is_valid_string);

@@ -6961,8 +6961,16 @@ mod tests {
                     .sign_lamport_message_by_pubkey(&message_bits, &imported_public_key)?;
 
                 // Verify the signature
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &imported_public_key)?;
-                assert!(is_valid, "Signature verification should succeed for {:?}", hash_type);
+                let (is_valid, reconstructed_bits) = lamport.verify_signature(
+                    Some(&message_bits),
+                    &signature,
+                    &imported_public_key,
+                )?;
+                assert!(
+                    is_valid,
+                    "Signature verification should succeed for {:?}",
+                    hash_type
+                );
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
                 // Verify signature properties
@@ -7015,9 +7023,13 @@ mod tests {
                 key_manager.sign_lamport_message_by_pubkey(&message_bytes, &public_key)?;
 
             // Verify the signature
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bytes), &signature, &public_key)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bytes), &signature, &public_key)?;
             assert!(is_valid, "Byte signature verification should succeed");
-            assert_eq!(reconstructed_bits.unwrap(), crate::lamport::bytes_to_bits(&message_bytes, 0));
+            assert_eq!(
+                reconstructed_bits.unwrap(),
+                crate::lamport::bytes_to_bits(&message_bytes, 0)
+            );
 
             Ok(())
         })
@@ -7059,8 +7071,13 @@ mod tests {
                 );
 
                 // Verify the signature
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(bit_value), &signature, &public_key)?;
-                assert!(is_valid, "Single bit signature verification should succeed for bit={}", bit_value);
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(bit_value), &signature, &public_key)?;
+                assert!(
+                    is_valid,
+                    "Single bit signature verification should succeed for bit={}",
+                    bit_value
+                );
                 assert_eq!(reconstructed_bits.unwrap(), vec![bit_value]);
             }
 
@@ -7147,8 +7164,12 @@ mod tests {
                 let signature =
                     key_manager.sign_lamport_message_by_pubkey(&message_bits, public_key)?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, public_key)?;
-                assert!(is_valid, "All stored keys should be retrievable and functional");
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bits), &signature, public_key)?;
+                assert!(
+                    is_valid,
+                    "All stored keys should be retrievable and functional"
+                );
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
 
@@ -7175,7 +7196,8 @@ mod tests {
             let signature =
                 key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
 
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7207,7 +7229,8 @@ mod tests {
                 let signature =
                     key_manager.sign_lamport_message_by_pubkey(&message_bits, public_key)?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, public_key)?;
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bits), &signature, public_key)?;
                 assert!(is_valid, "Key {} should sign and verify correctly", i);
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
@@ -7230,7 +7253,8 @@ mod tests {
                 key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 1)?;
 
             // Verify signature
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &public_keys[1])?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &signature, &public_keys[1])?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7255,9 +7279,13 @@ mod tests {
             )?;
 
             // Verify signature
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bytes), &signature, &public_keys[0])?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bytes), &signature, &public_keys[0])?;
             assert!(is_valid);
-            assert_eq!(reconstructed_bits.unwrap(), crate::lamport::bytes_to_bits(&message_bytes, 0));
+            assert_eq!(
+                reconstructed_bits.unwrap(),
+                crate::lamport::bytes_to_bits(&message_bytes, 0)
+            );
 
             Ok(())
         })
@@ -7274,14 +7302,16 @@ mod tests {
             // Sign bit 0 using index 0
             let signature_0 =
                 key_manager.sign_lamport_message_by_index(false, LamportType::SHA256, 0)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(false), &signature_0, &public_keys[0])?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(false), &signature_0, &public_keys[0])?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), vec![false]);
 
             // Sign bit 1 using index 1
             let signature_1 =
                 key_manager.sign_lamport_message_by_index(true, LamportType::SHA256, 1)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(true), &signature_1, &public_keys[1])?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(true), &signature_1, &public_keys[1])?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), vec![true]);
 
@@ -7312,7 +7342,8 @@ mod tests {
                 let signature =
                     key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
                 assert!(is_valid, "Hash type {:?} should work correctly", hash_type);
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
@@ -7475,7 +7506,8 @@ mod tests {
                 let signature =
                     key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bits), &signature, &public_key)?;
                 assert!(is_valid, "Bit length {} should work correctly", bit_length);
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
@@ -7526,17 +7558,20 @@ mod tests {
             let message_bits = vec![true; 256];
 
             let sig1 = key_manager.sign_lamport_message_by_pubkey(&message_bits, &derived_key)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig1, &derived_key)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig1, &derived_key)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
             let sig2 = key_manager.sign_lamport_message_by_pubkey(&message_bits, &imported_key)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig2, &imported_key)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig2, &imported_key)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
             let sig3 = key_manager.sign_lamport_message_by_pubkey(&message_bits, &derived_key2)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig3, &derived_key2)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig3, &derived_key2)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7625,7 +7660,8 @@ mod tests {
 
             // All signatures should verify with their respective keys
             for (i, sig) in signatures.iter().enumerate() {
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), sig, &keys[i])?;
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bits), sig, &keys[i])?;
                 assert!(is_valid, "Signature {} should verify", i);
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
@@ -7653,9 +7689,13 @@ mod tests {
                     idx as u32,
                 )?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bytes), &signature, &public_key)?;
+                let (is_valid, reconstructed_bits) =
+                    lamport.verify_signature(Some(&message_bytes), &signature, &public_key)?;
                 assert!(is_valid, "Byte size {} should work correctly", byte_size);
-                assert_eq!(reconstructed_bits.unwrap(), crate::lamport::bytes_to_bits(&message_bytes, 0));
+                assert_eq!(
+                    reconstructed_bits.unwrap(),
+                    crate::lamport::bytes_to_bits(&message_bytes, 0)
+                );
             }
 
             Ok(())
@@ -7694,7 +7734,7 @@ mod tests {
                 let (is_valid, reconstructed_bits) = lamport.verify_signature(
                     Some(wire_values[i as usize]),
                     &signatures[i as usize],
-                    &wire_keys[i as usize]
+                    &wire_keys[i as usize],
                 )?;
                 assert!(is_valid, "Wire {} signature should verify", i);
                 assert_eq!(reconstructed_bits.unwrap(), vec![wire_values[i as usize]]);
@@ -7703,7 +7743,7 @@ mod tests {
                 let (is_valid, _) = lamport.verify_signature(
                     Some(!wire_values[i as usize]),
                     &signatures[i as usize],
-                    &wire_keys[i as usize]
+                    &wire_keys[i as usize],
                 )?;
                 assert!(!is_valid, "Wire {} should fail with wrong bit value", i);
             }
@@ -7732,7 +7772,8 @@ mod tests {
 
             let sig1 =
                 key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig1, &key_sha256)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig1, &key_sha256)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7741,7 +7782,8 @@ mod tests {
                 LamportType::RIPEMD160,
                 1,
             )?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig2, &key_ripemd160)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig2, &key_ripemd160)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7750,7 +7792,8 @@ mod tests {
                 LamportType::HASH160,
                 2,
             )?;
-            let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &sig3, &key_hash160)?;
+            let (is_valid, reconstructed_bits) =
+                lamport.verify_signature(Some(&message_bits), &sig3, &key_hash160)?;
             assert!(is_valid);
             assert_eq!(reconstructed_bits.unwrap(), message_bits);
 
@@ -7870,7 +7913,11 @@ mod tests {
                     idx,
                 )?;
 
-                let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature, &keys[idx as usize])?;
+                let (is_valid, reconstructed_bits) = lamport.verify_signature(
+                    Some(&message_bits),
+                    &signature,
+                    &keys[idx as usize],
+                )?;
                 assert!(is_valid, "Key at index {} should work correctly", idx);
                 assert_eq!(reconstructed_bits.unwrap(), message_bits);
             }
@@ -7922,7 +7969,8 @@ mod tests {
         let signature1 = key_manager1.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
 
         // Verify the first signature
-        let (is_valid, reconstructed_bits) = lamport.verify_signature(Some(&message_bits), &signature1, &public_key)?;
+        let (is_valid, reconstructed_bits) =
+            lamport.verify_signature(Some(&message_bits), &signature1, &public_key)?;
         assert!(is_valid, "Signature should verify with bit-based method");
         assert_eq!(reconstructed_bits.unwrap(), message_bits);
 

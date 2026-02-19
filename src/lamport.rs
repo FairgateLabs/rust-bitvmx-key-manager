@@ -937,7 +937,7 @@ fn validate_imported_and_derivation_consistency(
 /// - `bool` — single-bit message
 /// - `&[bool]` / `&Vec<bool>` / `&[bool; N]` — multi-bit messages
 /// - `&[u8]` / `&Vec<u8>` / `&[u8; N]` — byte messages (bits derived MSB-first)
-pub trait LamportMessage {
+pub trait LamportMessage: Clone {
     fn into_message_bits(self) -> Vec<bool>;
 }
 

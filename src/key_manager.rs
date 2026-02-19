@@ -21,7 +21,7 @@ use crate::{
     errors::KeyManagerError,
     key_store::KeyStore,
     key_type::BitcoinKeyType,
-    lamport::{Lamport, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType},
+    lamport::{Lamport, LamportMessage, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType},
     musig2::{
         errors::Musig2SignerError,
         musig::{MuSig2Signer, MuSig2SignerApi},
@@ -29,8 +29,7 @@ use crate::{
     },
     rsa::{CryptoRng, OsRng, RSAKeyPair, Signature},
     winternitz::{
-        self, checksum_length, to_checksummed_message, WinternitzPublicKey, WinternitzSignature,
-        WinternitzType,
+        self, WinternitzPublicKey, WinternitzSignature, WinternitzType, checksum_length, to_checksummed_message
     },
 };
 
@@ -1429,8 +1428,13 @@ impl KeyManager {
 
     /// Sign a message
     ///
+    /// Accepts any message type that implements [`LamportMessage`]:
+    /// - `bool` — sign a single-bit message
+    /// - `&[bool]` / `&Vec<bool>` / `&[bool; N]` — sign a multi-bit message
+    /// - `&[u8]` / `&Vec<u8>` / `&[u8; N]` — sign a byte message (converted to bits internally)
+    ///
     /// # Arguments
-    /// * `message_bits` - The message to sign as a vector of bits (boolean array 0=false, 1=true)
+    /// * `message` - The message to sign
     /// * `public_key` - The public key to retrieve the private and use that for signing
     ///
     /// # Returns
@@ -1439,13 +1443,13 @@ impl KeyManager {
     /// # Security Critical
     /// After calling this function, the private key MUST be marked as used and never reused.
     /// Reusing a Lamport private key allows attackers to forge signatures.
-    pub fn sign_lamport_message_by_pubkey(
+    pub fn sign_lamport_message_by_pubkey<M: LamportMessage>(
         &self,
-        message_bits: &[bool],
+        message: M,
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
         if public_key.imported() {
-            self.sign_lamport_message_by_pubkey_imported(message_bits, public_key)
+            self.sign_lamport_message_by_pubkey_imported(message, public_key)
         } else {
             let index = public_key
                 .derivation_index()
@@ -1453,6 +1457,7 @@ impl KeyManager {
 
             // Validate message length matches the public key's expected message bit length
             let expected_bit_length = public_key.message_bit_length()?;
+            let message_bits = message.clone().into_message_bits();
             if message_bits.len() != expected_bit_length {
                 return Err(KeyManagerError::LamportGenerationError(
                     crate::errors::LamportError::MessageLengthMismatch(
@@ -1462,14 +1467,14 @@ impl KeyManager {
                 ));
             }
 
-            self.sign_lamport_message_by_index(message_bits, public_key.hash_type(), index)
+            self.sign_lamport_message_by_index(message, public_key.hash_type(), index)
         }
     }
 
     // private
-    fn sign_lamport_message_by_pubkey_imported(
+    fn sign_lamport_message_by_pubkey_imported<M: LamportMessage>(
         &self,
-        message_bits: &[bool],
+        message: M,
         public_key: &LamportPublicKey,
     ) -> Result<LamportSignature, KeyManagerError> {
         let private_key = self
@@ -1492,7 +1497,7 @@ impl KeyManager {
         }
 
         let lamport = Lamport::new();
-        let sig = lamport.sign_message(message_bits, &private_key)?;
+        let sig = lamport.sign_message(message, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(sig)
@@ -1502,14 +1507,15 @@ impl KeyManager {
     /*  if this method is used directly, its the responsibility of the caller to check that the message bits lenght
         is equal to the one specified in the public key, otherwise we are signing with a virtually extended key
     */
-    fn sign_lamport_message_by_index(
+    fn sign_lamport_message_by_index<M: LamportMessage>(
         &self,
-        message_bits: &[bool],
+        message: M,
         key_type: LamportType,
         index: u32,
     ) -> Result<LamportSignature, KeyManagerError> {
         let master_secret = self.keystore.load_lamport_seed()?;
         let lamport = Lamport::new();
+        let message_bits = message.clone().into_message_bits();
         let private_key =
             lamport.generate_private_key(&*master_secret, key_type, message_bits.len(), index)?;
 
@@ -1528,232 +1534,7 @@ impl KeyManager {
             }
         }
 
-        let signature = lamport.sign_message(message_bits, &private_key)?;
-
-        self.commit_transaction(tx_id)?;
-        Ok(signature)
-    }
-
-    /// Sign a message from bytes
-    ///
-    /// # Arguments
-    /// * `message_bytes` - The message to sign as bytes
-    /// * `public_key` - The public key to retrieve the private and use that for signing
-    ///
-    /// # Returns
-    /// The signature containing the revealed private key fragments
-    ///
-    /// # Security Critical
-    /// After calling this function, the private key MUST be marked as used and never reused.
-    /// Reusing a Lamport private key allows attackers to forge signatures.
-    ///
-    /// Use example: a SHA-256 Lamport usually expects 32-byte message digest (result of the sha 256)
-    /// Also could be used to group 256 garbled circuit wire labels in one signature, where each bit represent a label
-    pub fn sign_lamport_message_bytes_by_pubkey(
-        &self,
-        message_bytes: &[u8],
-        public_key: &LamportPublicKey,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        if public_key.imported() {
-            self.sign_lamport_message_bytes_by_pubkey_imported(message_bytes, public_key)
-        } else {
-            let index = public_key
-                .derivation_index()
-                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-
-            // Validate message length matches the public key's expected message bit length
-            let expected_bit_length = public_key.message_bit_length()?;
-            let message_bit_length = message_bytes.len() * 8;
-            if message_bit_length != expected_bit_length {
-                return Err(KeyManagerError::LamportGenerationError(
-                    crate::errors::LamportError::MessageLengthMismatch(
-                        message_bit_length,
-                        expected_bit_length,
-                    ),
-                ));
-            }
-
-            self.sign_lamport_message_bytes_by_index(message_bytes, public_key.hash_type(), index)
-        }
-    }
-
-    // private
-    fn sign_lamport_message_bytes_by_pubkey_imported(
-        &self,
-        message_bytes: &[u8],
-        public_key: &LamportPublicKey,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        let private_key = self
-            .keystore
-            .load_lamport_imported_key(public_key)?
-            .ok_or(KeyManagerError::LamportKeyNotFound)?;
-
-        let tx_id = self.begin_transaction();
-        // check if index was already used, if its error, if not mark and save
-        #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_used_imported(public_key, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
-        }
-
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message(message_bytes, &private_key)?;
-
-        self.commit_transaction(tx_id)?;
-        Ok(sig)
-    }
-
-    // For one-time lamport keys
-    /*  if this method is used directly, its the responsibility of the caller to check that the message bits lenght
-        is equal to the one specified in the public key, otherwise we are signing with a virtually extended key
-    */
-    fn sign_lamport_message_bytes_by_index(
-        &self,
-        message_bytes: &[u8],
-        key_type: LamportType,
-        index: u32,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        let master_secret = self.keystore.load_lamport_seed()?;
-        let lamport = Lamport::new();
-        let private_key = lamport.generate_private_key(
-            &*master_secret,
-            key_type,
-            message_bytes.len() * 8, // Convert bytes to bits
-            index,
-        )?;
-
-        let tx_id = self.begin_transaction();
-
-        // check if index was already used, if its error, if not mark and save
-        #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_index_used_derivated(index, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
-        }
-
-        let signature = lamport.sign_message(message_bytes, &private_key)?;
-
-        self.commit_transaction(tx_id)?;
-        Ok(signature)
-    }
-
-    /// Sign a single bit
-    ///
-    /// # Arguments
-    /// * `message_bit` - The single bit to sign - bool representing a bit false = 0, true = 1
-    /// * `public_key` - The public key to retrieve the private and use that for signing
-    ///
-    /// # Returns
-    /// The signature containing the revealed private key fragment
-    ///
-    /// # Security Critical
-    /// After calling this function, the private key MUST be marked as used and never reused.
-    /// Reusing a Lamport private key allows attackers to forge signatures.
-    ///
-    /// Example use case: to sign a simple garbled circuit wire label
-    pub fn sign_lamport_bit_by_pubkey(
-        &self,
-        message_bit: bool, // bool representing a bit false = 0, true = 1
-        public_key: &LamportPublicKey,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        if public_key.imported() {
-            self.sign_lamport_bit_by_pubkey_imported(message_bit, public_key)
-        } else {
-            let index = public_key
-                .derivation_index()
-                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-
-            // Validate message length matches the public key's expected message bit length
-            let expected_bit_length = public_key.message_bit_length()?;
-            if expected_bit_length != 1 {
-                return Err(KeyManagerError::LamportGenerationError(
-                    crate::errors::LamportError::MessageLengthMismatch(1, expected_bit_length),
-                ));
-            }
-
-            self.sign_lamport_bit_by_index(message_bit, public_key.hash_type(), index)
-        }
-    }
-
-    // private
-    fn sign_lamport_bit_by_pubkey_imported(
-        &self,
-        message_bit: bool, // bool representing a bit false = 0, true = 1
-        public_key: &LamportPublicKey,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        let private_key = self
-            .keystore
-            .load_lamport_imported_key(public_key)?
-            .ok_or(KeyManagerError::LamportKeyNotFound)?;
-
-        let tx_id = self.begin_transaction();
-        // check if index was already used, if its error, if not mark and save
-        #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_used_imported(public_key, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
-        }
-
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message(message_bit, &private_key)?;
-
-        self.commit_transaction(tx_id)?;
-        Ok(sig)
-    }
-
-    // For one-time lamport keys
-    /*  if this method is used directly, its the responsibility of the caller to check that the message bits lenght
-        is equal to the one specified in the public key, otherwise we are signing with a virtually extended key
-    */
-    fn sign_lamport_bit_by_index(
-        &self,
-        message_bit: bool,
-        key_type: LamportType,
-        index: u32,
-    ) -> Result<LamportSignature, KeyManagerError> {
-        let master_secret = self.keystore.load_lamport_seed()?;
-        let lamport = Lamport::new();
-        let private_key = lamport.generate_private_key(
-            &*master_secret,
-            key_type,
-            1, // Single bit
-            index,
-        )?;
-
-        let tx_id = self.begin_transaction();
-
-        // check if index was already used, if its error, if not mark and save
-        #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_index_used_derivated(index, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
-        }
-
-        let signature = lamport.sign_message(message_bit, &private_key)?;
+        let signature = lamport.sign_message(message, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
@@ -7230,7 +7011,7 @@ mod tests {
             rng.fill_bytes(&mut message_bytes);
 
             let signature =
-                key_manager.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key)?;
+                key_manager.sign_lamport_message_by_pubkey(&message_bytes, &public_key)?;
 
             // Verify the signature
             assert!(
@@ -7268,7 +7049,7 @@ mod tests {
                     LamportType::SHA256,
                 )?;
 
-                let signature = key_manager.sign_lamport_bit_by_pubkey(bit_value, &public_key)?;
+                let signature = key_manager.sign_lamport_message_by_pubkey(bit_value, &public_key)?;
 
                 assert_eq!(
                     signature.message_bit_length(),
@@ -7467,7 +7248,7 @@ mod tests {
 
             // Sign a 32-byte message using index
             let message_bytes = [0x42u8; 32];
-            let signature = key_manager.sign_lamport_message_bytes_by_index(
+            let signature = key_manager.sign_lamport_message_by_index(
                 &message_bytes,
                 LamportType::SHA256,
                 0,
@@ -7490,12 +7271,12 @@ mod tests {
 
             // Sign bit 0 using index 0
             let signature_0 =
-                key_manager.sign_lamport_bit_by_index(false, LamportType::SHA256, 0)?;
+                key_manager.sign_lamport_message_by_index(false, LamportType::SHA256, 0)?;
             assert!(lamport.verify_signature(false, &signature_0, &public_keys[0])?);
 
             // Sign bit 1 using index 1
             let signature_1 =
-                key_manager.sign_lamport_bit_by_index(true, LamportType::SHA256, 1)?;
+                key_manager.sign_lamport_message_by_index(true, LamportType::SHA256, 1)?;
             assert!(lamport.verify_signature(true, &signature_1, &public_keys[1])?);
 
             Ok(())
@@ -7860,7 +7641,7 @@ mod tests {
                 let public_key = key_manager.next_lamport(bit_length, LamportType::SHA256)?;
 
                 let message_bytes = vec![0x42u8; byte_size];
-                let signature = key_manager.sign_lamport_message_bytes_by_index(
+                let signature = key_manager.sign_lamport_message_by_index(
                     &message_bytes,
                     LamportType::SHA256,
                     idx as u32,
@@ -7896,7 +7677,7 @@ mod tests {
             // Sign each wire value
             let mut signatures = Vec::new();
             for i in 0..wire_count {
-                let sig = key_manager.sign_lamport_bit_by_index(
+                let sig = key_manager.sign_lamport_message_by_index(
                     wire_values[i as usize],
                     LamportType::SHA256,
                     i as u32,
@@ -8170,10 +7951,10 @@ mod tests {
         // For message lengths that are NOT multiples of 8 bits, users MUST use:
         // - sign_lamport_message_by_pubkey (bit-based method) ✓
         //
-        // The byte-based method (sign_lamport_message_bytes_by_pubkey) is ONLY for:
+        // The byte-based method, (using message_bytes)  is ONLY for:
         // - Message lengths that are exact multiples of 8 bits (e.g., 8, 16, 24, 32, 256 bits)
         let result =
-            key_manager2.sign_lamport_message_bytes_by_pubkey(&message_bytes, &public_key2);
+            key_manager2.sign_lamport_message_by_pubkey(&message_bytes, &public_key2);
 
         // Assert that we get the expected MessageLengthMismatch error
         assert!(

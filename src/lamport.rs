@@ -348,19 +348,12 @@ impl LamportPublicKey {
     // returns all bytes for 0s concatenated with bytes for 1s, in the order of the message bits
     // we aware this is exporting only the keys without other attributes
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let (bytes_0s, bytes_1s) = self.to_bytes_splitted();
 
-        // Serialize 0s
-        for hash in self.public_key_0s.iter() {
-            bytes.extend_from_slice(&hash.hash);
-        }
-
-        // Serialize 1s
-        for hash in self.public_key_1s.iter() {
-            bytes.extend_from_slice(&hash.hash);
-        }
-
-        bytes
+        let mut combined = Vec::with_capacity(bytes_0s.len() + bytes_1s.len());
+        combined.extend_from_slice(&bytes_0s);
+        combined.extend_from_slice(&bytes_1s);
+        combined
     }
 
     // returns all bytes for 0s at 1st return param, bytes for 1s at the second, in the order of the message bits

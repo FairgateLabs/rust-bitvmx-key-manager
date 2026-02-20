@@ -724,8 +724,9 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_keypair_index(key_type)?;
+            let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
-                .store_next_keypair_index(key_type, index + 1, tx_id)?;
+                .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 
@@ -757,8 +758,9 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_keypair_index(key_type)?;
+            let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
-                .store_next_keypair_index(key_type, index + 1, tx_id)?;
+                .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 
@@ -889,8 +891,9 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_winternitz_index()?;
+            let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
-                .store_next_winternitz_index(index + 1, tx_id)?;
+                .store_next_winternitz_index(next_index_to_store, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 
@@ -1027,7 +1030,9 @@ impl KeyManager {
             let tx_id = self.begin_transaction();
 
             let index = self.next_lamport_index()?;
-            self.keystore.store_next_lamport_index(index + 1, tx_id)?;
+            let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
+            self.keystore
+                .store_next_lamport_index(next_index_to_store, tx_id)?;
 
             self.commit_transaction(tx_id)?;
 

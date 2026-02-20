@@ -147,6 +147,9 @@ pub enum KeyManagerError {
 
     #[error("Corrupted Lamport index bitmap")]
     CorruptedLamportIndexBitmap,
+
+    #[error("Index overflow: cannot generate more keys")]
+    IndexOverflow,
 }
 
 #[derive(Error, Debug)]

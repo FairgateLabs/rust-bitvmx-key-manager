@@ -2666,7 +2666,7 @@ mod tests {
     fn test_dos_protection_public_key_from_bytes() {
         // Try to deserialize with excessive message_bit_length
         let result = LamportPublicKey::from_bytes(
-            &[0u8; 100],
+            &[0u8; (MAX_MESSAGE_BIT_LENGTH + 1) * 32 * 2], // using sha256 size for the test
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
             false,

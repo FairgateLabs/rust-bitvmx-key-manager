@@ -867,6 +867,15 @@ fn validate_message_bit_length(message_bit_length: usize) -> Result<(), LamportE
     Ok(())
 }
 
+/// Validates that we are 1 index below the overflow threshold for u32
+fn validate_following_derivation_index(derivation_index: u32) -> Result<(), LamportError> {
+    derivation_index
+        .checked_add(1)
+        .ok_or(LamportError::IndexOverflow)?;
+
+    Ok(())
+}
+
 /// Validates that byte length doesn't exceed the maximum to prevent DoS attacks
 fn validate_byte_length(byte_length: usize) -> Result<(), LamportError> {
     if byte_length > MAX_KEY_SIGNATURE_BYTE_LENGTH {
@@ -1010,10 +1019,7 @@ impl Lamport {
         derivation_index: u32,
     ) -> Result<LamportPrivateKey, LamportError> {
         validate_message_bit_length(message_bit_length)?;
-
-        derivation_index
-            .checked_add(1)
-            .ok_or(LamportError::IndexOverflow)?;
+        validate_following_derivation_index(derivation_index)?;
 
         let mut private_key =
             LamportPrivateKey::new(hash_type, message_bit_length, Some(derivation_index));
@@ -3000,5 +3006,22 @@ mod tests {
             assert_eq!(json_deserialized.derivation_index(), Some(0));
             assert_eq!(json_deserialized.message_bit_length(), message_bit_length);
         }
+    }
+
+    #[test]
+    fn test_lamport_derivation_index_correctness() {
+        let lamport = Lamport::new();
+        let master_secret = b"test_master_secret";
+        let message_bit_length = 1024; // Large message
+
+        let derivation_index = 123;
+
+        let private_key = lamport
+            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, derivation_index)
+            .unwrap();
+        let public_key = private_key.public_key().unwrap();
+
+        assert_eq!(private_key.derivation_index(), Some(derivation_index));
+        assert_eq!(public_key.derivation_index(), Some(derivation_index));
     }
 }

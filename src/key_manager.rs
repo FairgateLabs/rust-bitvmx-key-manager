@@ -7299,6 +7299,8 @@ mod tests {
             // Derive keys for single-bit signing
             let public_keys = key_manager.next_multiple_lamport(1, LamportType::SHA256, 2)?;
 
+            assert!(public_keys[0].derivation_index().unwrap() + 1 == public_keys[1].derivation_index().unwrap());
+
             // Sign bit 0 using index 0
             let signature_0 =
                 key_manager.sign_lamport_message_by_index(false, LamportType::SHA256, 0)?;

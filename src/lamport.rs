@@ -2681,7 +2681,7 @@ mod tests {
     fn test_dos_protection_public_key_from_bytes_excessive_bytes() {
         // Create a huge byte array that exceeds MAX_KEY_SIGNATURE_BYTE_LENGTH
         // We don't actually allocate it, just pass the length check
-        let large_vec = vec![0u8; 1000]; // Small allocation for the test
+        let large_vec = vec![0u8; (MAX_MESSAGE_BIT_LENGTH + 1) * 32 * 2]; // using sha256 size for the test
 
         // Try with a message_bit_length that would require more bytes than MAX
         let result = LamportPublicKey::from_bytes(
@@ -2701,7 +2701,7 @@ mod tests {
     fn test_dos_protection_private_key_from_bytes() {
         // Try to deserialize with excessive message_bit_length
         let result = LamportPrivateKey::from_bytes(
-            &[0u8; 100],
+            &[0u8; (MAX_MESSAGE_BIT_LENGTH + 1) * 32 * 2], // using sha256 size for the test
             MAX_MESSAGE_BIT_LENGTH + 1,
             LamportType::SHA256,
             Some(0),
@@ -2714,7 +2714,7 @@ mod tests {
                 assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
                 assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
             }
-            _ => panic!("Expected MessageBitLengthExceedsMax error"),
+            _ => panic!("Expected MessageBitLengthExceedsMax error - got {:?}", result),
         }
     }
 

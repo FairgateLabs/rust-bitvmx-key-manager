@@ -617,7 +617,6 @@ impl Winternitz {
         checksum_size: usize,
         derivation_index: u32,
     ) -> Result<WinternitzPrivateKey, WinternitzError> {
-
         validate_following_derivation_index(derivation_index)?;
 
         let mut private_key =

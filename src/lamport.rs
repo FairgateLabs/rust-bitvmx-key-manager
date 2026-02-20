@@ -2720,7 +2720,10 @@ mod tests {
                 assert_eq!(actual, MAX_MESSAGE_BIT_LENGTH + 1);
                 assert_eq!(max, MAX_MESSAGE_BIT_LENGTH);
             }
-            _ => panic!("Expected MessageBitLengthExceedsMax error - got {:?}", result),
+            _ => panic!(
+                "Expected MessageBitLengthExceedsMax error - got {:?}",
+                result
+            ),
         }
     }
 
@@ -3017,7 +3020,12 @@ mod tests {
         let derivation_index = 123;
 
         let private_key = lamport
-            .generate_private_key(master_secret, LamportType::SHA256, message_bit_length, derivation_index)
+            .generate_private_key(
+                master_secret,
+                LamportType::SHA256,
+                message_bit_length,
+                derivation_index,
+            )
             .unwrap();
         let public_key = private_key.public_key().unwrap();
 

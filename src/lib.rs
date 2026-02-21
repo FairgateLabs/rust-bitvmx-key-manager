@@ -12,6 +12,7 @@ pub mod errors;
 pub mod key_manager;
 pub mod key_store;
 pub mod key_type;
+pub mod lamport;
 pub mod musig2;
 pub mod rsa;
 pub mod tests;

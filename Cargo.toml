@@ -27,6 +27,7 @@ name = "key_manager"
 anyhow = "1.0.97"
 bitcoin = { version = "0.32.6", features = ["std", "rand-std", "serde"] }
 bip39 = "2.1.0"
+blake3 = "1.5"
 clap = { version = "4.5.32", features = ["derive"] }
 config = "0.15.11"
 itertools = "0.14.0"
@@ -62,7 +63,8 @@ name = "winternitz_bench"
 harness = false
 
 [features]
-default = ["transactional", "wots_idx_check"] # transactional is ON by default, strict is OFF
+default = ["transactional", "wots_idx_check", "lamport_idx_check"] # transactional is ON by default, strict is OFF
 wots_idx_check = []
+lamport_idx_check = []
 transactional = []
 strict = []

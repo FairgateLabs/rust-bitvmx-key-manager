@@ -22,6 +22,9 @@ pub enum KeyManagerError {
     #[error("Failed to create new Winternitz key")]
     WinternitzGenerationError(#[from] WinternitzError),
 
+    #[error("Failed to create new Lamport key")]
+    LamportGenerationError(#[from] LamportError),
+
     #[error("Failed to tweak secret key")]
     FailedToTweakKey(#[from] secp256k1::Error),
 
@@ -36,6 +39,9 @@ pub enum KeyManagerError {
 
     #[error("Invalid private key")]
     InvalidPrivateKey,
+
+    #[error("Invalid lamport private key")]
+    InvalidLamportPrivateKey,
 
     #[error("Invalid Mnemonic")]
     InvalidMnemonic,
@@ -67,11 +73,17 @@ pub enum KeyManagerError {
     #[error("Failed to load Next Winternitz index from key store")]
     NextWinternitzIndexNotFound,
 
+    #[error("Failed to load Next Lamport index from key store")]
+    NextLamportIndexNotFound,
+
     #[error("Failed to load Mnemonic passphrase from key store")]
     MnemonicPassphraseNotFound,
 
     #[error("Failed to load Winternitz seed from key store")]
     WinternitzSeedNotFound,
+
+    #[error("Failed to load Lamport seed from key store")]
+    LamportSeedNotFound,
 
     #[error("Failed to load the BIP39 key derivation seed from key store")]
     KeyDerivationSeedNotFound,
@@ -81,6 +93,9 @@ pub enum KeyManagerError {
 
     #[error("Corrupted Winternitz seed")]
     CorruptedWinternitzSeed,
+
+    #[error("Corrupted Lamport seed")]
+    CorruptedLamportSeed,
 
     #[error("Failed to convert data to byte array")]
     CorruptedData,
@@ -93,6 +108,12 @@ pub enum KeyManagerError {
 
     #[error("Rsa key not found")]
     RsaKeyNotFound,
+
+    #[error("Lamport key not found")]
+    LamportKeyNotFound,
+
+    #[error("Lamport key derivation index not found")]
+    LamportKeyDerivationIndexNotFound,
 
     #[error("Invalid RSA key size: {0}")]
     InvalidRSAKeySize(String),
@@ -111,6 +132,24 @@ pub enum KeyManagerError {
 
     #[error("Corrupted Winternitz index bitmap")]
     CorruptedWinternitzIndexBitmap,
+
+    #[error("Lamport index {0} has already been used")]
+    LamportIndexAlreadyUsed(u32),
+
+    #[error("Lamport imported key has already been used")]
+    LamportImportedKeyAlreadyUsed,
+
+    #[error("Lamport key is not marked as imported")]
+    LamportKeyNotMarkedAsImported,
+
+    #[error("Lamport private key not found")]
+    LamportPrivateKeyNotFound,
+
+    #[error("Corrupted Lamport index bitmap")]
+    CorruptedLamportIndexBitmap,
+
+    #[error("Index overflow: cannot generate more keys")]
+    IndexOverflow,
 }
 
 #[derive(Error, Debug)]
@@ -174,4 +213,52 @@ pub enum WinternitzError {
 
     #[error("Extra data in Winternitz Public Key missing {0}")]
     ExtraDataMissing(String),
+}
+
+#[derive(Error, Debug)]
+pub enum LamportError {
+    #[error("Index overflow: cannot generate more keys")]
+    IndexOverflow,
+
+    #[error("Invalid Lamport type {0}")]
+    InvalidLamportType(String),
+
+    #[error("Hash size of {0} bytes does not match expected size {1}")]
+    InvalidHashSize(usize, usize),
+
+    #[error("Hash size of {0} bytes does not match expected size {1}")]
+    HashSizeMismatch(usize, usize),
+
+    #[error("Signature length {0} bytes does not match expected length {1} bytes")]
+    InvalidSignatureLength(usize, usize),
+
+    #[error("Public key length {0} bytes does not match expected length {1} bytes")]
+    InvalidKeyLength(usize, usize),
+
+    #[error("Extra data in Lamport Public Key missing {0}")]
+    ExtraDataMissing(String),
+
+    #[error("Index {0} out of bounds (length: {1})")]
+    IndexOutOfBounds(usize, usize),
+
+    #[error("Message length {0} bits does not match expected length {1} bits")]
+    MessageLengthMismatch(usize, usize),
+
+    #[error("Invalid bit value {0} (expected 0 or 1)")]
+    InvalidBitValue(u8),
+
+    #[error("Invalid bit length {0} (must be multiple of 8)")]
+    InvalidBitLength(usize),
+
+    #[error("Message bit length {0} exceeds maximum allowed length of {1} bits")]
+    MessageBitLengthExceedsMax(usize, usize),
+
+    #[error("Byte length {0} exceeds maximum allowed length of {1} bytes")]
+    ByteLengthExceedsMax(usize, usize),
+
+    #[error("Imported keys cannot have a derivation index (found: {0})")]
+    ImportedKeyWithDerivationIndex(u32),
+
+    #[error("Derived keys must have a derivation index")]
+    DerivedKeyWithoutDerivationIndex,
 }

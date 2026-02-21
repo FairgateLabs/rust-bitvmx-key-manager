@@ -35,6 +35,12 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 - **Storage**: Keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed
 - **Rationale**: Storage scalability - Winternitz signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency
 
+#### Lamport One-Time Signature Keys
+
+- **HD Derivation**: Lamport keys are HD derived from the same master seed for consistency, adn are also able to be imported
+- **Storage**: Derived keys are **not stored** in the keystore - they are regenerated on-demand each time they're needed, Imported keys are stored
+- **Rationale**: Storage scalability - Lamport signatures require large key sets that would significantly bloat storage requirements. Since they can be deterministically regenerated from the HD seed, we prioritize storage efficiency. Imported keys are stores, as there is no way to re generate them from the seed. The storage key is the public key compressed using blake3, private materials are fully stored
+
 #### RSA Keys
 
 - **Fresh Entropy**: RSA keys are generated using fresh entropy provided by the user, with **no correlation** to the HD mnemonic
@@ -76,11 +82,21 @@ The BitVMX Key Manager implements different strategies for key derivation and st
 
 ### [Signing and verifying a message using Winternitz](examples/sign_verify_winternitz.rs)
 
+### [Deriving Lamport OTS keys](examples/deriving_lamport.rs)
+
+*The key manager also supports Lamport one-time signature keys. Lamport keys are derived and managed similarly to Winternitz keys, with the key pair being generated and only the public key returned for later use in signing operations.*
+
+### [Importing Lamport keys](examples/import_lamport.rs)
+
+### [Signing and verifying a message using Lamport](examples/sign_verify_lamport.rs)
+
 ### [Generating keys, Signing and verifying a message using RSA](examples/rsa.rs)
 
 ### [Signing and verifying Multi-Signatures with MuSig2](examples/sign_verify_musig2.rs)
 
 The `KeyManager` supports MuSig2 multi-signature schemes, allowing multiple parties to jointly produce a single Schnorr signature. See more details on [MuSig2 for Rust](https://docs.rs/musig2/latest/musig2/).
+
+
 
 ## Development Setup
 
@@ -98,12 +114,18 @@ run with `cargo run --example key_gen`
 run with `cargo run --example key_import`
 - **[deriving_winternitz:](examples/deriving_winternitz.rs)**
 run with `cargo run --example deriving_winternitz`
+- **[deriving_lamport:](examples/deriving_lamport.rs)**
+run with `cargo run --example deriving_lamport`
+- **[import_lamport:](examples/import_lamport.rs)**
+run with `cargo run --example import_lamport`
 - **[sign_verify_ecdsa:](examples/sign_verify_ecdsa.rs)**
 run with `cargo run --example sign_verify_ecdsa`
 - **[sign_verify_schnorr_taproot:](examples/sign_verify_schnorr_taproot.rs)**
 run with `cargo run --example sign_verify_schnorr_taproot`
 - **[sign_verify_winternitz:](examples/sign_verify_winternitz.rs)**
 run with `cargo run --example sign_verify_winternitz`
+- **[sign_verify_lamport:](examples/sign_verify_lamport.rs)**
+run with `cargo run --example sign_verify_lamport`
 - **[rsa:](examples/rsa.rs)**
 run with `cargo run --example rsa`
 

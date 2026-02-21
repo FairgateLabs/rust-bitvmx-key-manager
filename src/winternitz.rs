@@ -617,9 +617,7 @@ impl Winternitz {
         checksum_size: usize,
         derivation_index: u32,
     ) -> Result<WinternitzPrivateKey, WinternitzError> {
-        derivation_index
-            .checked_add(1)
-            .ok_or(WinternitzError::IndexOverflow)?;
+        validate_following_derivation_index(derivation_index)?;
 
         let mut private_key =
             WinternitzPrivateKey::new(key_type, derivation_index, message_size, checksum_size);
@@ -737,4 +735,15 @@ fn to_digits(mut number: u32, number_of_digits: usize) -> Vec<u8> {
 
     digits.resize(number_of_digits, 0);
     digits
+}
+
+// ========== Validation Helper Functions ==========
+
+/// Validates that we are 1 index below the overflow threshold for u32
+fn validate_following_derivation_index(derivation_index: u32) -> Result<(), WinternitzError> {
+    derivation_index
+        .checked_add(1)
+        .ok_or(WinternitzError::IndexOverflow)?;
+
+    Ok(())
 }

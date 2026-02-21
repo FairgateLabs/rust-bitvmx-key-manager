@@ -15,6 +15,27 @@ mod deriving_winternitz_example {
     }
 }
 
+mod deriving_lamport_example {
+    include!("../examples/deriving_lamport.rs");
+    pub fn run_example() {
+        main();
+    }
+}
+
+mod import_lamport_example {
+    include!("../examples/import_lamport.rs");
+    pub fn run_example() {
+        main();
+    }
+}
+
+mod sign_verify_lamport_example {
+    include!("../examples/sign_verify_lamport.rs");
+    pub fn run_example() {
+        main();
+    }
+}
+
 mod key_gen_example {
     include!("../examples/key_gen.rs");
     pub fn run_example() {
@@ -148,6 +169,27 @@ mod tests {
     fn test_sign_verify_musig2_example() {
         setup_and_cleanup(|| {
             super::sign_verify_musig2_example::run_example();
+        });
+    }
+
+    #[test]
+    fn test_deriving_lamport_example() {
+        setup_and_cleanup(|| {
+            super::deriving_lamport_example::run_example();
+        });
+    }
+
+    #[test]
+    fn test_import_lamport_example() {
+        setup_and_cleanup(|| {
+            super::import_lamport_example::run_example();
+        });
+    }
+
+    #[test]
+    fn test_sign_verify_lamport_example() {
+        setup_and_cleanup(|| {
+            super::sign_verify_lamport_example::run_example();
         });
     }
 }

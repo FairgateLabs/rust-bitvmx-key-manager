@@ -350,7 +350,7 @@ impl KeyStore {
     }
 
     fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
-        // blake3 justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
+        // compressed pubkey (blake3) justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
         let pubkey_bytes = public_key.to_bytes();
         let hash = blake3::hash(&pubkey_bytes);
         format!("{}:{}", Self::LAMPORT, hash.to_hex())

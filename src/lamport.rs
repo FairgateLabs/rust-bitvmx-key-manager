@@ -556,6 +556,81 @@ impl LamportPublicKey {
     }
 }
 
+/// A compressed representation of a Lamport public key.
+///
+/// Stores only the key metadata plus an `id` that is the BLAKE3 hash
+/// of the full serialized public key bytes (`LamportPublicKey::to_bytes()`).
+///
+/// This lets callers:
+/// - Store a tiny fingerprint instead of the full (potentially large) public key.
+/// - Regenerate the full public key from the seed + metadata, then verify integrity
+///   by re-computing BLAKE3 and comparing against the stored `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LamportCompressedPubKey {
+    /// BLAKE3 hash of the serialized public key bytes, used as a compact,
+    /// collision-resistant identifier.  Re-derive the key and recompute to verify
+    /// the seed/key has not changed.  Call `.to_hex()` on it to get a hex string.
+    id: blake3::Hash,
+    hash_type: LamportType,
+    imported: bool, // if the key was imported or derived. imported = true, derive = false
+    extra_data: Option<ExtraData>,
+}
+
+impl LamportCompressedPubKey {
+    /// Build a `LamportCompressedPubKey` from a live `LamportPublicKey`, computing
+    /// the BLAKE3 fingerprint automatically.
+    pub fn from_public_key(pubk: &LamportPublicKey) -> Self {
+        LamportCompressedPubKey {
+            id: blake3::hash(&pubk.to_bytes()),
+            hash_type: pubk.hash_type(),
+            imported: pubk.imported(),
+            extra_data: pubk.extra_data(),
+        }
+    }
+
+    /// BLAKE3 hash of the serialized public key bytes.
+    /// Call `.to_hex()` on the returned value to get a hex string:
+    /// `compressed.id().to_hex().to_string()`
+    pub fn id(&self) -> blake3::Hash {
+        self.id
+    }
+
+    pub fn hash_type(&self) -> LamportType {
+        self.hash_type
+    }
+
+    pub fn imported(&self) -> bool {
+        self.imported
+    }
+
+    pub fn extra_data(&self) -> Option<&ExtraData> {
+        self.extra_data.as_ref()
+    }
+
+    pub fn message_bit_length(&self) -> Result<usize, LamportError> {
+        self.extra_data
+            .as_ref()
+            .ok_or(LamportError::ExtraDataMissing("message_bit_length".to_string()))
+            .map(|d| d.message_bit_length())
+    }
+
+    pub fn derivation_index(&self) -> Option<u32> {
+        self.extra_data.as_ref().and_then(|d| d.derivation_index())
+    }
+
+    /// Verify that a regenerated `LamportPublicKey` matches this compressed key.
+    /// Returns `true` if its BLAKE3 hash equals the stored `id`.
+    pub fn verify_against(&self, pk: &LamportPublicKey) -> bool {
+        blake3::hash(&pk.to_bytes()) == self.id
+    }
+}
+
+impl From<&LamportPublicKey> for LamportCompressedPubKey {
+    fn from(pk: &LamportPublicKey) -> Self {
+        Self::from_public_key(pk)
+    }
+}
+
 /// Lamport private key containing two sets of secret values:
 /// - private_key_0s: secrets for when the corresponding bit is 0
 /// - private_key_1s: secrets for when the corresponding bit is 1

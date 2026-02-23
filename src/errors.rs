@@ -115,6 +115,9 @@ pub enum KeyManagerError {
     #[error("Lamport key derivation index not found")]
     LamportKeyDerivationIndexNotFound,
 
+    #[error("Lamport expansion fingerprint mismatch: the BLAKE3 id of the re-derived key does not match the compressed key. The seed may have changed, the keystore may have been swapped or removed, the metadata may be incorrect, or the compressed key may be corrupted.")]
+    LamportExpansionFingerprintMismatch,
+
     #[error("Invalid RSA key size: {0}")]
     InvalidRSAKeySize(String),
 

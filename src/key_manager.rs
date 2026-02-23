@@ -22,7 +22,8 @@ use crate::{
     key_store::KeyStore,
     key_type::BitcoinKeyType,
     lamport::{
-        Lamport, LamportMessage, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType,
+        Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
+        LamportSignature, LamportType,
     },
     musig2::{
         errors::Musig2SignerError,
@@ -1546,6 +1547,66 @@ impl KeyManager {
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
+    }
+
+    /// Expands a derived (non-imported) [`LamportCompressedPubKey`] back into the full
+    /// [`LamportPublicKey`] by re-deriving it from the stored seed using the metadata
+    /// embedded in the compressed key.
+    ///
+    /// After derivation the BLAKE3 fingerprint is verified against the stored `id` to confirm
+    /// the seed has not changed or been corrupted.
+    ///
+    /// Returns an error if the derivation index or message bit length is missing, or if the
+    /// integrity check fails.
+    pub fn expand_lamport(
+        &self,
+        compressed: &LamportCompressedPubKey,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        if compressed.imported() {
+            self.expand_lamport_imported(compressed)
+        } else {
+            self.expand_lamport_by_index(compressed)
+        }
+    }
+
+    // For imported lamport keys: loads the stored private key by its compressed key fingerprint
+    // and derives the public key from it, then verifies the BLAKE3 fingerprint.
+    fn expand_lamport_imported(
+        &self,
+        compressed: &LamportCompressedPubKey,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        let private_key = self
+            .keystore
+            .load_lamport_compressed_imported_key(compressed)?
+            .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
+
+        let public_key = private_key.public_key()?;
+
+        if !compressed.verify_against(&public_key) {
+            return Err(KeyManagerError::LamportExpansionFingerprintMismatch);
+        }
+
+        Ok(public_key)
+    }
+
+    // For derived (non-imported) lamport keys: re-derives from seed and verifies BLAKE3 fingerprint.
+    fn expand_lamport_by_index(
+        &self,
+        compressed: &LamportCompressedPubKey,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        let index = compressed
+            .derivation_index()
+            .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+
+        let message_bit_length = compressed.message_bit_length()?;
+
+        let public_key = self.derive_lamport(message_bit_length, compressed.hash_type(), index)?;
+
+        if !compressed.verify_against(&public_key) {
+            return Err(KeyManagerError::LamportExpansionFingerprintMismatch);
+        }
+
+        Ok(public_key)
     }
 
     /// Exports the private key for a given public key.

@@ -6,7 +6,7 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::rand::RngCore;
 use bitcoin::secp256k1;
 
-use key_manager::lamport::{bits_to_bytes, Lamport, LamportType};
+use key_manager::lamport::{bits_to_bytes, Lamport, LamportCompressedPubKey, LamportType};
 
 fn main() {
     // see function code, main is just a wrapper to run the example
@@ -122,11 +122,38 @@ fn sign_verify_lamport_example() {
     println!("SHA256 digest: {:?}", hex::encode(message_digest));
 
     // For a 32-byte digest, we need 256 bits (32 * 8) as the message length
-    let lamport_pubkey_string = key_manager.next_lamport(256, LamportType::SHA256).unwrap();
+    let lamport_pubkey_string_example = key_manager.next_lamport(256, LamportType::SHA256).unwrap();
+
+    // Example of storing compressed public keys
+    let compressed_lamport_pubkey = lamport_pubkey_string_example.to_compressed();
+    let serialized_compressed = serde_json::to_string(&compressed_lamport_pubkey).unwrap();
+    let deserialized_compressed: LamportCompressedPubKey =
+        serde_json::from_str(&serialized_compressed).unwrap();
+    let decompressed_pubkey = key_manager
+        .expand_lamport(&deserialized_compressed)
+        .unwrap();
+    assert_eq!(
+        lamport_pubkey_string_example, decompressed_pubkey,
+        "Decompressed public key should match the original"
+    );
+
+    // Difference in size between serialized compressed and uncompressed public key
+    let serialized_uncompressed = serde_json::to_string(&lamport_pubkey_string_example).unwrap();
+    println!(
+        "\nSerialized compressed Lamport public key ({} bytes)",
+        serialized_compressed.len()
+    );
+    println!(
+        "Serialized uncompressed Lamport public key ({} bytes)",
+        serialized_uncompressed.len()
+    );
+
+    // Use the expanded key for operations
+    let lamport_pubkey_string_ex = decompressed_pubkey;
 
     // Create a Lamport signature for the message digest
     let signature_string = key_manager
-        .sign_lamport_message_by_pubkey(&message_digest, &lamport_pubkey_string)
+        .sign_lamport_message_by_pubkey(&message_digest, &lamport_pubkey_string_ex)
         .unwrap();
     println!(
         "Lamport signature for string message: {:?}",
@@ -138,7 +165,7 @@ fn sign_verify_lamport_example() {
         .verify_signature(
             Some(&message_digest),
             &signature_string,
-            &lamport_pubkey_string,
+            &lamport_pubkey_string_ex,
         )
         .unwrap();
     println!("Is string message signature valid: {:?}", is_valid_string);

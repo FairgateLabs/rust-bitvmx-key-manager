@@ -1577,7 +1577,7 @@ impl KeyManager {
     ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
         let private_key = self
             .keystore
-            .load_lamport_compressed_imported_key(compressed)?
+            .load_lamport_imported_key(compressed)?
             .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
 
         let public_key = private_key.public_key()?;

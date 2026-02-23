@@ -1,7 +1,7 @@
 use crate::{
     errors::KeyManagerError,
     key_type::BitcoinKeyType,
-    lamport::{LamportCompressedPubKey, LamportPrivateKey, LamportPublicKey},
+    lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
     rsa::RSAKeyPair,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -349,17 +349,10 @@ impl KeyStore {
         Ok(None)
     }
 
-    // TODO template?
-    fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
-        // compressed pubkey (blake3) justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
-        let hash = public_key.to_compressed().id();
-        format!("{}:{}", Self::LAMPORT, hash.to_hex())
-    }
-
-    fn format_lamport_compressed_storage_key(comp_public_key: &LamportCompressedPubKey) -> String {
-        // compressed pubkey (blake3) justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
-        let hash = comp_public_key.id();
-        format!("{}:{}", Self::LAMPORT, hash.to_hex())
+    // Blake3 fingerprint justification: the full LamportPublicKey can be large; using its
+    // BLAKE3 hash as the storage key avoids rocksdb performance issues with big keys.
+    fn format_lamport_storage_key<K: LamportPubKeyId>(key: &K) -> String {
+        format!("{}:{}", Self::LAMPORT, key.key_id().to_hex())
     }
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
@@ -383,11 +376,10 @@ impl KeyStore {
         Ok(())
     }
 
-    // TODO template?
     // we are not storing derived keys
-    pub fn load_lamport_imported_key(
+    pub fn load_lamport_imported_key<K: LamportPubKeyId>(
         &self,
-        public_key: &LamportPublicKey,
+        public_key: &K,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key);
         let privk: Option<Zeroizing<String>> =
@@ -413,51 +405,6 @@ impl KeyStore {
                 &private_key_decoded,
                 public_key.message_bit_length()?,
                 public_key.hash_type(),
-                None,
-                true, // imported: true for imported keys
-            )?;
-
-            // Set the spent flag
-            if spent {
-                private_key.mark_spent();
-            }
-
-            return Ok(Some(private_key));
-        }
-
-        Ok(None)
-    }
-
-    // TODO template?
-    // we are not storing derived keys
-    pub fn load_lamport_compressed_imported_key(
-        &self,
-        comp_public_key: &LamportCompressedPubKey,
-    ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
-        let pubk = Self::format_lamport_compressed_storage_key(comp_public_key);
-        let privk: Option<Zeroizing<String>> =
-            self.store.get::<String, String>(pubk)?.map(Zeroizing::new);
-
-        if let Some(privk) = privk {
-            let parts: Vec<&str> = privk.split(':').collect();
-
-            // Expected format: lamport:base64_key:spent
-            if parts.len() != 3 || parts[0] != Self::LAMPORT {
-                return Err(KeyManagerError::InvalidLamportPrivateKey);
-            }
-
-            let key_bytes_part = parts[1];
-            let spent = parts[2]
-                .parse::<bool>()
-                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-
-            let private_key_decoded = general_purpose::STANDARD
-                .decode(key_bytes_part.as_bytes())
-                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-            let mut private_key = LamportPrivateKey::from_bytes(
-                &private_key_decoded,
-                comp_public_key.message_bit_length()?,
-                comp_public_key.hash_type(),
                 None,
                 true, // imported: true for imported keys
             )?;

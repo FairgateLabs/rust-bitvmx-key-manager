@@ -1041,6 +1041,41 @@ impl<const N: usize> LamportMessage for &[u8; N] {
     }
 }
 
+/// Trait for types that can provide a BLAKE3 fingerprint identifying a Lamport public key.
+///
+/// Implemented by both [`LamportPublicKey`] (computes the hash on the fly) and
+/// [`LamportCompressedPubKey`] (returns its stored `id`), allowing a single generic
+/// function to accept either form — see [`KeyStore::format_lamport_key`](crate::key_store).
+pub trait LamportPubKeyId {
+    fn key_id(&self) -> blake3::Hash;
+    fn message_bit_length(&self) -> Result<usize, LamportError>;
+    fn hash_type(&self) -> LamportType;
+}
+
+impl LamportPubKeyId for LamportPublicKey {
+    fn key_id(&self) -> blake3::Hash {
+        self.to_compressed().id()
+    }
+    fn message_bit_length(&self) -> Result<usize, LamportError> {
+        LamportPublicKey::message_bit_length(self)
+    }
+    fn hash_type(&self) -> LamportType {
+        LamportPublicKey::hash_type(self)
+    }
+}
+
+impl LamportPubKeyId for LamportCompressedPubKey {
+    fn key_id(&self) -> blake3::Hash {
+        self.id()
+    }
+    fn message_bit_length(&self) -> Result<usize, LamportError> {
+        LamportCompressedPubKey::message_bit_length(self)
+    }
+    fn hash_type(&self) -> LamportType {
+        LamportCompressedPubKey::hash_type(self)
+    }
+}
+
 // ========== Main Lamport Implementation ==========
 
 /// Main Lamport signature scheme implementation

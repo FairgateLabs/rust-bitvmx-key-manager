@@ -610,7 +610,9 @@ impl LamportCompressedPubKey {
     pub fn message_bit_length(&self) -> Result<usize, LamportError> {
         self.extra_data
             .as_ref()
-            .ok_or(LamportError::ExtraDataMissing("message_bit_length".to_string()))
+            .ok_or(LamportError::ExtraDataMissing(
+                "message_bit_length".to_string(),
+            ))
             .map(|d| d.message_bit_length())
     }
 

@@ -537,6 +537,10 @@ impl LamportPublicKey {
         self.imported
     }
 
+    pub fn to_compressed(&self) -> LamportCompressedPubKey {
+        LamportCompressedPubKey::from_public_key(self)
+    }
+
     fn public_key_0_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.public_key_0s
             .get(index)

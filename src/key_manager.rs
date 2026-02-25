@@ -1883,7 +1883,7 @@ mod tests {
         let key_derivation_seed = random_64bytes();
         let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&(*random_32bytes())).unwrap();
 
-        let config = StorageConfig::new(path.clone(), Some(password));
+        let config = StorageConfig::new(path.clone(), Some(Secret::new(password)));
         let store = Rc::new(Storage::new(&config).unwrap());
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed.clone())?;
@@ -1930,7 +1930,7 @@ mod tests {
         let winternitz_seed = random_32bytes();
         let key_derivation_seed = random_64bytes();
 
-        let config = StorageConfig::new(path.clone(), Some(password.clone()));
+        let config = StorageConfig::new(path.clone(), Some(Secret::new(password.clone())));
         let store = Rc::new(Storage::new(&config)?);
         let keystore = KeyStore::new(store);
         keystore.store_winternitz_seed(winternitz_seed)?;
@@ -2579,13 +2579,13 @@ mod tests {
 
     fn database_keystore_config(storage_path: &str) -> Result<StorageConfig, KeyManagerError> {
         let password = "secret password_123__ABC".to_string();
-        let config = StorageConfig::new(storage_path.to_string(), Some(password));
+        let config = StorageConfig::new(storage_path.to_string(), Some(Secret::new(password)));
         Ok(config)
     }
 
     fn database_keystore(storage_path: &str) -> Result<KeyStore, KeyManagerError> {
         let password = "secret password_123__ABC".to_string();
-        let config = StorageConfig::new(storage_path.to_string(), Some(password));
+        let config = StorageConfig::new(storage_path.to_string(), Some(Secret::new(password)));
         let store = Rc::new(Storage::new(&config)?);
         Ok(KeyStore::new(store))
     }
@@ -5364,7 +5364,7 @@ mod tests {
     fn test_wrong_password_propagates_decryption_error() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let password = "correct password_123__ABC".to_string();
-        let storage_config = StorageConfig::new(keystore_path.clone(), Some(password));
+        let storage_config = StorageConfig::new(keystore_path.clone(), Some(Secret::new(password)));
 
         // --- Create the 1st KeyManager with a mnemonic and correct password
 
@@ -5380,7 +5380,7 @@ mod tests {
 
         let wrong_password = "wrong p4SSWord -_= but str0n9 123 ABC".to_string();
         let wrong_storage_config =
-            StorageConfig::new(keystore_path.clone(), Some(wrong_password));
+            StorageConfig::new(keystore_path.clone(), Some(Secret::new(wrong_password)));
 
         let result = KeyManager::new(REGTEST, Some(fixed_mnemonic), None, &wrong_storage_config);
 

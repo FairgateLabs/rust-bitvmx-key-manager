@@ -4,6 +4,7 @@ use bip39::Mnemonic;
 use bitcoin::key::rand;
 use bitcoin::{key::rand::RngCore, secp256k1, PublicKey};
 use rand::Rng;
+use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
 
 pub fn random_bytes() -> [u8; 32] {
@@ -21,7 +22,7 @@ pub fn create_key_manager(
     }
 
     let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
-    let config = StorageConfig::new(store_keystore_path.to_string(), password);
+    let config = StorageConfig::new(store_keystore_path.to_string(), password.map(Secret::new));
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,

@@ -33,11 +33,11 @@ fn sign_verify_lamport_example() {
     // Difference in size between serialized compressed and uncompressed public key
     println!(
         "\nSerialized compressed Lamport public key ({} bytes)",
-        bincode::serialize(&lamport_pubkey).unwrap().len()
+        bincode::serialize(&lamport_pubkey.to_compressed()).unwrap().len()
     );
     println!(
         "Serialized uncompressed Lamport public key ({} bytes)",
-        bincode::serialize(&lamport_pubkey.to_compressed()).unwrap().len()
+        bincode::serialize(&lamport_pubkey).unwrap().len()
     );
 
     // Create a Lamport signature

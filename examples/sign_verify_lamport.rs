@@ -29,6 +29,17 @@ fn sign_verify_lamport_example() {
     // Get the Lamport public key with message bit length = 1 using the SHA-256 hash function
     let lamport_pubkey = key_manager.next_lamport(1, LamportType::SHA256).unwrap();
 
+
+    // Difference in size between serialized compressed and uncompressed public key
+    println!(
+        "\nSerialized compressed Lamport public key ({} bytes)",
+        bincode::serialize(&lamport_pubkey).unwrap().len()
+    );
+    println!(
+        "Serialized uncompressed Lamport public key ({} bytes)",
+        bincode::serialize(&lamport_pubkey.to_compressed()).unwrap().len()
+    );
+
     // Create a Lamport signature
     let signature = key_manager
         .sign_lamport_message_by_pubkey(message_bit, &lamport_pubkey)

@@ -126,9 +126,9 @@ fn sign_verify_lamport_example() {
 
     // Example of storing compressed public keys
     let compressed_lamport_pubkey = lamport_pubkey_string_example.to_compressed();
-    let serialized_compressed = serde_json::to_string(&compressed_lamport_pubkey).unwrap();
+    let serialized_compressed: Vec<u8> = bincode::serialize(&compressed_lamport_pubkey).unwrap();
     let deserialized_compressed: LamportCompressedPubKey =
-        serde_json::from_str(&serialized_compressed).unwrap();
+        bincode::deserialize(&serialized_compressed).unwrap();
     let decompressed_pubkey = key_manager
         .expand_lamport(&deserialized_compressed)
         .unwrap();
@@ -138,7 +138,8 @@ fn sign_verify_lamport_example() {
     );
 
     // Difference in size between serialized compressed and uncompressed public key
-    let serialized_uncompressed = serde_json::to_string(&lamport_pubkey_string_example).unwrap();
+    let serialized_uncompressed: Vec<u8> =
+        bincode::serialize(&lamport_pubkey_string_example).unwrap();
     println!(
         "\nSerialized compressed Lamport public key ({} bytes)",
         serialized_compressed.len()

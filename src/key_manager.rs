@@ -1562,45 +1562,25 @@ impl KeyManager {
         &self,
         compressed: &LamportCompressedPubKey,
     ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
-        if compressed.imported() {
-            self.expand_lamport_imported(compressed)
+        let public_key = if compressed.imported() {
+            // For imported lamport keys: loads the stored private key by its compressed key fingerprint
+            // and derives the public key from it, then verifies the BLAKE3 fingerprint.
+            let private_key = self
+                .keystore
+                .load_lamport_imported_key(compressed)?
+                .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
+
+            private_key.public_key()?
         } else {
-            self.expand_lamport_by_index(compressed)
-        }
-    }
+            // For derived (non-imported) lamport keys: re-derives from seed and verifies BLAKE3 fingerprint.
+            let index = compressed
+                .derivation_index()
+                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
 
-    // For imported lamport keys: loads the stored private key by its compressed key fingerprint
-    // and derives the public key from it, then verifies the BLAKE3 fingerprint.
-    fn expand_lamport_imported(
-        &self,
-        compressed: &LamportCompressedPubKey,
-    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
-        let private_key = self
-            .keystore
-            .load_lamport_imported_key(compressed)?
-            .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
+            let message_bit_length = compressed.message_bit_length()?;
 
-        let public_key = private_key.public_key()?;
-
-        if !compressed.verify_against(&public_key) {
-            return Err(KeyManagerError::LamportExpansionFingerprintMismatch);
-        }
-
-        Ok(public_key)
-    }
-
-    // For derived (non-imported) lamport keys: re-derives from seed and verifies BLAKE3 fingerprint.
-    fn expand_lamport_by_index(
-        &self,
-        compressed: &LamportCompressedPubKey,
-    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
-        let index = compressed
-            .derivation_index()
-            .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
-
-        let message_bit_length = compressed.message_bit_length()?;
-
-        let public_key = self.derive_lamport(message_bit_length, compressed.hash_type(), index)?;
+            self.derive_lamport(message_bit_length, compressed.hash_type(), index)?
+        };
 
         if !compressed.verify_against(&public_key) {
             return Err(KeyManagerError::LamportExpansionFingerprintMismatch);

@@ -228,13 +228,14 @@ impl KeyManager {
             Err(e) => return Err(e), // Propagate storage/decryption errors
         }
 
-        // TODO, revisit how to save musig data without impacting performance
-        let plain_storage_config = StorageConfig {
-            path: format!("{}-plain", storage_config.path.clone()),
-            password: None,
-        };
-        let plain_key_store = Rc::new(Storage::new(&plain_storage_config)?);
-        let musig2 = MuSig2Signer::new(plain_key_store);
+        // // TODO, revisit how to save musig data without impacting performance
+        // let plain_storage_config = StorageConfig {
+        //     path: format!("{}-plain", storage_config.path.clone()),
+        //     password: None,
+        // };
+        // let plain_key_store = Rc::new(Storage::new(&plain_storage_config)?);
+        // let musig2 = MuSig2Signer::new(plain_key_store);
+        let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {
             secp,

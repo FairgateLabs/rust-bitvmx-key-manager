@@ -3,5 +3,6 @@ pub mod init_musig_method_test;
 pub mod multiple_msgs_test;
 pub mod nonces_test;
 pub mod partial_signature_test;
+pub mod rsa_test;
 pub mod utils;
 pub mod winternitz_test;

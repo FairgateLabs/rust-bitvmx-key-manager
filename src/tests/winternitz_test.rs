@@ -138,8 +138,12 @@ mod winternitz_tests {
         let verifier = SignatureVerifier::new();
         let message = random_message();
 
-        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
-        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+        let public_key = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
 
         assert!(verifier.verify_winternitz_signature(&signature, &message, &public_key));
         clear_output();
@@ -152,8 +156,12 @@ mod winternitz_tests {
         let verifier = SignatureVerifier::new();
         let message = random_message();
 
-        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::HASH160).unwrap();
-        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+        let public_key = key_manager
+            .next_winternitz(message.len(), WinternitzType::HASH160)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
 
         assert!(verifier.verify_winternitz_signature(&signature, &message, &public_key));
         clear_output();
@@ -166,9 +174,15 @@ mod winternitz_tests {
         let verifier = SignatureVerifier::new();
         let message = random_message();
 
-        let public_key_i = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
-        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key_i).unwrap();
-        let public_key_i_plus_1 = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+        let public_key_i = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key_i)
+            .unwrap();
+        let public_key_i_plus_1 = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
 
         assert!(!verifier.verify_winternitz_signature(&signature, &message, &public_key_i_plus_1));
         clear_output();
@@ -181,9 +195,15 @@ mod winternitz_tests {
         let verifier = SignatureVerifier::new();
         let message = random_message();
 
-        let public_key_sha256 = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
-        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key_sha256).unwrap();
-        let public_key_hash160 = key_manager.next_winternitz(message.len(), WinternitzType::HASH160).unwrap();
+        let public_key_sha256 = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key_sha256)
+            .unwrap();
+        let public_key_hash160 = key_manager
+            .next_winternitz(message.len(), WinternitzType::HASH160)
+            .unwrap();
 
         assert!(!verifier.verify_winternitz_signature(&signature, &message, &public_key_hash160));
         clear_output();
@@ -196,16 +216,27 @@ mod winternitz_tests {
         let message = random_message();
         let winternitz_type = WinternitzType::SHA256;
 
-        let public_key = key_manager.next_winternitz(message.len(), winternitz_type).unwrap();
-        let original_signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+        let public_key = key_manager
+            .next_winternitz(message.len(), winternitz_type)
+            .unwrap();
+        let original_signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
 
         let signature_bytes = original_signature.to_bytes();
         let message_digits_len = original_signature.message_length();
         let reconstructed_signature =
-            WinternitzSignature::from_bytes(&signature_bytes, message_digits_len, winternitz_type).unwrap();
+            WinternitzSignature::from_bytes(&signature_bytes, message_digits_len, winternitz_type)
+                .unwrap();
 
-        assert_eq!(original_signature.to_hashes(), reconstructed_signature.to_hashes());
-        assert_eq!(original_signature.message_length(), reconstructed_signature.message_length());
+        assert_eq!(
+            original_signature.to_hashes(),
+            reconstructed_signature.to_hashes()
+        );
+        assert_eq!(
+            original_signature.message_length(),
+            reconstructed_signature.message_length()
+        );
         assert_eq!(original_signature.len(), reconstructed_signature.len());
         clear_output();
     }
@@ -223,8 +254,12 @@ mod winternitz_tests {
         let key_manager = create_key_manager(path, None).unwrap();
         let message = random_message();
 
-        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
-        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+        let public_key = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
 
         assert_eq!(message, signature.message_bytes());
         clear_output();
@@ -238,7 +273,9 @@ mod winternitz_tests {
         let key_type = WinternitzType::SHA256;
         let count = 5;
 
-        let batch_keys = key_manager.next_multiple_winternitz(message_size, key_type, count).unwrap();
+        let batch_keys = key_manager
+            .next_multiple_winternitz(message_size, key_type, count)
+            .unwrap();
         let mut individual_keys = Vec::new();
         for _ in 0..count {
             individual_keys.push(key_manager.next_winternitz(message_size, key_type).unwrap());

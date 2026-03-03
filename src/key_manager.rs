@@ -226,8 +226,7 @@ impl KeyManager {
                 keystore.store_lamport_seed(expected_lamport_seed)?;
             }
             Err(e) => return Err(e), // Propagate storage/decryption errors
-        }
-;
+        };
         let musig2 = MuSig2Signer::new(keystore.store_clone());
 
         Ok(KeyManager {

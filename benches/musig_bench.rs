@@ -8,9 +8,7 @@ use std::{
 use bip39::Mnemonic;
 use bitcoin::{key::rand::RngCore, secp256k1, Network, PublicKey};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use key_manager::{
-    errors::KeyManagerError, key_manager::KeyManager, key_type::BitcoinKeyType,
-};
+use key_manager::{errors::KeyManagerError, key_manager::KeyManager, key_type::BitcoinKeyType};
 use redact::Secret;
 use storage_backend::storage_config::StorageConfig;
 
@@ -135,7 +133,16 @@ fn setup_2p_ready_to_sign(message_id: &str, message: &[u8]) -> TwoParticipantSes
     n_for_2.insert(pk1, nonces1);
     km2.aggregate_nonces(&agg_pk, &session_id, n_for_2).unwrap();
 
-    TwoParticipantSession { km1, pk1, path1, km2, pk2, path2, agg_pk, session_id }
+    TwoParticipantSession {
+        km1,
+        pk1,
+        path1,
+        km2,
+        pk2,
+        path2,
+        agg_pk,
+        session_id,
+    }
 }
 
 /// Extends `setup_2p_ready_to_sign` by computing and saving all partial
@@ -143,15 +150,25 @@ fn setup_2p_ready_to_sign(message_id: &str, message: &[u8]) -> TwoParticipantSes
 fn setup_2p_ready_to_aggregate(message_id: &str, message: &[u8]) -> TwoParticipantSession {
     let s = setup_2p_ready_to_sign(message_id, message);
 
-    let sigs1 = s.km1.get_my_partial_signatures(&s.agg_pk, &s.session_id).unwrap();
-    let sigs2 = s.km2.get_my_partial_signatures(&s.agg_pk, &s.session_id).unwrap();
+    let sigs1 = s
+        .km1
+        .get_my_partial_signatures(&s.agg_pk, &s.session_id)
+        .unwrap();
+    let sigs2 = s
+        .km2
+        .get_my_partial_signatures(&s.agg_pk, &s.session_id)
+        .unwrap();
 
     let mut all_sigs = HashMap::new();
     all_sigs.insert(s.pk1, sigs1);
     all_sigs.insert(s.pk2, sigs2);
 
-    s.km1.save_partial_signatures(&s.agg_pk, &s.session_id, all_sigs.clone()).unwrap();
-    s.km2.save_partial_signatures(&s.agg_pk, &s.session_id, all_sigs).unwrap();
+    s.km1
+        .save_partial_signatures(&s.agg_pk, &s.session_id, all_sigs.clone())
+        .unwrap();
+    s.km2
+        .save_partial_signatures(&s.agg_pk, &s.session_id, all_sigs)
+        .unwrap();
 
     s
 }
@@ -222,7 +239,8 @@ fn full_round_n_participants(
         .collect();
 
     for (km, _) in participants.iter() {
-        km.save_partial_signatures(&agg_pk, session_id, all_sigs.clone()).unwrap();
+        km.save_partial_signatures(&agg_pk, session_id, all_sigs.clone())
+            .unwrap();
     }
 
     // Steps 6–8 – aggregate and verify from participant 0's perspective
@@ -283,13 +301,18 @@ fn full_round_n_messages(
     let mut all_sigs = HashMap::new();
     all_sigs.insert(pk1, sigs1);
     all_sigs.insert(pk2, sigs2);
-    km1.save_partial_signatures(&agg_pk, session_id, all_sigs.clone()).unwrap();
-    km2.save_partial_signatures(&agg_pk, session_id, all_sigs).unwrap();
+    km1.save_partial_signatures(&agg_pk, session_id, all_sigs.clone())
+        .unwrap();
+    km2.save_partial_signatures(&agg_pk, session_id, all_sigs)
+        .unwrap();
 
     // Steps 6–8 – aggregate and verify every message
     for msg_id in &message_ids {
-        let sig = km1.get_aggregated_signature(&agg_pk, session_id, msg_id).unwrap();
-        km1.verify_final_signature(msg_id, sig, agg_pk, session_id).unwrap();
+        let sig = km1
+            .get_aggregated_signature(&agg_pk, session_id, msg_id)
+            .unwrap();
+        km1.verify_final_signature(msg_id, sig, agg_pk, session_id)
+            .unwrap();
     }
 }
 
@@ -335,7 +358,6 @@ fn bench_session_init(c: &mut Criterion) {
 }
 
 // 2. Nonce generation
-
 
 /*  Benchmarks `generate_nonce` for a single message in a 2-participant session.
 
@@ -464,34 +486,29 @@ fn bench_verify_final_signature(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(30));
     group.sample_size(15);
 
-    group.bench_function(
-        "verify final signature (2 participants, 1 message)",
-        |b| {
-            b.iter_batched(
-                || {
-                    let s = setup_2p_ready_to_aggregate("msg", b"benchmark message");
-                    let sig = s
-                        .km1
-                        .get_aggregated_signature(&s.agg_pk, &s.session_id, "msg")
-                        .unwrap();
-                    (s, sig)
-                },
-                |(s, sig)| {
-                    s.km1
-                        .verify_final_signature("msg", sig, s.agg_pk, &s.session_id)
-                        .unwrap();
-                },
-                BatchSize::PerIteration,
-            );
-        },
-    );
+    group.bench_function("verify final signature (2 participants, 1 message)", |b| {
+        b.iter_batched(
+            || {
+                let s = setup_2p_ready_to_aggregate("msg", b"benchmark message");
+                let sig = s
+                    .km1
+                    .get_aggregated_signature(&s.agg_pk, &s.session_id, "msg")
+                    .unwrap();
+                (s, sig)
+            },
+            |(s, sig)| {
+                s.km1
+                    .verify_final_signature("msg", sig, s.agg_pk, &s.session_id)
+                    .unwrap();
+            },
+            BatchSize::PerIteration,
+        );
+    });
 
     group.finish();
 }
 
-
 // Full signing round – varying number of participants
-
 
 /*  Benchmarks the complete 8-step MuSig2 protocol with 2 and 4 participants
     signing a single message.
@@ -516,12 +533,7 @@ fn bench_full_signing_round(c: &mut Criterion) {
         group.bench_function(format!("{} participants / 1 message", n), |b| {
             b.iter(|| {
                 let session_id = next_id();
-                full_round_n_participants(
-                    &participants,
-                    "msg",
-                    b"benchmark message",
-                    &session_id,
-                );
+                full_round_n_participants(&participants, "msg", b"benchmark message", &session_id);
             })
         });
 
@@ -533,9 +545,7 @@ fn bench_full_signing_round(c: &mut Criterion) {
     group.finish();
 }
 
-
 // Full signing round – varying number of messages per session
-
 
 /*  Benchmarks the complete MuSig2 protocol for 2 participants signing 1, 5,
     and 10 messages in a single session.
@@ -557,27 +567,18 @@ fn bench_signing_multi_messages(c: &mut Criterion) {
     let (km2, pk2) = new_participant(&path2).unwrap();
 
     for num_messages in [1_usize, 5, 10] {
-        group.bench_function(
-            format!("2 participants / {} messages", num_messages),
-            |b| {
-                b.iter(|| {
-                    let session_id = next_id();
-                    full_round_n_messages(
-                        &km1, pk1, &km2, pk2,
-                        &session_id,
-                        num_messages,
-                    );
-                })
-            },
-        );
+        group.bench_function(format!("2 participants / {} messages", num_messages), |b| {
+            b.iter(|| {
+                let session_id = next_id();
+                full_round_n_messages(&km1, pk1, &km2, pk2, &session_id, num_messages);
+            })
+        });
     }
 
     group.finish();
     cleanup_storage(&path1);
     cleanup_storage(&path2);
 }
-
-
 
 criterion_group!(
     benches,

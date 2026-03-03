@@ -22,7 +22,9 @@ mod rsa_tests {
         let signature = key_manager.sign_rsa_message(&message, &pem).unwrap();
 
         let verifier = SignatureVerifier::new();
-        assert!(verifier.verify_rsa_signature(&signature, &message, &pem).unwrap());
+        assert!(verifier
+            .verify_rsa_signature(&signature, &message, &pem)
+            .unwrap());
         clear_output();
     }
 
@@ -35,7 +37,9 @@ mod rsa_tests {
 
         message[0] ^= 0xFF;
         let verifier = SignatureVerifier::new();
-        assert!(!verifier.verify_rsa_signature(&signature, &message, &pem).unwrap());
+        assert!(!verifier
+            .verify_rsa_signature(&signature, &message, &pem)
+            .unwrap());
         clear_output();
     }
 
@@ -49,7 +53,9 @@ mod rsa_tests {
         let signature = key_manager.sign_rsa_message(&message, &pem_a).unwrap();
 
         let verifier = SignatureVerifier::new();
-        assert!(!verifier.verify_rsa_signature(&signature, &message, &pem_b).unwrap());
+        assert!(!verifier
+            .verify_rsa_signature(&signature, &message, &pem_b)
+            .unwrap());
         clear_output();
     }
 
@@ -80,7 +86,9 @@ mod rsa_tests {
     fn test_decrypt_with_unknown_key_returns_not_found() {
         let key_manager = create_key_manager("test_output/rsa_unknown_dec", None).unwrap();
         let pem = key_manager.generate_rsa_keypair(&mut thread_rng()).unwrap();
-        let encrypted = key_manager.encrypt_rsa_message(&random_bytes(), &pem).unwrap();
+        let encrypted = key_manager
+            .encrypt_rsa_message(&random_bytes(), &pem)
+            .unwrap();
 
         let other = create_key_manager("test_output/rsa_unknown_dec_other", None).unwrap();
         let foreign_pem = other.generate_rsa_keypair(&mut thread_rng()).unwrap();
@@ -90,4 +98,3 @@ mod rsa_tests {
         clear_output();
     }
 }
-

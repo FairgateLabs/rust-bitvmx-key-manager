@@ -1,9 +1,14 @@
 #[cfg(test)]
 mod winternitz_tests {
-
-    use crate::winternitz::{
-        checksum_length, message_digits_length, to_checksummed_message, Winternitz, WinternitzType,
+    use crate::{
+        tests::utils::helper::{clear_output, create_key_manager},
+        verifier::SignatureVerifier,
+        winternitz::{
+            checksum_length, message_digits_length, to_checksummed_message, Winternitz,
+            WinternitzSignature, WinternitzType,
+        },
     };
+    use bitcoin::key::rand::RngCore;
 
     fn create_master_secret() -> Vec<u8> {
         b"test_master_secret_key_32_bytes".to_vec()
@@ -116,5 +121,139 @@ mod winternitz_tests {
             modified_verification_result,
             "Modified signature verification should succed because the digit is capped to W"
         );
+    }
+
+    // Suite 5: Integration tests for Winternitz OTS sign/verify operations
+
+    fn random_message() -> Vec<u8> {
+        let mut digest = [0u8; 32];
+        bitcoin::secp256k1::rand::thread_rng().fill_bytes(&mut digest);
+        digest.to_vec()
+    }
+
+    #[test]
+    fn test_sign_verify_sha256() {
+        let path = "test_output/suite5_sign_verify_sha256";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+
+        assert!(verifier.verify_winternitz_signature(&signature, &message, &public_key));
+        clear_output();
+    }
+
+    #[test]
+    fn test_sign_verify_hash160() {
+        let path = "test_output/suite5_sign_verify_hash160";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::HASH160).unwrap();
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+
+        assert!(verifier.verify_winternitz_signature(&signature, &message, &public_key));
+        clear_output();
+    }
+
+    #[test]
+    fn test_index_mismatch() {
+        let path = "test_output/suite5_index_mismatch";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key_i = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key_i).unwrap();
+        let public_key_i_plus_1 = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+
+        assert!(!verifier.verify_winternitz_signature(&signature, &message, &public_key_i_plus_1));
+        clear_output();
+    }
+
+    #[test]
+    fn test_type_mismatch() {
+        let path = "test_output/suite5_type_mismatch";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key_sha256 = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key_sha256).unwrap();
+        let public_key_hash160 = key_manager.next_winternitz(message.len(), WinternitzType::HASH160).unwrap();
+
+        assert!(!verifier.verify_winternitz_signature(&signature, &message, &public_key_hash160));
+        clear_output();
+    }
+
+    #[test]
+    fn test_signature_serialization_round_trip() {
+        let path = "test_output/suite5_signature_serialization";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let message = random_message();
+        let winternitz_type = WinternitzType::SHA256;
+
+        let public_key = key_manager.next_winternitz(message.len(), winternitz_type).unwrap();
+        let original_signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+
+        let signature_bytes = original_signature.to_bytes();
+        let message_digits_len = original_signature.message_length();
+        let reconstructed_signature =
+            WinternitzSignature::from_bytes(&signature_bytes, message_digits_len, winternitz_type).unwrap();
+
+        assert_eq!(original_signature.to_hashes(), reconstructed_signature.to_hashes());
+        assert_eq!(original_signature.message_length(), reconstructed_signature.message_length());
+        assert_eq!(original_signature.len(), reconstructed_signature.len());
+        clear_output();
+    }
+
+    #[test]
+    fn test_from_bytes_invalid_length() {
+        let invalid_bytes = vec![0u8; 33];
+        let result = WinternitzSignature::from_bytes(&invalid_bytes, 10, WinternitzType::SHA256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_checksummed_digits_reconstruct_message() {
+        let path = "test_output/suite5_checksummed_digits";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let message = random_message();
+
+        let public_key = key_manager.next_winternitz(message.len(), WinternitzType::SHA256).unwrap();
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &public_key).unwrap();
+
+        assert_eq!(message, signature.message_bytes());
+        clear_output();
+    }
+
+    #[test]
+    fn test_derive_multiple_equals_sequential() {
+        let path = "test_output/suite5_derive_multiple";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let message_size = 32;
+        let key_type = WinternitzType::SHA256;
+        let count = 5;
+
+        let batch_keys = key_manager.next_multiple_winternitz(message_size, key_type, count).unwrap();
+        let mut individual_keys = Vec::new();
+        for _ in 0..count {
+            individual_keys.push(key_manager.next_winternitz(message_size, key_type).unwrap());
+        }
+
+        assert_eq!(batch_keys.len(), count as usize);
+        assert_eq!(individual_keys.len(), count as usize);
+
+        for (i, key) in batch_keys.iter().enumerate() {
+            for (j, other_key) in batch_keys.iter().enumerate() {
+                if i != j {
+                    assert_ne!(key.to_bytes(), other_key.to_bytes());
+                }
+            }
+        }
+        clear_output();
     }
 }

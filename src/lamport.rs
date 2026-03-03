@@ -537,6 +537,10 @@ impl LamportPublicKey {
         self.imported
     }
 
+    pub fn to_compressed(&self) -> LamportCompressedPubKey {
+        LamportCompressedPubKey::from_public_key(self)
+    }
+
     fn public_key_0_at(&self, index: usize) -> Result<&LamportHash, LamportError> {
         self.public_key_0s
             .get(index)
@@ -553,6 +557,83 @@ impl LamportPublicKey {
                 index,
                 self.public_key_1s.len(),
             ))
+    }
+}
+
+/// A compressed representation of a Lamport public key.
+///
+/// Stores only the key metadata plus an `id` that is the BLAKE3 hash
+/// of the full serialized public key bytes (`LamportPublicKey::to_bytes()`).
+///
+/// This lets callers:
+/// - Store a tiny fingerprint instead of the full (potentially large) public key.
+/// - Regenerate the full public key from the seed + metadata, then verify integrity
+///   by re-computing BLAKE3 and comparing against the stored `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LamportCompressedPubKey {
+    /// BLAKE3 hash of the serialized public key bytes, used as a compact,
+    /// collision-resistant identifier.  Re-derive the key and recompute to verify
+    /// the seed/key has not changed.  Call `.to_hex()` on it to get a hex string.
+    id: blake3::Hash,
+    hash_type: LamportType,
+    imported: bool, // if the key was imported or derived. imported = true, derive = false
+    extra_data: Option<ExtraData>,
+}
+
+impl LamportCompressedPubKey {
+    /// Build a `LamportCompressedPubKey` from a live `LamportPublicKey`, computing
+    /// the BLAKE3 fingerprint automatically.
+    pub fn from_public_key(pubk: &LamportPublicKey) -> Self {
+        LamportCompressedPubKey {
+            id: blake3::hash(&pubk.to_bytes()),
+            hash_type: pubk.hash_type(),
+            imported: pubk.imported(),
+            extra_data: pubk.extra_data(),
+        }
+    }
+
+    /// BLAKE3 hash of the serialized public key bytes.
+    /// Call `.to_hex()` on the returned value to get a hex string:
+    /// `compressed.id().to_hex().to_string()`
+    pub fn id(&self) -> blake3::Hash {
+        self.id
+    }
+
+    pub fn hash_type(&self) -> LamportType {
+        self.hash_type
+    }
+
+    pub fn imported(&self) -> bool {
+        self.imported
+    }
+
+    pub fn extra_data(&self) -> Option<&ExtraData> {
+        self.extra_data.as_ref()
+    }
+
+    pub fn message_bit_length(&self) -> Result<usize, LamportError> {
+        self.extra_data
+            .as_ref()
+            .ok_or(LamportError::ExtraDataMissing(
+                "message_bit_length".to_string(),
+            ))
+            .map(|d| d.message_bit_length())
+    }
+
+    pub fn derivation_index(&self) -> Option<u32> {
+        self.extra_data.as_ref().and_then(|d| d.derivation_index())
+    }
+
+    /// Verify that a regenerated `LamportPublicKey` matches this compressed key.
+    /// Returns `true` if its BLAKE3 hash equals the stored `id`.
+    pub fn verify_against(&self, pk: &LamportPublicKey) -> bool {
+        blake3::hash(&pk.to_bytes()) == self.id
+    }
+}
+
+impl From<&LamportPublicKey> for LamportCompressedPubKey {
+    fn from(pk: &LamportPublicKey) -> Self {
+        Self::from_public_key(pk)
     }
 }
 
@@ -957,6 +1038,41 @@ impl LamportMessage for &Vec<u8> {
 impl<const N: usize> LamportMessage for &[u8; N] {
     fn into_message_bits(self) -> Vec<bool> {
         bytes_to_bits(self, 0)
+    }
+}
+
+/// Trait for types that can provide a BLAKE3 fingerprint identifying a Lamport public key.
+///
+/// Implemented by both [`LamportPublicKey`] (computes the hash on the fly) and
+/// [`LamportCompressedPubKey`] (returns its stored `id`), allowing a single generic
+/// function to accept either form — see [`KeyStore::format_lamport_key`](crate::key_store).
+pub trait LamportPubKeyId {
+    fn key_id(&self) -> blake3::Hash;
+    fn message_bit_length(&self) -> Result<usize, LamportError>;
+    fn hash_type(&self) -> LamportType;
+}
+
+impl LamportPubKeyId for LamportPublicKey {
+    fn key_id(&self) -> blake3::Hash {
+        self.to_compressed().id()
+    }
+    fn message_bit_length(&self) -> Result<usize, LamportError> {
+        LamportPublicKey::message_bit_length(self)
+    }
+    fn hash_type(&self) -> LamportType {
+        LamportPublicKey::hash_type(self)
+    }
+}
+
+impl LamportPubKeyId for LamportCompressedPubKey {
+    fn key_id(&self) -> blake3::Hash {
+        self.id()
+    }
+    fn message_bit_length(&self) -> Result<usize, LamportError> {
+        LamportCompressedPubKey::message_bit_length(self)
+    }
+    fn hash_type(&self) -> LamportType {
+        LamportCompressedPubKey::hash_type(self)
     }
 }
 
@@ -3031,5 +3147,154 @@ mod tests {
 
         assert_eq!(private_key.derivation_index(), Some(derivation_index));
         assert_eq!(public_key.derivation_index(), Some(derivation_index));
+    }
+
+    // ── LamportCompressedPubKey ───────────────────────────────────────────────
+
+    fn derived_pubkey_for_compression() -> LamportPublicKey {
+        Lamport::new()
+            .generate_private_key(
+                b"test_compression_secret_12345678",
+                LamportType::SHA256,
+                1,
+                0,
+            )
+            .unwrap()
+            .public_key()
+            .unwrap()
+    }
+
+    fn imported_pubkey_for_compression() -> LamportPublicKey {
+        let hash_type = LamportType::SHA256;
+        let message_bit_length = 1;
+        let key_bytes = vec![0x42u8; 2 * message_bit_length * hash_type.hash_size()];
+        LamportPrivateKey::from_bytes(&key_bytes, message_bit_length, hash_type, None, true)
+            .unwrap()
+            .public_key()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_compressed_from_public_key_preserves_hash_type_and_imported_flag() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = LamportCompressedPubKey::from_public_key(&pubkey);
+        assert_eq!(compressed.hash_type(), LamportType::SHA256);
+        assert!(!compressed.imported());
+    }
+
+    #[test]
+    fn test_compressed_to_compressed_matches_from_public_key() {
+        let pubkey = derived_pubkey_for_compression();
+        assert_eq!(
+            pubkey.to_compressed(),
+            LamportCompressedPubKey::from_public_key(&pubkey)
+        );
+    }
+
+    #[test]
+    fn test_compressed_from_trait_matches_from_public_key() {
+        let pubkey = derived_pubkey_for_compression();
+        assert_eq!(
+            LamportCompressedPubKey::from(&pubkey),
+            LamportCompressedPubKey::from_public_key(&pubkey)
+        );
+    }
+
+    #[test]
+    fn test_compressed_id_is_blake3_hash_of_serialized_key() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = pubkey.to_compressed();
+        assert_eq!(compressed.id(), blake3::hash(&pubkey.to_bytes()));
+    }
+
+    #[test]
+    fn test_compressed_different_keys_produce_different_ids() {
+        let lamport = Lamport::new();
+        let master = b"test_compression_secret_12345678";
+        let pk_a = lamport
+            .generate_private_key(master, LamportType::SHA256, 1, 0)
+            .unwrap()
+            .public_key()
+            .unwrap();
+        let pk_b = lamport
+            .generate_private_key(master, LamportType::SHA256, 1, 1)
+            .unwrap()
+            .public_key()
+            .unwrap();
+        assert_ne!(pk_a.to_compressed().id(), pk_b.to_compressed().id());
+    }
+
+    #[test]
+    fn test_compressed_message_bit_length_round_trips() {
+        let pubkey = derived_pubkey_for_compression();
+        assert_eq!(pubkey.to_compressed().message_bit_length().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_compressed_derivation_index_present_for_derived_key() {
+        let pubkey = derived_pubkey_for_compression();
+        assert!(pubkey.to_compressed().derivation_index().is_some());
+    }
+
+    #[test]
+    fn test_compressed_verify_against_same_key() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = pubkey.to_compressed();
+        assert!(compressed.verify_against(&pubkey));
+    }
+
+    #[test]
+    fn test_compressed_verify_against_different_key_fails() {
+        let lamport = Lamport::new();
+        let master = b"test_compression_secret_12345678";
+        let pk_a = lamport
+            .generate_private_key(master, LamportType::SHA256, 1, 0)
+            .unwrap()
+            .public_key()
+            .unwrap();
+        let pk_b = lamport
+            .generate_private_key(master, LamportType::SHA256, 1, 1)
+            .unwrap()
+            .public_key()
+            .unwrap();
+        assert!(!pk_a.to_compressed().verify_against(&pk_b));
+    }
+
+    #[test]
+    fn test_compressed_imported_key_flag() {
+        let pubkey = imported_pubkey_for_compression();
+        assert!(pubkey.to_compressed().imported());
+    }
+
+    // ── LamportPubKeyId trait ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_pub_key_id_trait_full_and_compressed_agree() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = pubkey.to_compressed();
+        assert_eq!(
+            LamportPubKeyId::key_id(&pubkey),
+            LamportPubKeyId::key_id(&compressed)
+        );
+    }
+
+    #[test]
+    fn test_pub_key_id_trait_message_bit_length_agrees() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = pubkey.to_compressed();
+        assert_eq!(
+            LamportPubKeyId::message_bit_length(&pubkey).unwrap(),
+            LamportPubKeyId::message_bit_length(&compressed).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_pub_key_id_trait_hash_type_agrees() {
+        let pubkey = derived_pubkey_for_compression();
+        let compressed = pubkey.to_compressed();
+        assert_eq!(
+            LamportPubKeyId::hash_type(&pubkey),
+            LamportPubKeyId::hash_type(&compressed)
+        );
     }
 }

@@ -22,7 +22,8 @@ use crate::{
     key_store::KeyStore,
     key_type::BitcoinKeyType,
     lamport::{
-        Lamport, LamportMessage, LamportPrivateKey, LamportPublicKey, LamportSignature, LamportType,
+        Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
+        LamportSignature, LamportType,
     },
     musig2::{
         errors::Musig2SignerError,
@@ -1548,6 +1549,46 @@ impl KeyManager {
         Ok(signature)
     }
 
+    /// Expands a derived (non-imported) [`LamportCompressedPubKey`] back into the full
+    /// [`LamportPublicKey`] by re-deriving it from the stored seed using the metadata
+    /// embedded in the compressed key.
+    ///
+    /// After derivation the BLAKE3 fingerprint is verified against the stored `id` to confirm
+    /// the seed has not changed or been corrupted.
+    ///
+    /// Returns an error if the derivation index or message bit length is missing, or if the
+    /// integrity check fails.
+    pub fn expand_lamport(
+        &self,
+        compressed: &LamportCompressedPubKey,
+    ) -> Result<crate::lamport::LamportPublicKey, KeyManagerError> {
+        let public_key = if compressed.imported() {
+            // For imported lamport keys: loads the stored private key by its compressed key fingerprint
+            // and derives the public key from it, then verifies the BLAKE3 fingerprint.
+            let private_key = self
+                .keystore
+                .load_lamport_imported_key(compressed)?
+                .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
+
+            private_key.public_key()?
+        } else {
+            // For derived (non-imported) lamport keys: re-derives from seed and verifies BLAKE3 fingerprint.
+            let index = compressed
+                .derivation_index()
+                .ok_or(KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+
+            let message_bit_length = compressed.message_bit_length()?;
+
+            self.derive_lamport(message_bit_length, compressed.hash_type(), index)?
+        };
+
+        if !compressed.verify_against(&public_key) {
+            return Err(KeyManagerError::LamportExpansionFingerprintMismatch);
+        }
+
+        Ok(public_key)
+    }
+
     /// Exports the private key for a given public key.
     ///
     /// Note: Each public key uniquely maps to exactly one private key in the keystore.
@@ -1968,10 +2009,11 @@ mod tests {
     use zeroize::Zeroizing;
 
     use crate::{
-        errors::{KeyManagerError, WinternitzError},
+        errors::KeyManagerError,
+        errors::WinternitzError,
         key_store::KeyStore,
         key_type::BitcoinKeyType,
-        lamport::{Lamport, LamportPrivateKey, LamportType},
+        lamport::{Lamport, LamportCompressedPubKey, LamportPrivateKey, LamportType},
         rsa::RSAKeyPair,
         verifier::SignatureVerifier,
         winternitz::{to_checksummed_message, WinternitzType},
@@ -8037,5 +8079,105 @@ mod tests {
         cleanup_test_environment(&keystore_path2, &store_path2);
 
         Ok(())
+    }
+
+    // ── KeyManager::expand_lamport ────────────────────────────────────────────
+
+    #[test]
+    fn test_expand_lamport_derived_key_round_trips() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let original = key_manager.next_lamport(1, LamportType::SHA256)?;
+            let compressed = original.to_compressed();
+            let expanded = key_manager.expand_lamport(&compressed)?;
+            assert_eq!(expanded, original, "expanded key must equal the original");
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_expand_lamport_imported_key_round_trips() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let mut b0 = [0u8; 32];
+            let mut b1 = [0u8; 32];
+            let mut rng = secp256k1::rand::thread_rng();
+            rng.fill_bytes(&mut b0);
+            rng.fill_bytes(&mut b1);
+
+            let original =
+                key_manager.import_lamport_private_key(&b0, &b1, 1, LamportType::SHA256)?;
+            let compressed = original.to_compressed();
+            let expanded = key_manager.expand_lamport(&compressed)?;
+            assert_eq!(
+                expanded, original,
+                "expanded imported key must equal the original"
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_expand_lamport_imported_not_found_returns_error() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            // Build a compressed key for a private key never stored in this key manager.
+            let priv_key = LamportPrivateKey::from_bytes_splitted(
+                &[0x11u8; 32],
+                &[0x22u8; 32],
+                1,
+                LamportType::SHA256,
+                None,
+                true, // imported
+            )
+            .map_err(KeyManagerError::LamportGenerationError)?;
+            let public_key = priv_key
+                .public_key()
+                .map_err(KeyManagerError::LamportGenerationError)?;
+            let compressed = public_key.to_compressed();
+
+            let err = key_manager
+                .expand_lamport(&compressed)
+                .expect_err("must fail when imported key is not in the store");
+            assert!(
+                matches!(err, KeyManagerError::LamportPrivateKeyNotFound),
+                "unexpected error: {err}"
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_expand_lamport_missing_derivation_index_returns_error() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            // Import a key (so it has no derivation_index), then patch `imported=false` via JSON
+            // to simulate a derived compressed key whose derivation_index is missing.
+            let mut b0 = [0u8; 32];
+            let mut b1 = [0u8; 32];
+            let mut rng = secp256k1::rand::thread_rng();
+            rng.fill_bytes(&mut b0);
+            rng.fill_bytes(&mut b1);
+
+            let pubkey =
+                key_manager.import_lamport_private_key(&b0, &b1, 1, LamportType::SHA256)?;
+            let compressed = pubkey.to_compressed();
+
+            let mut val: serde_json::Value = serde_json::to_value(&compressed)
+                .map_err(|_| KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+            val["imported"] = serde_json::Value::Bool(false);
+            if let Some(ed) = val.get_mut("extra_data") {
+                if let Some(obj) = ed.as_object_mut() {
+                    obj.insert("derivation_index".into(), serde_json::Value::Null);
+                }
+            }
+            let patched: LamportCompressedPubKey = serde_json::from_value(val)
+                .map_err(|_| KeyManagerError::LamportKeyDerivationIndexNotFound)?;
+
+            let err = key_manager
+                .expand_lamport(&patched)
+                .expect_err("must fail with missing derivation index");
+            assert!(
+                matches!(err, KeyManagerError::LamportKeyDerivationIndexNotFound),
+                "unexpected error: {err}"
+            );
+            Ok(())
+        })
     }
 }

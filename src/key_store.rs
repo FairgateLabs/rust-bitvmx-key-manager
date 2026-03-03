@@ -1,7 +1,7 @@
 use crate::{
     errors::KeyManagerError,
     key_type::BitcoinKeyType,
-    lamport::{LamportPrivateKey, LamportPublicKey},
+    lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
     rsa::RSAKeyPair,
 };
 use base64::{engine::general_purpose, Engine as _};
@@ -349,11 +349,10 @@ impl KeyStore {
         Ok(None)
     }
 
-    fn format_lamport_storage_key(public_key: &LamportPublicKey) -> String {
-        // blake3 justification: This lamport key could be large to use it as storage key, impacting into rocksdb performance
-        let pubkey_bytes = public_key.to_bytes();
-        let hash = blake3::hash(&pubkey_bytes);
-        format!("{}:{}", Self::LAMPORT, hash.to_hex())
+    // Blake3 fingerprint justification: the full LamportPublicKey can be large; using its
+    // BLAKE3 hash as the storage key avoids rocksdb performance issues with big keys.
+    fn format_lamport_storage_key<K: LamportPubKeyId>(key: &K) -> String {
+        format!("{}:{}", Self::LAMPORT, key.key_id().to_hex())
     }
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
@@ -378,9 +377,9 @@ impl KeyStore {
     }
 
     // we are not storing derived keys
-    pub fn load_lamport_imported_key(
+    pub fn load_lamport_imported_key<K: LamportPubKeyId>(
         &self,
-        public_key: &LamportPublicKey,
+        public_key: &K,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key);
         let privk: Option<Zeroizing<String>> =

@@ -27,7 +27,7 @@ name = "key_manager"
 anyhow = "1.0.97"
 bitcoin = { version = "0.32.6", features = ["std", "rand-std", "serde"] }
 bip39 = "2.1.0"
-blake3 = "1.5"
+blake3 = { version = "1.5", features = ["serde"] }
 clap = { version = "4.5.32", features = ["derive"] }
 config = "0.15.11"
 itertools = "0.14.0"
@@ -53,6 +53,7 @@ uuid = { version = "1.10.0", features = ["v4"] }
 [dev-dependencies]
 criterion = "0.6.0"
 rand = "0.9.0"
+bincode = "1"
 
 [[bin]]
 name = "key-manager"

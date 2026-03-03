@@ -102,7 +102,7 @@ The `KeyManager` supports MuSig2 multi-signature schemes, allowing multiple part
 
 1. Clone the repository
 2. Install dependencies: `cargo build`
-3. Run tests: `cargo test -- --test-threads=1`
+3. Run tests: `cargo test --release -- --test-threads=1`
 
 ## Examples
 

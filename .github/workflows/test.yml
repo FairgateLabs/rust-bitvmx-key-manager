@@ -14,8 +14,10 @@ concurrency:
 
 jobs:
   test:
-    uses: FairgateLabs/BitVMX-CI/.github/workflows/ci_template.yml@main
+    uses: FairgateLabs/BitVMX-CI/.github/workflows/ci_local_template.yml@main
     with:
       repo: 'FairgateLabs/rust-bitvmx-workspace'
-      submodule_path: 'rust-bitvmx-key-manager'      
+      submodule_path: 'rust-bitvmx-key-manager'
+      cargo_lock_path: 'rust-bitvmx-key-manager/Cargo.lock'
+      target_path: 'rust-bitvmx-key-manager/target'
     secrets: inherit

@@ -15,14 +15,14 @@ pub fn random_bytes() -> [u8; 32] {
 
 pub fn create_key_manager(
     store_keystore_path: &str,
-    password: Option<String>,
+    encrypt: Option<Secret<String>>,
 ) -> Result<KeyManager, anyhow::Error> {
     if let Some(parent) = std::path::Path::new(store_keystore_path).parent() {
         std::fs::create_dir_all(parent).ok();
     }
 
     let random_mnemonic: Mnemonic = Mnemonic::from_entropy(&random_bytes()).unwrap();
-    let config = StorageConfig::new(store_keystore_path.to_string(), password.map(Secret::new));
+    let config = StorageConfig::new(store_keystore_path.to_string(), encrypt);
 
     let key_manager = key_manager::KeyManager::new(
         bitcoin::Network::Regtest,
@@ -45,8 +45,8 @@ pub fn generate_random_string() -> String {
 
 pub fn mock_data() -> Result<(KeyManager, PublicKey), anyhow::Error> {
     let path = format!("test_output/{}", generate_random_string());
-    let password = Some("secret password_123__ABC".to_string());
-    let key_manager = create_key_manager(path.as_str(), password)?;
+    let password = "secret password_123__ABC".to_string();
+    let key_manager = create_key_manager(path.as_str(), Some(Secret::from(password)))?;
     let pub_key = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?;
 
     Ok((key_manager, pub_key))

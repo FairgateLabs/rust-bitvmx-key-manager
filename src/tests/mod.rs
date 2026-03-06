@@ -1,6 +1,7 @@
 pub mod final_msg_signature_test;
 pub mod init_musig_method_test;
 pub mod multiple_msgs_test;
+pub mod musig2_test;
 pub mod nonces_test;
 pub mod partial_signature_test;
 pub mod rsa_test;

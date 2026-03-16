@@ -2104,9 +2104,11 @@ mod tests {
         // Case 2: Invalid derivation path (not possible)
 
         // Case 3 b: Write error when creating database keystore (invalid path)
-        //TODO: FIX THIS TEST is not working in windows envs
-        //let result = database_keystore("/invalid/path");
-        //assert!(matches!(result, Err(KeyStoreError::WriteError(_))));
+        #[cfg(windows)]
+        let result = database_keystore("C:\\invalid<>path\\::");
+        #[cfg(not(windows))]
+        let result = database_keystore("/invalid/path");
+        assert!(matches!(result, Err(KeyManagerError::StorageError(_))));
 
         // Case 4: Index overflow when generating keys
         let result =

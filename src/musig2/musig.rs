@@ -417,7 +417,7 @@ impl MuSig2SignerApi for MuSig2Signer {
                     message_id: message_id_nonce.to_string(),
                     participant_pubkey: pub_key.to_string(),
                 });
-                let exist_nonce = self.store.has_key(&key)?;
+                let exist_nonce = self.store.has_key(&key, None)?;
 
                 if exist_nonce {
                     return Err(Musig2SignerError::NonceAlreadyExists);
@@ -748,7 +748,9 @@ impl MuSig2Signer {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
-                }))?
+                    }),
+                None
+                )?
         {
             // Check if that nonce was generated for the exact same message
             if stored_message != message {
@@ -798,8 +800,6 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
-        let transaction_id = self.begin_transaction();
-
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -807,7 +807,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.0,
-            transaction_id,
+            None,
         )?;
         for (pub_key, pub_nonce) in data.1.iter() {
             self.store.set(
@@ -818,7 +818,7 @@ impl MuSig2Signer {
                     participant_pubkey: pub_key.to_string(),
                 }),
                 pub_nonce.clone(),
-                transaction_id,
+                None,
             )?;
         }
         self.store.set(
@@ -828,7 +828,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.2,
-            transaction_id,
+            None,
         )?;
         if let Some(tweak_value) = data.3 {
             self.store.set(
@@ -838,7 +838,7 @@ impl MuSig2Signer {
                     message_id: message_id.to_string(),
                 }),
                 tweak_value.to_be_bytes(),
-                transaction_id,
+                None,
             )?;
         }
         let message_ids =
@@ -846,7 +846,9 @@ impl MuSig2Signer {
                 .get::<String, Vec<MessageId>>(self.get_key(StoreKey::MuSig2MessageIds {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
-                }))?;
+                    }),
+                None,
+                )?;
 
         let mut message_ids = message_ids.unwrap_or(Vec::new());
         message_ids.push(message_id.to_string());
@@ -856,10 +858,8 @@ impl MuSig2Signer {
                 session_id: id.to_string(),
             }),
             message_ids,
-            transaction_id,
+            None,
         )?;
-
-        self.commit_transaction(transaction_id)?;
 
         Ok(())
     }
@@ -915,7 +915,7 @@ impl MuSig2Signer {
 
             let current_index = self
                 .store
-                .get::<String, u32>(key_index_used_by_me.clone())?;
+                .get::<String, u32>(key_index_used_by_me.clone(), None)?;
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
 
@@ -933,7 +933,7 @@ impl MuSig2Signer {
     ) -> Result<PublicKey, Musig2SignerError> {
         match self.store.get(self.get_key(StoreKey::MuSig2MyPublicKey {
             aggregated_pubkey: aggregated_pubkey.to_string(),
-        }))? {
+        }), None)? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::AggregatedPubkeyNotFound),
         }
@@ -947,7 +947,7 @@ impl MuSig2Signer {
             .store
             .get(self.get_key(StoreKey::MuSig2ParticipantPubKeys {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
-            }))? {
+            }), None)? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::AggregatedPubkeyNotFound),
         }
@@ -965,7 +965,7 @@ impl MuSig2Signer {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
-            }))? {
+            }), None)? {
             Some(result) => {
                 let tweak = musig2::secp256k1::Scalar::from_be_bytes(result)?;
                 Ok(Some(tweak))
@@ -986,7 +986,7 @@ impl MuSig2Signer {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
-            }))? {
+            }), None)? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::InvalidMessageId),
         }
@@ -1005,7 +1005,7 @@ impl MuSig2Signer {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
-                }))?;
+                }), None)?;
 
         for (key, value) in result {
             let pubkey_str = key.split('/').last().unwrap_or("");
@@ -1033,7 +1033,7 @@ impl MuSig2Signer {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
-            }))? {
+            }), None)? {
             Some(result) => Ok(result),
             None => Err(Musig2SignerError::InvalidMessageId),
         }
@@ -1053,7 +1053,7 @@ impl MuSig2Signer {
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
                 participant_pubkey: participant_pubkey.to_string(),
-            }))? {
+            }), None)? {
             Some(result) => Ok(Some(result)),
             None => Ok(None),
         }
@@ -1071,7 +1071,7 @@ impl MuSig2Signer {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
                 message_id: message_id.to_string(),
-            }))?;
+            }), None)?;
 
         Ok(result.len())
     }
@@ -1086,7 +1086,7 @@ impl MuSig2Signer {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
                 session_id: id.to_string(),
             },
-        ))? {
+        ), None)? {
             Some(ids) => Ok(ids),
             None => Err(Musig2SignerError::IdNotFound),
         }
@@ -1107,7 +1107,7 @@ impl MuSig2Signer {
                     session_id: id.to_string(),
                     message_id: message_id.to_string(),
                     participant_pubkey: participant_key.to_string(),
-                }))? {
+                }), None)? {
                     error!(
                         "Participant {} is missing pub nonce for message {}",
                         participant_key, message_id
@@ -1268,7 +1268,9 @@ impl MuSig2Signer {
             .store
             .partial_compare_keys(&self.get_key(StoreKey::MuSig2Session {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
-            }))?;
+                }),
+            None,
+            )?;
         if result.is_empty() {
             return Ok(false);
         }

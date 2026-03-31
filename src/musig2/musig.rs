@@ -800,6 +800,8 @@ impl MuSig2Signer {
         id: &str,
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
+        let transaction_id = self.begin_transaction();
+
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -807,7 +809,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.0,
-            None,
+            transaction_id,
         )?;
         for (pub_key, pub_nonce) in data.1.iter() {
             self.store.set(
@@ -818,7 +820,7 @@ impl MuSig2Signer {
                     participant_pubkey: pub_key.to_string(),
                 }),
                 pub_nonce.clone(),
-                None,
+                transaction_id,
             )?;
         }
         self.store.set(
@@ -828,7 +830,7 @@ impl MuSig2Signer {
                 message_id: message_id.to_string(),
             }),
             data.2,
-            None,
+            transaction_id,
         )?;
         if let Some(tweak_value) = data.3 {
             self.store.set(
@@ -838,7 +840,7 @@ impl MuSig2Signer {
                     message_id: message_id.to_string(),
                 }),
                 tweak_value.to_be_bytes(),
-                None,
+                transaction_id,
             )?;
         }
         let message_ids =
@@ -847,7 +849,7 @@ impl MuSig2Signer {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
                     session_id: id.to_string(),
                     }),
-                None,
+                transaction_id,
                 )?;
 
         let mut message_ids = message_ids.unwrap_or(Vec::new());
@@ -858,7 +860,7 @@ impl MuSig2Signer {
                 session_id: id.to_string(),
             }),
             message_ids,
-            None,
+            transaction_id,
         )?;
 
         Ok(())
@@ -915,7 +917,7 @@ impl MuSig2Signer {
 
             let current_index = self
                 .store
-                .get::<String, u32>(key_index_used_by_me.clone(), None)?;
+                .get::<String, u32>(key_index_used_by_me.clone(), db_tx_id)?;
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
 

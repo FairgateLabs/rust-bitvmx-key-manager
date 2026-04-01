@@ -1335,6 +1335,8 @@ impl MuSig2Signer {
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), StorageError> {
         #[cfg(feature = "transactional")]
         self.store.commit_transaction(tx_id.unwrap())?;
+        #[cfg(not(feature = "transactional"))]
+        let _ = tx_id;
 
         Ok(())
     }

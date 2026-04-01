@@ -1970,6 +1970,8 @@ impl KeyManager {
     fn rollback_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
         #[cfg(feature = "transactional")]
         self.keystore.rollback_transaction(tx_id.unwrap())?;
+        #[cfg(not(feature = "transactional"))]
+        let _ = tx_id;
 
         Ok(())
     }
@@ -1978,6 +1980,8 @@ impl KeyManager {
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
         #[cfg(feature = "transactional")]
         self.keystore.commit_transaction(tx_id.unwrap())?;
+        #[cfg(not(feature = "transactional"))]
+        let _ = tx_id;
 
         Ok(())
     }

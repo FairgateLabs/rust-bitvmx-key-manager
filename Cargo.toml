@@ -68,7 +68,7 @@ name = "musig_bench"
 harness = false
 
 [features]
-default = ["transactional", "wots_idx_check", "lamport_idx_check"] # transactional is ON by default, strict is OFF
+default = ["wots_idx_check", "lamport_idx_check"]
 wots_idx_check = []
 lamport_idx_check = []
 transactional = []

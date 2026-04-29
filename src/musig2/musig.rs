@@ -27,9 +27,6 @@ use super::{
 enum StoreKey {
     /// Stores the nonce index for a given public key
     IndexForNonceGeneration(PublicKey),
-    MuSig2Session {
-        aggregated_pubkey: String,
-    },
     MuSig2ParticipantPubKeys {
         aggregated_pubkey: String,
     },
@@ -1207,9 +1204,6 @@ impl MuSig2Signer {
             StoreKey::IndexForNonceGeneration(pubkey) => {
                 format!("{prefix}/index_for_nonce_generation/{pubkey}")
             }
-            StoreKey::MuSig2Session { aggregated_pubkey } => {
-                format!("{prefix}/session/{aggregated_pubkey}")
-            }
             StoreKey::MuSig2ParticipantPubKeys { aggregated_pubkey } => {
                 format!("{prefix}/session/{aggregated_pubkey}/participant_pub_keys")
             }
@@ -1279,17 +1273,12 @@ impl MuSig2Signer {
     }
 
     fn check_musig_data(&self, aggregated_pubkey: &PublicKey) -> Result<bool, Musig2SignerError> {
-        let result = self.store.partial_compare_keys(
-            &self.get_key(StoreKey::MuSig2Session {
+        Ok(self.store.has_key(
+            &self.get_key(StoreKey::MuSig2MyPublicKey {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
             }),
             None,
-        )?;
-        if result.is_empty() {
-            return Ok(false);
-        }
-
-        Ok(true)
+        )?)
     }
 
     pub(crate) fn aggregate_private_key(

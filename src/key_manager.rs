@@ -11,6 +11,7 @@ use bitcoin::{
 };
 use hkdf::Hkdf;
 use itertools::izip;
+use serde::Serialize;
 use sha2::Sha256;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
@@ -45,6 +46,43 @@ const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid perf
 // HKDF domain separator for MuSig2 nonce seed generation
 // Version 1 - ensures derived nonce seeds are unique to this specific use case
 const MUSIG2_NONCE_HKDF_INFO: &[u8] = b"KeyManager-MuSig2-Nonce-v1";
+
+#[derive(Debug, Serialize)]
+pub struct ExportedKeys {
+    pub bitcoin_keypairs: Vec<ExportedBitcoinKeyPair>,
+    pub rsa_keypairs: Vec<ExportedRsaKeyPair>,
+    pub lamport_imported_raw: Vec<ExportedLamportImportedKey>,
+    pub aggregated_sessions: Vec<ExportedAggregatedSession>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportedBitcoinKeyPair {
+    pub public_key: String,
+    pub private_key_wif: String,
+    pub key_type: Option<String>,
+    pub category: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportedRsaKeyPair {
+    pub public_key_pem: String,
+    pub private_key_pem: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportedLamportImportedKey {
+    pub storage_key: String,
+    pub encoded_private_key_and_spent_flag: String,
+    pub note: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportedAggregatedSession {
+    pub aggregated_public_key: String,
+    pub my_public_key: Option<String>,
+    pub my_owned_keypair: Option<ExportedBitcoinKeyPair>,
+    pub ordered_participant_public_keys: Vec<String>,
+}
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
 /// It includes functionality for generating, importing, and deriving keys, as well as signing messages
@@ -239,6 +277,112 @@ impl KeyManager {
 
     pub fn musig2(&self) -> &MuSig2Signer {
         &self.musig2
+    }
+
+    pub fn export_keys(&self) -> Result<ExportedKeys, KeyManagerError> {
+        let storage_keys = self.keystore.keys()?;
+        let mut bitcoin_keypairs = Vec::new();
+        let mut rsa_keypairs = Vec::new();
+        let mut lamport_imported_raw = Vec::new();
+        let mut aggregated_sessions = Vec::new();
+
+        for key in &storage_keys {
+            if let Ok(public_key) = PublicKey::from_str(key) {
+                if let Some((private_key, _, key_type)) = self.keystore.load_keypair(&public_key)? {
+                    bitcoin_keypairs.push(Self::exported_bitcoin_keypair(
+                        public_key,
+                        private_key,
+                        key_type,
+                    ));
+                }
+                continue;
+            }
+
+            if key.starts_with("-----BEGIN PUBLIC KEY-----") {
+                if let Some(private_key_pem) = self.keystore.load_value::<String>(key)? {
+                    if private_key_pem.starts_with("-----BEGIN PRIVATE KEY-----") {
+                        rsa_keypairs.push(ExportedRsaKeyPair {
+                            public_key_pem: key.clone(),
+                            private_key_pem,
+                        });
+                    }
+                }
+                continue;
+            }
+
+            if key.starts_with("lamport:") {
+                if let Some(value) = self.keystore.load_value::<String>(key)? {
+                    lamport_imported_raw.push(ExportedLamportImportedKey {
+                        storage_key: key.clone(),
+                        encoded_private_key_and_spent_flag: value,
+                        note: "Imported Lamport keys are stored by BLAKE3 public-key id. The stored value is `lamport:<base64_private_key_bytes>:<spent>`. Full public-key metadata is not stored separately.".to_string(),
+                    });
+                }
+            }
+        }
+
+        let session_prefix = "musig2/session/";
+        let participant_suffix = "/participant_pub_keys";
+        for key in storage_keys
+            .iter()
+            .filter(|key| key.starts_with(session_prefix) && key.ends_with(participant_suffix))
+        {
+            let aggregated_public_key = key
+                .trim_start_matches(session_prefix)
+                .trim_end_matches(participant_suffix);
+
+            let ordered_participant_public_keys = self
+                .keystore
+                .load_value::<Vec<PublicKey>>(key)?
+                .unwrap_or_default();
+
+            let my_public_key_key = format!("musig2/session/{aggregated_public_key}/my_public_key");
+            let my_public_key = self.keystore.load_value::<PublicKey>(&my_public_key_key)?;
+            let my_owned_keypair = match my_public_key {
+                Some(pubkey) => self.keystore.load_keypair(&pubkey)?.map(
+                    |(private_key, public_key, key_type)| {
+                        Self::exported_bitcoin_keypair(public_key, private_key, key_type)
+                    },
+                ),
+                None => None,
+            };
+
+            aggregated_sessions.push(ExportedAggregatedSession {
+                aggregated_public_key: aggregated_public_key.to_string(),
+                my_public_key: my_public_key.map(|key| key.to_string()),
+                my_owned_keypair,
+                ordered_participant_public_keys: ordered_participant_public_keys
+                    .into_iter()
+                    .map(|key| key.to_string())
+                    .collect(),
+            });
+        }
+
+        Ok(ExportedKeys {
+            bitcoin_keypairs,
+            rsa_keypairs,
+            lamport_imported_raw,
+            aggregated_sessions,
+        })
+    }
+
+    fn exported_bitcoin_keypair(
+        public_key: PublicKey,
+        private_key: PrivateKey,
+        key_type: Option<BitcoinKeyType>,
+    ) -> ExportedBitcoinKeyPair {
+        let category = match key_type {
+            Some(BitcoinKeyType::P2tr) => "schnorr".to_string(),
+            Some(_) => "ecdsa".to_string(),
+            None => "unknown".to_string(),
+        };
+
+        ExportedBitcoinKeyPair {
+            public_key: public_key.to_string(),
+            private_key_wif: private_key.to_string(),
+            key_type: key_type.map(|key_type| format!("{:?}", key_type)),
+            category,
+        }
     }
 
     /*********************************/

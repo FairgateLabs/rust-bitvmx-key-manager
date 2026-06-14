@@ -1,6 +1,6 @@
 use anyhow::{Ok, Result};
 use bitvmx_settings::settings::ConfigurationFile;
-use std::str::FromStr;
+use std::{fs, str::FromStr};
 
 use crate::{
     config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
@@ -149,6 +149,11 @@ enum Commands {
         #[arg(value_name = "public_key", short = 'k', long = "public_key")]
         pub_key: String, // PEM formate,
     },
+
+    ExportKeys {
+        #[arg(value_name = "output", short = 'o', long = "output")]
+        output: String,
+    },
 }
 
 impl Cli {
@@ -263,8 +268,21 @@ impl Cli {
                     key_manager.decrypt_rsa_message(bytes.as_slice(), pub_key)?;
                 info!("Decrypted message: {}", hex::encode(decrypted_message));
             }
+
+            Commands::ExportKeys { output } => {
+                self.export_keys(output)?;
+            }
         }
 
+        Ok(())
+    }
+
+    fn export_keys(&self, output: &str) -> Result<()> {
+        let key_manager = self.key_manager()?;
+        let exported_keys = key_manager.export_keys()?;
+        let json = serde_json::to_string_pretty(&exported_keys)?;
+        fs::write(output, json)?;
+        info!("Exported keys to {}", output);
         Ok(())
     }
 

@@ -8,6 +8,7 @@ use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
+use serde::de::DeserializeOwned;
 use std::{rc::Rc, str::FromStr};
 use storage_backend::storage::{KeyValueStore, Storage};
 use uuid::Uuid;
@@ -94,13 +95,23 @@ impl KeyStore {
         Ok(())
     }
 
+    pub fn keys(&self) -> Result<Vec<String>, KeyManagerError> {
+        Ok(self.store.keys(None)?)
+    }
+
+    pub fn load_value<V: DeserializeOwned>(&self, key: &str) -> Result<Option<V>, KeyManagerError> {
+        Ok(self.store.get::<&str, V>(key, None)?)
+    }
+
     pub fn load_keypair(
         &self,
         public_key: &PublicKey,
     ) -> Result<Option<(PrivateKey, PublicKey, Option<BitcoinKeyType>)>, KeyManagerError> {
         let key = public_key.to_string();
-        let data: Option<Zeroizing<String>> =
-            self.store.get::<String, String>(key, None)?.map(Zeroizing::new);
+        let data: Option<Zeroizing<String>> = self
+            .store
+            .get::<String, String>(key, None)?
+            .map(Zeroizing::new);
 
         if let Some(private_key_str) = data {
             if let Some(colon_pos) = private_key_str.find(':') {
@@ -338,8 +349,10 @@ impl KeyStore {
         rsa_pub_key: RsaPublicKey,
     ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let privk: Option<Zeroizing<String>> =
-            self.store.get::<String, String>(pubk, None)?.map(Zeroizing::new);
+        let privk: Option<Zeroizing<String>> = self
+            .store
+            .get::<String, String>(pubk, None)?
+            .map(Zeroizing::new);
 
         if let Some(privk) = privk {
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
@@ -382,8 +395,10 @@ impl KeyStore {
         public_key: &K,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key);
-        let privk: Option<Zeroizing<String>> =
-            self.store.get::<String, String>(pubk, None)?.map(Zeroizing::new);
+        let privk: Option<Zeroizing<String>> = self
+            .store
+            .get::<String, String>(pubk, None)?
+            .map(Zeroizing::new);
 
         if let Some(privk) = privk {
             let parts: Vec<&str> = privk.split(':').collect();

@@ -44,13 +44,27 @@ mod musig2_tests {
         map2.insert(pk1, n1);
         km2.musig2().aggregate_nonces(&agg, &id2, map2)?;
 
-        Ok(SessionCtx { km1, km2, pk1, pk2, agg, id1, id2 })
+        Ok(SessionCtx {
+            km1,
+            km2,
+            pk1,
+            pk2,
+            agg,
+            id1,
+            id2,
+        })
     }
 
     fn create_session_with_partials(
         message: &str,
-    ) -> Result<(SessionCtx, Vec<(String, PartialSignature)>, Vec<(String, PartialSignature)>), anyhow::Error>
-    {
+    ) -> Result<
+        (
+            SessionCtx,
+            Vec<(String, PartialSignature)>,
+            Vec<(String, PartialSignature)>,
+        ),
+        anyhow::Error,
+    > {
         let ctx = create_session(message)?;
         let ps1 = ctx.km1.get_my_partial_signatures(&ctx.agg, &ctx.id1)?;
         let ps2 = ctx.km2.get_my_partial_signatures(&ctx.agg, &ctx.id2)?;
@@ -213,7 +227,8 @@ mod musig2_tests {
         all.insert(ctx.pk1, ps1);
         all.insert(ctx.pk2, ps2);
 
-        ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all.clone())?;
+        ctx.km1
+            .save_partial_signatures(&ctx.agg, &ctx.id1, all.clone())?;
 
         let result = ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all);
         assert!(matches!(
@@ -256,7 +271,8 @@ mod musig2_tests {
     fn test_verify_partial_signatures_positive() -> Result<(), anyhow::Error> {
         let (ctx, _ps1, ps2) = create_session_with_partials("verify_pos")?;
 
-        let ok = ctx.km1
+        let ok = ctx
+            .km1
             .musig2()
             .verify_partial_signatures(&ctx.agg, &ctx.id1, ctx.pk2, ps2)?;
         assert!(ok);
@@ -278,7 +294,8 @@ mod musig2_tests {
             })
             .collect();
 
-        let result = ctx.km1
+        let result = ctx
+            .km1
             .musig2()
             .verify_partial_signatures(&ctx.agg, &ctx.id1, ctx.pk2, tampered);
         assert!(matches!(
@@ -310,8 +327,12 @@ mod musig2_tests {
         let sig2 = ctx.km2.get_aggregated_signature(&ctx.agg, &ctx.id2, msg)?;
         assert_eq!(sig1, sig2);
 
-        assert!(ctx.km1.verify_final_signature(msg, sig1, ctx.agg, &ctx.id1)?);
-        assert!(ctx.km2.verify_final_signature(msg, sig2, ctx.agg, &ctx.id2)?);
+        assert!(ctx
+            .km1
+            .verify_final_signature(msg, sig1, ctx.agg, &ctx.id1)?);
+        assert!(ctx
+            .km2
+            .verify_final_signature(msg, sig2, ctx.agg, &ctx.id2)?);
 
         clear_output();
         Ok(())
@@ -342,7 +363,9 @@ mod musig2_tests {
         let mut bad_bytes = valid_sig.serialize();
         bad_bytes[0] ^= 0xFF;
         let bad_sig = bitcoin::secp256k1::schnorr::Signature::from_slice(&bad_bytes)?;
-        let result = ctx.km1.verify_final_signature(msg, bad_sig, ctx.agg, &ctx.id1);
+        let result = ctx
+            .km1
+            .verify_final_signature(msg, bad_sig, ctx.agg, &ctx.id1);
         assert!(matches!(
             result,
             Err(KeyManagerError::Musig2SignerError(

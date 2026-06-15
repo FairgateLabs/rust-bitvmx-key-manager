@@ -3,6 +3,6 @@ key_manager:
   mnemonic_sentence: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
   mnemonic_passphrase: ""
 
-storage:
+key_storage:
   password: "secret password_123__ABC"
   path: "/tmp/storage.db"

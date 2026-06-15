@@ -41,8 +41,7 @@ impl KeyManagerConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)] // enforce strict field compliance
 pub struct Config {
     pub key_manager: KeyManagerConfig,
-    pub storage: StorageConfig,
+    pub key_storage: StorageConfig,
 }

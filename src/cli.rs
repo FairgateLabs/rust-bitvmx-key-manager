@@ -3,8 +3,12 @@ use bitvmx_settings::settings::ConfigurationFile;
 use std::{fs, str::FromStr};
 
 use crate::{
-    config::Config, create_key_manager_from_config, errors::CliError, key_manager::KeyManager,
-    key_type::BitcoinKeyType, verifier::SignatureVerifier,
+    config::Config,
+    create_key_manager_from_config,
+    errors::CliError,
+    key_manager::{ExportedKeys, KeyManager},
+    key_type::BitcoinKeyType,
+    verifier::SignatureVerifier,
 };
 use bitcoin::{
     bip32::Xpub,
@@ -154,6 +158,14 @@ enum Commands {
         #[arg(value_name = "output", short = 'o', long = "output")]
         output: String,
     },
+
+    Merge {
+        #[arg(value_name = "output", short = 'o', long = "output")]
+        output: String,
+
+        #[arg(value_name = "json_files", required = true)]
+        json_files: Vec<String>,
+    },
 }
 
 impl Cli {
@@ -272,6 +284,10 @@ impl Cli {
             Commands::ExportKeys { output } => {
                 self.export_keys(output)?;
             }
+
+            Commands::Merge { output, json_files } => {
+                self.merge(output, json_files)?;
+            }
         }
 
         Ok(())
@@ -283,6 +299,22 @@ impl Cli {
         let json = serde_json::to_string_pretty(&exported_keys)?;
         fs::write(output, json)?;
         info!("Exported keys to {}", output);
+        Ok(())
+    }
+
+    fn merge(&self, output: &str, json_files: &[String]) -> Result<()> {
+        let mut exported_files = Vec::new();
+
+        for json_file in json_files {
+            let contents = fs::read_to_string(json_file)?;
+            exported_files.push(serde_json::from_str::<ExportedKeys>(&contents)?);
+        }
+
+        let key_manager = self.key_manager()?;
+        let merged_keys = key_manager.merge_exported_keys(exported_files)?;
+        let json = serde_json::to_string_pretty(&merged_keys)?;
+        fs::write(output, json)?;
+        info!("Merged aggregated keys to {}", output);
         Ok(())
     }
 

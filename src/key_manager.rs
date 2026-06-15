@@ -1,4 +1,8 @@
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    str::FromStr,
+};
 
 use bip39::Mnemonic;
 use bitcoin::{
@@ -11,7 +15,7 @@ use bitcoin::{
 };
 use hkdf::Hkdf;
 use itertools::izip;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use storage_backend::{storage::Storage, storage_config::StorageConfig};
 use tracing::debug;
@@ -47,7 +51,7 @@ const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid perf
 // Version 1 - ensures derived nonce seeds are unique to this specific use case
 const MUSIG2_NONCE_HKDF_INFO: &[u8] = b"KeyManager-MuSig2-Nonce-v1";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportedKeys {
     pub bitcoin_keypairs: Vec<ExportedBitcoinKeyPair>,
     pub rsa_keypairs: Vec<ExportedRsaKeyPair>,
@@ -55,7 +59,7 @@ pub struct ExportedKeys {
     pub aggregated_sessions: Vec<ExportedAggregatedSession>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportedBitcoinKeyPair {
     pub public_key: String,
     pub private_key_wif: String,
@@ -63,25 +67,39 @@ pub struct ExportedBitcoinKeyPair {
     pub category: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportedRsaKeyPair {
     pub public_key_pem: String,
     pub private_key_pem: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportedLamportImportedKey {
     pub storage_key: String,
     pub encoded_private_key_and_spent_flag: String,
     pub note: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExportedAggregatedSession {
     pub aggregated_public_key: String,
     pub my_public_key: Option<String>,
     pub my_owned_keypair: Option<ExportedBitcoinKeyPair>,
     pub ordered_participant_public_keys: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MergedKeys {
+    pub aggregated_keypairs: Vec<MergedAggregatedKeyPair>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MergedAggregatedKeyPair {
+    pub session_aggregated_public_key: String,
+    pub generated_aggregated_public_key: String,
+    pub private_key_wif: String,
+    pub ordered_participant_public_keys: Vec<String>,
+    pub public_key_matches_session: bool,
 }
 
 /// This module provides a key manager for managing BitVMX keys and signatures.
@@ -363,6 +381,81 @@ impl KeyManager {
             rsa_keypairs,
             lamport_imported_raw,
             aggregated_sessions,
+        })
+    }
+
+    pub fn merge_exported_keys(
+        &self,
+        exported_files: Vec<ExportedKeys>,
+    ) -> Result<MergedKeys, KeyManagerError> {
+        let mut private_keys_by_public_key: HashMap<String, String> = HashMap::new();
+        let mut sessions_by_participants: HashMap<Vec<String>, String> = HashMap::new();
+
+        for exported in exported_files {
+            for keypair in exported.bitcoin_keypairs {
+                private_keys_by_public_key
+                    .entry(keypair.public_key)
+                    .or_insert(keypair.private_key_wif);
+            }
+
+            for session in exported.aggregated_sessions {
+                if let Some(keypair) = session.my_owned_keypair {
+                    private_keys_by_public_key
+                        .entry(keypair.public_key)
+                        .or_insert(keypair.private_key_wif);
+                }
+
+                if !session.ordered_participant_public_keys.is_empty() {
+                    sessions_by_participants
+                        .entry(session.ordered_participant_public_keys)
+                        .or_insert(session.aggregated_public_key);
+                }
+            }
+        }
+
+        let mut seen = HashSet::new();
+        let mut aggregated_keypairs = Vec::new();
+
+        for (ordered_participant_public_keys, session_aggregated_public_key) in
+            sessions_by_participants
+        {
+            if !seen.insert(ordered_participant_public_keys.clone()) {
+                continue;
+            }
+
+            let mut partial_keys_bytes = Vec::new();
+            let mut all_participant_privates_present = true;
+
+            for public_key in &ordered_participant_public_keys {
+                let Some(private_key_wif) = private_keys_by_public_key.get(public_key) else {
+                    all_participant_privates_present = false;
+                    break;
+                };
+
+                let private_key = PrivateKey::from_str(private_key_wif)?;
+                partial_keys_bytes.push(private_key.to_bytes().to_vec());
+            }
+
+            if !all_participant_privates_present {
+                continue;
+            }
+
+            let (aggregated_private_key, generated_aggregated_public_key) = self
+                .musig2
+                .aggregate_private_key(Zeroizing::new(partial_keys_bytes), self.network)?;
+
+            aggregated_keypairs.push(MergedAggregatedKeyPair {
+                session_aggregated_public_key: session_aggregated_public_key.clone(),
+                generated_aggregated_public_key: generated_aggregated_public_key.to_string(),
+                private_key_wif: aggregated_private_key.to_string(),
+                ordered_participant_public_keys,
+                public_key_matches_session: generated_aggregated_public_key.to_string()
+                    == session_aggregated_public_key,
+            });
+        }
+
+        Ok(MergedKeys {
+            aggregated_keypairs,
         })
     }
 

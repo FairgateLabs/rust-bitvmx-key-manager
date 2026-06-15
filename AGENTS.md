@@ -13,12 +13,15 @@ Guidance for coding agents working on `rust-bitvmx-key-manager`.
 - Lamport one-time signatures, including derived and imported keys.
 - RSA key generation/import, signing, verification, encryption, and decryption.
 - MuSig2 multi-signature session management.
+- JSON export of stored key material and MuSig2 session aggregation metadata.
+- Merging multiple exported JSON files to reconstruct aggregate private keys when all participant private keys are available.
 
 The package name is `bitvmx-key-manager`, and the library crate is exposed as `key_manager`.
 
 ## Important security/design notes
 
 - This project handles sensitive material. Avoid logging mnemonics, passphrases, private keys, seeds, nonces, or decrypted keystore values.
+- `export-keys` and `merge` write private keys to JSON files. Treat those outputs as highly sensitive and do not commit them.
 - The keystore is essential for recovery. The mnemonic alone is not enough because imported keys and RSA keys are stored independently of HD derivation.
 - Bitcoin keys are stored in the encrypted storage backend and are also derivable from the mnemonic.
 - Winternitz keys are not stored as full key sets; they are regenerated from deterministic seeds to avoid huge storage usage.
@@ -57,6 +60,8 @@ cargo test -- --test-threads=1
 cargo run --example create
 cargo run --example key_gen
 cargo run --bin key-manager -- --configuration config/development.yaml --help
+cargo run --bin key-manager -- --configuration config/development.yaml export-keys -o /tmp/key-export.json
+cargo run --bin key-manager -- --configuration config/development.yaml merge -o /tmp/merged.json /tmp/key-export-1.json /tmp/key-export-2.json
 ```
 
 Notes:
@@ -101,6 +106,23 @@ storage:
 ```
 
 `network` is parsed as `bitcoin::Network`. Invalid mnemonics/passphrases or mismatches with existing storage should return typed errors, not panic.
+
+## Key export and merge commands
+
+`export-keys` scans the existing encrypted storage without adding extra tracking metadata and writes JSON containing:
+
+- `bitcoin_keypairs`: stored Bitcoin keypairs, categorized as `ecdsa`, `schnorr`, or `unknown` from the stored `BitcoinKeyType` metadata.
+- `rsa_keypairs`: stored RSA PEM public/private keypairs.
+- `lamport_imported_raw`: raw imported Lamport storage entries.
+- `aggregated_sessions`: MuSig2 aggregated public key, local owned keypair when available, and ordered participant public keys.
+
+`merge` reads multiple `export-keys` JSON files and reconstructs aggregate private keys for MuSig2 sessions where every participant private key is present. It orders private keys using `ordered_participant_public_keys` and uses the existing MuSig2 private aggregation logic (`MuSig2Signer::aggregate_private_key`). The output includes `public_key_matches_session` so callers can verify the generated aggregate public key matches the session aggregate public key.
+
+Limitations without extra tracking:
+
+- Untyped Bitcoin keypairs may be imported, legacy, or private-key-aggregated keypairs.
+- Derived Winternitz and derived Lamport private keys are not stored as full key material and are not fully exported by `export-keys`.
+- Imported Lamport export is raw because full public-key metadata is not stored separately.
 
 ## Development guidance
 

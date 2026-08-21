@@ -1,6 +1,5 @@
 /target
 .vscode/
-Cargo.lock
 .DS_Store
 secure_storage.db
 /test_output

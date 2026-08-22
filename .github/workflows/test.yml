@@ -25,4 +25,5 @@ jobs:
       submodule_path: 'rust-bitvmx-key-manager'
       cargo_lock_path: 'rust-bitvmx-key-manager/Cargo.lock'
       target_path: 'rust-bitvmx-key-manager/target'
+      single_thread_tests: true
     secrets: inherit

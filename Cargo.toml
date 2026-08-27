@@ -24,36 +24,36 @@ readme = "README.md"
 name = "key_manager"
 
 [dependencies]
-anyhow = "1.0.97"
-bitcoin = { version = "0.32.6", features = ["std", "rand-std", "serde"] }
-bip39 = "2.1.0"
-blake3 = { version = "1.5", features = ["serde"] }
-clap = { version = "4.5.32", features = ["derive"] }
-config = "0.15.11"
-itertools = "0.14.0"
-serde = "1.0.219"
-serde_json = "1.0.140"
-thiserror = "2.0.12"
-tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+anyhow = "1.0.104"
+bitcoin = { version = "0.32.102", features = ["std", "rand-std", "serde"] }
+bip39 = "2.2.2"
+blake3 = { version = "1.8.6", features = ["serde"] }
+clap = { version = "4.6.6", features = ["derive"] }
+config = "0.15.25"
+itertools = "0.15.0"
+serde = "1.0.229"
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
 hex = "0.4.3"
-rsa = "0.9.8"
-sha2 = "0.10"
-hkdf = "0.12"
-base64 = "0.22.0"
+rsa = "0.9.10"
+sha2 = "0.10.9"
+hkdf = "0.12.4"
+base64 = "0.23.1"
 rust-bitvmx-storage-backend = { git = "https://github.com/FairgateLabs/rust-bitvmx-storage-backend.git", tag = "v0.8.2" }
 bitvmx-settings = { git = "https://github.com/FairgateLabs/rust-bitvmx-settings.git", tag = "v0.8.2" }
-musig2 = { version = "0.2.3", features = ["serde", "rand"] }
-strum = { version = "0.26", features = ["derive"] }
+musig2 = { version = "0.4.1", features = ["serde", "rand"] }
+strum = { version = "0.28.0", features = ["derive"] }
 xyzpub = "0.3.0"
-zeroize = "1.8.2"
+zeroize = "1.9.0"
 redact = { version = "0.1", features = ["serde", "zeroize"] }
-uuid = { version = "1.10.0", features = ["v4"] }
+uuid = { version = "1.24.0", features = ["v4"] }
 
 [dev-dependencies]
-criterion = "0.6.0"
-rand = "0.9.0"
-bincode = "1"
+criterion = "0.8.2"
+rand = "0.10.2"
+bincode = { version = "2.0.1", features = ["serde"] }
 
 [[bin]]
 name = "key-manager"

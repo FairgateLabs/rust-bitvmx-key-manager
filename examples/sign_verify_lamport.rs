@@ -15,6 +15,7 @@ fn main() {
 
 fn sign_verify_lamport_example() {
     let key_manager = create_key_manager_example("sign_verify_lamport");
+    let bincode_config = bincode::config::standard();
 
     // --- Signing and verifying a message using Lamport
 
@@ -32,13 +33,15 @@ fn sign_verify_lamport_example() {
     // Difference in size between serialized compressed and uncompressed public key
     println!(
         "\nSerialized compressed Lamport public key ({} bytes)",
-        bincode::serialize(&lamport_pubkey.to_compressed())
+        bincode::serde::encode_to_vec(lamport_pubkey.to_compressed(), bincode_config)
             .unwrap()
             .len()
     );
     println!(
         "Serialized uncompressed Lamport public key ({} bytes)",
-        bincode::serialize(&lamport_pubkey).unwrap().len()
+        bincode::serde::encode_to_vec(&lamport_pubkey, bincode_config)
+            .unwrap()
+            .len()
     );
 
     // Create a Lamport signature
@@ -138,9 +141,10 @@ fn sign_verify_lamport_example() {
 
     // Example of storing compressed public keys
     let compressed_lamport_pubkey = lamport_pubkey_string_example.to_compressed();
-    let serialized_compressed: Vec<u8> = bincode::serialize(&compressed_lamport_pubkey).unwrap();
-    let deserialized_compressed: LamportCompressedPubKey =
-        bincode::deserialize(&serialized_compressed).unwrap();
+    let serialized_compressed =
+        bincode::serde::encode_to_vec(&compressed_lamport_pubkey, bincode_config).unwrap();
+    let (deserialized_compressed, _): (LamportCompressedPubKey, usize) =
+        bincode::serde::decode_from_slice(&serialized_compressed, bincode_config).unwrap();
     let decompressed_pubkey = key_manager
         .expand_lamport(&deserialized_compressed)
         .unwrap();
@@ -150,8 +154,8 @@ fn sign_verify_lamport_example() {
     );
 
     // Difference in size between serialized compressed and uncompressed public key
-    let serialized_uncompressed: Vec<u8> =
-        bincode::serialize(&lamport_pubkey_string_example).unwrap();
+    let serialized_uncompressed =
+        bincode::serde::encode_to_vec(&lamport_pubkey_string_example, bincode_config).unwrap();
     println!(
         "\nSerialized compressed Lamport public key ({} bytes)",
         serialized_compressed.len()

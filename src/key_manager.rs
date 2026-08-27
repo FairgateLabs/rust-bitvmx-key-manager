@@ -1913,7 +1913,10 @@ impl KeyManager {
             }
         };
 
-        let sk = musig2::secp256k1::SecretKey::from_slice(&private_key[..])
+        let private_key_bytes: [u8; 32] = private_key[..]
+            .try_into()
+            .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
+        let sk = musig2::secp256k1::SecretKey::from_byte_array(private_key_bytes)
             .map_err(|_| KeyManagerError::InvalidPrivateKey)?;
 
         let result = sign_partial(

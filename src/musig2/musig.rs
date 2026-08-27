@@ -771,15 +771,16 @@ impl MuSig2Signer {
             return Ok(());
         }
 
-        let sec_nonce = musig2::SecNonceBuilder::new(*nonce_seed)
-            .with_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
-            .with_message(&message)
-            .build();
+        let my_pub_key = self.my_public_key(aggregated_pubkey)?;
+        let sec_nonce =
+            musig2::SecNonceBuilder::from_pubkey(*nonce_seed, to_musig_pubkey(my_pub_key)?)
+                .with_aggregated_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
+                .with_message(&message)
+                .build();
 
         let pub_nonce = sec_nonce.public_nonce();
 
         let mut pub_nonces = HashMap::new();
-        let my_pub_key = self.my_public_key(aggregated_pubkey)?;
         pub_nonces.insert(my_pub_key, pub_nonce);
 
         let data = (message, pub_nonces, sec_nonce, tweak);

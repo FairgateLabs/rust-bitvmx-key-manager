@@ -1605,7 +1605,6 @@ impl KeyManager {
         Ok(signatures)
     }
 
-    // TODO: make this fun private to force sign by key? Protocol should store the key and not the index
     // For one-time winternitz keys
     pub fn sign_winternitz_message_by_index(
         &self,
@@ -1874,7 +1873,7 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protocol.
+    //Rationale: The private key is needed because it should be transfered to the user that aggregate the private keys used to complete the Transfer of Ownership protocol.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -2036,7 +2035,7 @@ impl KeyManager {
         id: &str,
         mut partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
     ) -> Result<(), KeyManagerError> {
-        //TODO: Fix this
+        //TODO: Revisit this
         //this is a workaround bacause the as leader I got all the partial before sending mine
         //and therefore have it computed.
         //this should change in program
@@ -2826,9 +2825,11 @@ mod tests {
         // Case 2: Invalid derivation path (not possible)
 
         // Case 3 b: Write error when creating database keystore (invalid path)
-        //TODO: FIX THIS TEST is not working in windows envs
-        //let result = database_keystore("/invalid/path");
-        //assert!(matches!(result, Err(KeyStoreError::WriteError(_))));
+        #[cfg(windows)]
+        let result = database_keystore("C:\\invalid<>path\\::");
+        #[cfg(not(windows))]
+        let result = database_keystore("/invalid/path");
+        assert!(matches!(result, Err(KeyManagerError::StorageError(_))));
 
         // Case 4: Index overflow when generating keys
         let result =

@@ -8,6 +8,10 @@ updates:
     open-pull-requests-limit: 10
     cooldown:
       default-days: 10
+    ignore:
+      # Keep these dependencies pinned to their currently required versions.
+      - dependency-name: "sha2"
+      - dependency-name: "hkdf"
 
   - package-ecosystem: "github-actions"
     directory: "/"

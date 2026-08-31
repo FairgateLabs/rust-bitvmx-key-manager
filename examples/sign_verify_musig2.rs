@@ -32,18 +32,18 @@ fn sign_verify_musig2_example() {
 
     // Step 1: Initialize MuSig2 session
     // Public keys must be in the same order for all participants
-    let participant_pubkeys = vec![my_pubkey.clone(), other_pubkey.clone()];
+    let participant_pubkeys = vec![my_pubkey, other_pubkey];
     println!("Participant public keys: {:?}", participant_pubkeys.clone());
 
     // Initialize a new MuSig2 session, it creates the aggregated public key
     let aggregated_pubkey = key_manager
-        .new_musig2_session(participant_pubkeys.clone(), my_pubkey.clone())
+        .new_musig2_session(participant_pubkeys.clone(), my_pubkey)
         .unwrap();
     println!("Aggregated public key: {:?}", aggregated_pubkey);
 
     // The other participant does the same, the aggregated public key is the same for all participants
     other_key_manager
-        .new_musig2_session(participant_pubkeys.clone(), other_pubkey.clone())
+        .new_musig2_session(participant_pubkeys.clone(), other_pubkey)
         .unwrap();
 
     // Step 2: Generate nonces for each message
@@ -89,14 +89,14 @@ fn sign_verify_musig2_example() {
 
     // Step 4: Aggregate nonces from all participants
     let mut nonces_map = HashMap::new();
-    nonces_map.insert(other_pubkey.clone(), other_pub_nonces.clone());
+    nonces_map.insert(other_pubkey, other_pub_nonces.clone());
     key_manager
         .aggregate_nonces(&aggregated_pubkey, session_id, nonces_map)
         .unwrap();
 
     // Do the same for the other participant
     let mut nonces_map = HashMap::new();
-    nonces_map.insert(my_pubkey.clone(), my_pub_nonces.clone());
+    nonces_map.insert(my_pubkey, my_pub_nonces.clone());
     other_key_manager
         .aggregate_nonces(&aggregated_pubkey, session_id, nonces_map)
         .unwrap();
@@ -117,8 +117,8 @@ fn sign_verify_musig2_example() {
 
     // Step 6: Exchange and save partial signatures
     let mut partial_sigs_map = HashMap::new();
-    partial_sigs_map.insert(my_pubkey.clone(), my_partial_sigs.clone());
-    partial_sigs_map.insert(other_pubkey.clone(), other_partial_sigs.clone());
+    partial_sigs_map.insert(my_pubkey, my_partial_sigs.clone());
+    partial_sigs_map.insert(other_pubkey, other_partial_sigs.clone());
     key_manager
         .save_partial_signatures(&aggregated_pubkey, session_id, partial_sigs_map.clone())
         .unwrap();

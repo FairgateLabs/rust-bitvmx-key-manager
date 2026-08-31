@@ -341,7 +341,7 @@ impl MuSig2SignerApi for MuSig2Signer {
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
         match self.get_pub_nonce(aggregated_pubkey, id, message_id, &my_pub_key)? {
             Some(pub_nonce) => Ok(pub_nonce),
-            None => return Err(Musig2SignerError::NoncesNotGenerated),
+            None => Err(Musig2SignerError::NoncesNotGenerated),
         }
     }
 
@@ -754,7 +754,7 @@ impl MuSig2Signer {
             return Ok(true);
         }
 
-        return Ok(false);
+        Ok(false)
     }
 
     pub fn generate_nonce(
@@ -1014,7 +1014,7 @@ impl MuSig2Signer {
         )?;
 
         for (key, value) in result {
-            let pubkey_str = key.split('/').last().unwrap_or("");
+            let pubkey_str = key.split('/').next_back().unwrap_or("");
             let pubkey = PublicKey::from_str(pubkey_str)
                 .map_err(|_| Musig2SignerError::CantReconstructValue("PublicKey".to_string()))?;
             let partial_signature: PartialSignature =

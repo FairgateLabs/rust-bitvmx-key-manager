@@ -255,7 +255,7 @@ impl Cli {
                 signature,
                 pub_key,
             } => {
-                self.verify_rsa_signature(signature, message, &pub_key)?;
+                self.verify_rsa_signature(signature, message, pub_key)?;
             }
 
             Commands::RandomMessage { size } => {

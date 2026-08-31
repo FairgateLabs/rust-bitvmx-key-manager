@@ -18,15 +18,13 @@ pub fn create_key_manager_example(name: &str) -> KeyManager {
 
     let storage_config = StorageConfig::new(keystore_path, Some(Secret::new((*password).clone())));
 
-    let key_manager = KeyManager::new(
+    KeyManager::new(
         network,
         None, // will generate a new random mnemonic internally
         None, // sill use empty passphrase for mnemonic
         &storage_config,
     )
-    .unwrap();
-
-    key_manager
+    .unwrap()
 }
 
 #[allow(dead_code)]

@@ -197,7 +197,7 @@ impl KeyManager {
             }
             Err(KeyManagerError::MnemonicPassphraseNotFound) => {
                 // No passphrase in storage, store the provided one or use empty string as default
-                let passphrase = mnemonic_passphrase.unwrap_or_else(|| "".to_string());
+                let passphrase = mnemonic_passphrase.unwrap_or_default();
                 keystore.store_mnemonic_passphrase(&passphrase)?;
                 Zeroizing::new(passphrase)
             }
@@ -765,7 +765,7 @@ impl KeyManager {
         let hardened_wots_account_derivation_path =
             Self::extract_account_level_path(&wots_full_derivation_path);
 
-        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(network, key_derivation_seed)?;
         let account_xpriv =
             master_xpriv.derive_priv(&secp, &hardened_wots_account_derivation_path)?;
 
@@ -795,7 +795,7 @@ impl KeyManager {
         let hardened_lamport_account_derivation_path =
             Self::extract_account_level_path(&lamport_full_derivation_path);
 
-        let master_xpriv = Xpriv::new_master(network, &key_derivation_seed)?;
+        let master_xpriv = Xpriv::new_master(network, key_derivation_seed)?;
         let account_xpriv =
             master_xpriv.derive_priv(&secp, &hardened_lamport_account_derivation_path)?;
 
@@ -1397,8 +1397,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_ecdsa_message compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1427,8 +1426,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_ecdsa_recoverable_message compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1488,8 +1486,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )));
             }
         };
@@ -1523,8 +1520,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message_with_tap_tweak compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1563,8 +1559,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message_with_tweak compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1830,8 +1825,7 @@ impl KeyManager {
             Some((private_key, _, _)) => Ok(private_key),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "export_secret compressed {} public key: {:?}",
-                pubkey.to_string(),
-                pubkey
+                pubkey, pubkey
             ))),
         }
     }
@@ -1841,11 +1835,11 @@ impl KeyManager {
         message: &[u8],
         pub_key: &str, // PEM format
     ) -> Result<Signature, KeyManagerError> {
-        let pubk = RSAKeyPair::pubkey_from_public_key_pem(&pub_key)?;
+        let pubk = RSAKeyPair::pubkey_from_public_key_pem(pub_key)?;
         let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
             Some(rsa_key) => Ok(rsa_key.sign(message)),
-            None => return Err(KeyManagerError::RsaKeyNotFound),
+            None => Err(KeyManagerError::RsaKeyNotFound),
         }
     }
 
@@ -1854,7 +1848,7 @@ impl KeyManager {
         message: &[u8],
         pub_key: &str, // PEM format
     ) -> Result<Vec<u8>, KeyManagerError> {
-        Ok(RSAKeyPair::encrypt(message, &pub_key, &mut OsRng)?)
+        Ok(RSAKeyPair::encrypt(message, pub_key, &mut OsRng)?)
     }
 
     pub fn decrypt_rsa_message(
@@ -1862,11 +1856,11 @@ impl KeyManager {
         encrypted_message: &[u8],
         pub_key: &str, // PEM format
     ) -> Result<Vec<u8>, KeyManagerError> {
-        let pubk = RSAKeyPair::pubkey_from_public_key_pem(&pub_key)?;
+        let pubk = RSAKeyPair::pubkey_from_public_key_pem(pub_key)?;
         let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
             Some(rsa_key) => Ok(rsa_key.decrypt(encrypted_message)?),
-            None => return Err(KeyManagerError::RsaKeyNotFound),
+            None => Err(KeyManagerError::RsaKeyNotFound),
         }
     }
 
@@ -1885,8 +1879,7 @@ impl KeyManager {
             Some((private_key, public_key, _)) => Ok((private_key, public_key)),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "get_key_pair_for_too_insecure compressed {} public key: {:?}",
-                my_pub_key.to_string(),
-                my_pub_key
+                my_pub_key, my_pub_key
             ))),
         }
     }
@@ -1907,8 +1900,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_partial_message compressed {} public key: {:?}",
-                    my_public_key.to_string(),
-                    my_public_key
+                    my_public_key, my_public_key
                 )))
             }
         };
@@ -1946,8 +1938,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "generate_nonce_seed compressed {} public key: {:?}",
-                    public_key.to_string(),
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1965,7 +1956,7 @@ impl KeyManager {
         info.extend_from_slice(&index.to_le_bytes());
 
         // Derive the nonce seed using HKDF-SHA256
-        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &(*ikm));
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm);
 
         let mut nonce_seed = Zeroizing::new([0u8; 32]); // automatically zeroized when dropped and adjust for return type
         hkdf.expand(&info, &mut *nonce_seed)
@@ -2045,7 +2036,7 @@ impl KeyManager {
         let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
         partial_signatures_mapping.insert(my_pub_key, my_partial_signatures.clone());
 
-        Ok(self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)?)
+        self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)
     }
 
     pub fn save_partial_signatures(

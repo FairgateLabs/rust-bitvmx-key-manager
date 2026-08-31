@@ -232,11 +232,7 @@ fn full_round_n_participants(
         .collect();
 
     // Step 5 – distribute and save all partial signatures
-    let all_sigs: HashMap<PublicKey, _> = pub_keys
-        .iter()
-        .cloned()
-        .zip(partial_sigs)
-        .collect();
+    let all_sigs: HashMap<PublicKey, _> = pub_keys.iter().cloned().zip(partial_sigs).collect();
 
     for (km, _) in participants.iter() {
         km.save_partial_signatures(&agg_pk, session_id, all_sigs.clone())

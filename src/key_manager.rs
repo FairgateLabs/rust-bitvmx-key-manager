@@ -1397,8 +1397,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_ecdsa_message compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1427,8 +1426,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_ecdsa_recoverable_message compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1488,8 +1486,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )));
             }
         };
@@ -1523,8 +1520,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message_with_tap_tweak compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1563,8 +1559,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_schnorr_message_with_tweak compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )))
             }
         };
@@ -1830,8 +1825,7 @@ impl KeyManager {
             Some((private_key, _, _)) => Ok(private_key),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "export_secret compressed {} public key: {:?}",
-                pubkey,
-                pubkey
+                pubkey, pubkey
             ))),
         }
     }
@@ -1885,8 +1879,7 @@ impl KeyManager {
             Some((private_key, public_key, _)) => Ok((private_key, public_key)),
             None => Err(KeyManagerError::KeyPairNotFound(format!(
                 "get_key_pair_for_too_insecure compressed {} public key: {:?}",
-                my_pub_key,
-                my_pub_key
+                my_pub_key, my_pub_key
             ))),
         }
     }
@@ -1907,8 +1900,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "sign_partial_message compressed {} public key: {:?}",
-                    my_public_key,
-                    my_public_key
+                    my_public_key, my_public_key
                 )))
             }
         };
@@ -1946,8 +1938,7 @@ impl KeyManager {
             None => {
                 return Err(KeyManagerError::KeyPairNotFound(format!(
                     "generate_nonce_seed compressed {} public key: {:?}",
-                    public_key,
-                    public_key
+                    public_key, public_key
                 )))
             }
         };

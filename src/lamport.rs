@@ -466,6 +466,7 @@ impl LamportPublicKey {
         (hashes_0s, hashes_1s)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn to_array_hashes(&self) -> Result<(Vec<[u8; 32]>, Vec<[u8; 32]>), LamportError> {
         let hashes_0s: Result<Vec<[u8; 32]>, LamportError> = self
             .public_key_0s
@@ -816,6 +817,7 @@ impl LamportPrivateKey {
         (hashes_0s, hashes_1s)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn to_array_hashes(&self) -> Result<(Vec<[u8; 32]>, Vec<[u8; 32]>), LamportError> {
         let hashes_0s: Result<Vec<[u8; 32]>, LamportError> = self
             .private_key_0s

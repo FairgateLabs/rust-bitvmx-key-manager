@@ -25,7 +25,7 @@ pub fn import_key_to_key_manager_example() {
     let private_key = PrivateKey::new(secret_key, network);
     let private_key_wif_z = Zeroizing::new(private_key.to_wif()); // adds automatic zeroization on drop
 
-    let pubkey = key_manager.import_private_key(&*private_key_wif_z).unwrap();
+    let pubkey = key_manager.import_private_key(&private_key_wif_z).unwrap();
     println!("Imported public key: {}", pubkey);
 
     // -- Importing a single private key with type specified
@@ -39,7 +39,7 @@ pub fn import_key_to_key_manager_example() {
     // The key type could be any of the supported BitcoinKeyType variants (P2pkh, P2shP2wpkh, P2wpkh, P2tr)
     let key2_type = BitcoinKeyType::P2tr;
     let pubkey = key_manager
-        .import_private_key_typed(&*private_key_wif2_z, Some(key2_type))
+        .import_private_key_typed(&private_key_wif2_z, Some(key2_type))
         .unwrap();
     println!("Imported public key 2: {} of type {:?}", pubkey, key2_type);
 

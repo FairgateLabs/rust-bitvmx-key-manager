@@ -35,10 +35,7 @@ pub fn create_key_manager_from_config(
         None => None,
     };
 
-    let passphrase = match &key_manager_config.mnemonic_passphrase {
-        Some(pass) => Some(pass.expose_secret().to_owned()),
-        None => None,
-    };
+    let passphrase = key_manager_config.mnemonic_passphrase.as_ref().map(|pass| pass.expose_secret().to_owned());
 
     let network =
         Network::from_str(&key_manager_config.network).map_err(|_| ConfigError::InvalidNetwork)?;

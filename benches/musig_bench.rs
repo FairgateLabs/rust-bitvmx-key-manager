@@ -235,7 +235,7 @@ fn full_round_n_participants(
     let all_sigs: HashMap<PublicKey, _> = pub_keys
         .iter()
         .cloned()
-        .zip(partial_sigs.into_iter())
+        .zip(partial_sigs)
         .collect();
 
     for (km, _) in participants.iter() {

@@ -60,13 +60,13 @@ impl KeyStore {
     pub fn commit_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
         self.store
             .commit_transaction(transaction_id)
-            .map_err(|e| KeyManagerError::from(e))
+            .map_err(KeyManagerError::from)
     }
 
     pub fn rollback_transaction(&self, transaction_id: Uuid) -> Result<(), KeyManagerError> {
         self.store
             .rollback_transaction(transaction_id)
-            .map_err(|e| KeyManagerError::from(e))
+            .map_err(KeyManagerError::from)
     }
 
     /**
@@ -74,7 +74,6 @@ impl KeyStore {
         it is stored as a prefix in the private key string, separated by a ":"
         in the case of no key type, the prefix is "unknown"
     */
-
     pub fn store_keypair(
         &self,
         private_key: PrivateKey,
@@ -88,8 +87,7 @@ impl KeyStore {
             None => Self::UNKNOWN_TYPE.to_string(),
         };
 
-        let typed_private_key =
-            Zeroizing::new(format!("{}:{}", key_type_str, private_key.to_string()));
+        let typed_private_key = Zeroizing::new(format!("{}:{}", key_type_str, private_key));
         self.store.set(key, (*typed_private_key).clone(), None)?;
 
         Ok(())
@@ -301,7 +299,7 @@ impl KeyStore {
         seed: Zeroizing<[u8; 64]>,
     ) -> Result<(), KeyManagerError> {
         // using base64 encoding to avoid 32 byte limitation in serde
-        let mut encoded = general_purpose::STANDARD.encode(&(*seed));
+        let mut encoded = general_purpose::STANDARD.encode(*seed);
         self.store
             .set(Self::KEY_DERIVATION_SEED_KEY, &encoded, None)?;
         encoded.zeroize();
@@ -312,7 +310,7 @@ impl KeyStore {
         // using base64 encoding to avoid 32 byte limitation in serde
         let encoded: Option<Zeroizing<String>> = self
             .store
-            .get::<String, String>(Self::KEY_DERIVATION_SEED_KEY.to_string(), None)?
+            .get::<&str, String>(Self::KEY_DERIVATION_SEED_KEY, None)?
             .map(Zeroizing::new);
 
         let encoded = match encoded {

@@ -127,7 +127,7 @@ impl WinternitzSignature {
     ) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
-        if bytes.len() % hash_size != 0 {
+        if !bytes.len().is_multiple_of(hash_size) {
             return Err(WinternitzError::InvalidSignatureLength(
                 bytes.len(),
                 hash_type.to_string(),
@@ -154,7 +154,7 @@ impl WinternitzSignature {
     ) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
-        if hashes.len() % hash_size != 0 {
+        if !hashes.len().is_multiple_of(hash_size) {
             return Err(WinternitzError::InvalidSignatureLength(
                 hashes.len(),
                 hash_type.to_string(),
@@ -305,7 +305,7 @@ impl WinternitzPublicKey {
     pub fn from_bytes(bytes: &[u8], hash_type: WinternitzType) -> Result<Self, WinternitzError> {
         let hash_size = hash_type.hash_size();
 
-        if bytes.len() % hash_size != 0 {
+        if !bytes.len().is_multiple_of(hash_size) {
             return Err(WinternitzError::InvalidPublicKeyLength(
                 bytes.len(),
                 hash_type.to_string(),

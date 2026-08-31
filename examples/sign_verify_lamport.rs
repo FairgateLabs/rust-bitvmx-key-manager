@@ -99,7 +99,7 @@ fn sign_verify_lamport_example() {
     // Note: For bytes, we need 16 bits (2 bytes) as the message length
     // since bits_to_bytes adds padding to make it a multiple of 8
 
-    let message_bit_lenght_padded_to_use_bytes = message_bits.len() + padding as usize;
+    let message_bit_lenght_padded_to_use_bytes = message_bits.len() + padding;
     // if the user want to use the bytes methods, it should indicate the message length with padding, otherwise will get an MessageLengthMismatch error at signing time
     let lamport_pubkey_bytes = key_manager
         .next_lamport(message_bit_lenght_padded_to_use_bytes, LamportType::SHA256)

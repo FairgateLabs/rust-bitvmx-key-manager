@@ -9,7 +9,7 @@ use rsa::{
     signature::{SignerMut, Verifier},
     Oaep, RsaPrivateKey, RsaPublicKey,
 };
-use sha2::Sha256;
+use rsa::sha2::Sha256;
 use thiserror::Error;
 use zeroize::Zeroizing;
 

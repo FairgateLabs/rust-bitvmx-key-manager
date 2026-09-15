@@ -26,23 +26,24 @@ This could be a future improvement to consider after evaluating the current impl
 */
 
 impl KeyStore {
-    const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
-    const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
-    const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
-    const LAMPORT_KEY: &str = "lamport_seed"; // Key to use in the database for the Lamport seed
-    const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
+    const MNEMONIC_KEY: &str = "key_manager/seed/bip39_mnemonic"; // Key for the BIP-39 mnemonic
+    const MNEMONIC_PASSPHRASE_KEY: &str = "key_manager/seed/bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
+    const WINTERNITZ_KEY: &str = "key_manager/seed/winternitz"; // Key to use in the database for the Winternitz seed
+    const LAMPORT_KEY: &str = "key_manager/seed/lamport"; // Key to use in the database for the Lamport seed
+    const KEY_DERIVATION_SEED_KEY: &str = "key_manager/seed/bip32"; // Key to use in the database for the bip32 key derivation seed
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
-    const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
-    const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
-    const NEXT_LAMPORT_INDEX_KEY: &str = "next_lamport_index"; // Key for storing the next lamport index
-    const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
-    const LAMPORT_INDEX_BLOCK_KEY: &str = "lamport_index_block"; // Key prefix for Lamport index bitmap blocks
+    const NEXT_KEYPAIR_INDEX_KEY: &str = "key_manager/index/keypair"; // Key for storing the next keypair index
+    const NEXT_WINTERNITZ_INDEX_KEY: &str = "key_manager/index/winternitz"; // Key for storing the next winternitz index
+    const NEXT_LAMPORT_INDEX_KEY: &str = "key_manager/index/lamport"; // Key for storing the next lamport index
+    const WINTERNITZ_INDEX_BLOCK_KEY: &str = "key_manager/index_block/winternitz"; // Key prefix for Winternitz index bitmap blocks
+    const LAMPORT_INDEX_BLOCK_KEY: &str = "key_manager/index_block/lamport"; // Key prefix for Lamport index bitmap blocks
                                                                  // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
     const LAMPORT_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const LAMPORT_CHECK_BLOCK_BYTES: usize = (Self::LAMPORT_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
-    const LAMPORT: &str = "lamport"; // Key prefix for Lamport pubkeys
+    const LAMPORT: &str = "lamport"; // Value tag inside the stored payload, NOT a storage key
+    const LAMPORT_KEY_PREFIX: &str = "key_manager/lamport"; // Storage-key prefix for Lamport pubkeys
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -140,10 +141,11 @@ impl KeyStore {
         index: u32,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        let key_type_str = format!("{:?}", key_type);
+        let key_type_str = format!("{:?}", key_type).to_lowercase();
         let typed_next_keypair_index_key =
-            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
+            format!("{}/{}", Self::NEXT_KEYPAIR_INDEX_KEY, key_type_str);
+        // this will store the next keypair index for the given key type
+        // e.g.: key_manager/index/keypair/p2tr
         self.store
             .set(typed_next_keypair_index_key, index, transaction_id)?;
         Ok(())
@@ -153,9 +155,9 @@ impl KeyStore {
         &self,
         key_type: BitcoinKeyType,
     ) -> Result<u32, KeyManagerError> {
-        let key_type_str = format!("{:?}", key_type);
+        let key_type_str = format!("{:?}", key_type).to_lowercase();
         let typed_next_keypair_index_key =
-            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
+            format!("{}/{}", Self::NEXT_KEYPAIR_INDEX_KEY, key_type_str);
         match self.store.get(typed_next_keypair_index_key, None)? {
             Some(next_index) => Ok(next_index),
             None => Err(KeyManagerError::NextKeypairIndexNotFound),
@@ -268,7 +270,7 @@ impl KeyStore {
         let bit_index = (bit_pos % 8) as u8;
 
         // Load the block from storage (or create new if doesn't exist)
-        let block_key = format!("{}:{}", Self::WINTERNITZ_INDEX_BLOCK_KEY, block_num);
+        let block_key = format!("{}/{}", Self::WINTERNITZ_INDEX_BLOCK_KEY, block_num);
         let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone(), None)? {
             Some(block) => block,
             None => vec![0u8; Self::WOTS_CHECK_BLOCK_BYTES], // Create new empty block
@@ -363,7 +365,7 @@ impl KeyStore {
     // Blake3 fingerprint justification: the full LamportPublicKey can be large; using its
     // BLAKE3 hash as the storage key avoids rocksdb performance issues with big keys.
     fn format_lamport_storage_key<K: LamportPubKeyId>(key: &K) -> String {
-        format!("{}:{}", Self::LAMPORT, key.key_id().to_hex())
+        format!("{}/{}", Self::LAMPORT_KEY_PREFIX, key.key_id().to_hex())
     }
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
@@ -449,7 +451,7 @@ impl KeyStore {
         let bit_index = (bit_pos % 8) as u8;
 
         // Load the block from storage (or create new if doesn't exist)
-        let block_key = format!("{}:{}", Self::LAMPORT_INDEX_BLOCK_KEY, block_num);
+        let block_key = format!("{}/{}", Self::LAMPORT_INDEX_BLOCK_KEY, block_num);
         let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone(), None)? {
             Some(block) => block,
             None => vec![0u8; Self::LAMPORT_CHECK_BLOCK_BYTES], // Create new empty block

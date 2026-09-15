@@ -1200,7 +1200,9 @@ impl MuSig2Signer {
     }
 
     fn get_key(&self, key: StoreKey) -> String {
-        let prefix = "musig2";
+        // Nested under the owning crate's `key_manager` component prefix, per the
+        // shared `<component>/<entity>/<id>` key layout.
+        let prefix = "key_manager/musig2";
         match key {
             StoreKey::IndexForNonceGeneration(pubkey) => {
                 format!("{prefix}/index_for_nonce_generation/{pubkey}")

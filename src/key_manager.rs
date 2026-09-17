@@ -24,7 +24,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
-    key_store::KeyStore,
+    key_store::{KeyStore, StoredRsaKeyPair},
     key_type::BitcoinKeyType,
     lamport::{
         Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
@@ -316,12 +316,18 @@ impl KeyManager {
                 continue;
             }
 
-            if key.starts_with("-----BEGIN PUBLIC KEY-----") {
-                if let Some(private_key_pem) = self.keystore.load_value::<String>(key)? {
-                    if private_key_pem.starts_with("-----BEGIN PRIVATE KEY-----") {
+            if key.starts_with("key_manager/rsa/") {
+                if let Some(stored) = self.keystore.load_value::<StoredRsaKeyPair>(key)? {
+                    if stored
+                        .public_key_pem
+                        .starts_with("-----BEGIN PUBLIC KEY-----")
+                        && stored
+                            .private_key_pem
+                            .starts_with("-----BEGIN PRIVATE KEY-----")
+                    {
                         rsa_keypairs.push(ExportedRsaKeyPair {
-                            public_key_pem: key.clone(),
-                            private_key_pem,
+                            public_key_pem: stored.public_key_pem,
+                            private_key_pem: stored.private_key_pem,
                         });
                     }
                 }

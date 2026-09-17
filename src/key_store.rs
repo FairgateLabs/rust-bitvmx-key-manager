@@ -8,11 +8,24 @@ use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
 use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{rc::Rc, str::FromStr};
-use storage_backend::storage::{KeyValueStore, Storage};
+use storage_backend::{
+    key::StorageKey,
+    storage::{KeyValueStore, Storage},
+};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
+
+/// Value stored under an RSA key's storage key. The key itself is a BLAKE3
+/// fingerprint of the public PEM (see `KeyStore::rsa_key`), so unlike before,
+/// the public PEM is no longer recoverable from the key text alone and must
+/// be stored alongside the private PEM.
+#[derive(Serialize, Deserialize)]
+pub struct StoredRsaKeyPair {
+    pub public_key_pem: String,
+    pub private_key_pem: String,
+}
 
 pub struct KeyStore {
     store: Rc<Storage>,
@@ -26,23 +39,87 @@ This could be a future improvement to consider after evaluating the current impl
 */
 
 impl KeyStore {
-    const MNEMONIC_KEY: &str = "bip39_mnemonic"; // Key for the BIP-39 mnemonic
-    const MNEMONIC_PASSPHRASE_KEY: &str = "bip39_mnemonic_passphrase"; // Key for the BIP-39 mnemonic passphrase
-    const WINTERNITZ_KEY: &str = "winternitz_seed"; // Key to use in the database for the Winternitz seed
-    const LAMPORT_KEY: &str = "lamport_seed"; // Key to use in the database for the Lamport seed
-    const KEY_DERIVATION_SEED_KEY: &str = "bip32_seed"; // Key to use in the database for the bip32 key derivation seed
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
-    const NEXT_KEYPAIR_INDEX_KEY: &str = "next_keypair_index"; // Key for storing the next keypair index
-    const NEXT_WINTERNITZ_INDEX_KEY: &str = "next_winternitz_index"; // Key for storing the next winternitz index
-    const NEXT_LAMPORT_INDEX_KEY: &str = "next_lamport_index"; // Key for storing the next lamport index
-    const WINTERNITZ_INDEX_BLOCK_KEY: &str = "winternitz_index_block"; // Key prefix for Winternitz index bitmap blocks
-    const LAMPORT_INDEX_BLOCK_KEY: &str = "lamport_index_block"; // Key prefix for Lamport index bitmap blocks
-                                                                 // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
+                                          // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
     const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
     const LAMPORT_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
     const LAMPORT_CHECK_BLOCK_BYTES: usize = (Self::LAMPORT_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
-    const LAMPORT: &str = "lamport"; // Key prefix for Lamport pubkeys
+    const LAMPORT: &str = "lamport"; // Value tag inside the stored payload, NOT a storage key
+
+    fn key_manager_key<'a>(component: &str, tail: impl IntoIterator<Item = &'a str>) -> StorageKey {
+        StorageKey::new(
+            ["key_manager", component]
+                .into_iter()
+                .map(str::to_string)
+                .chain(tail.into_iter().map(str::to_string)),
+        )
+    }
+
+    fn seed_key<'a>(tail: impl IntoIterator<Item = &'a str>) -> StorageKey {
+        Self::key_manager_key("seed", tail)
+    }
+
+    fn index_key<'a>(tail: impl IntoIterator<Item = &'a str>) -> StorageKey {
+        Self::key_manager_key("index", tail)
+    }
+
+    fn index_block_key<'a>(tail: impl IntoIterator<Item = &'a str>) -> StorageKey {
+        Self::key_manager_key("index_block", tail)
+    }
+
+    fn mnemonic_key() -> StorageKey {
+        Self::seed_key(["bip39_mnemonic"])
+    }
+
+    fn mnemonic_passphrase_key() -> StorageKey {
+        Self::seed_key(["bip39_mnemonic_passphrase"])
+    }
+
+    fn winternitz_seed_key() -> StorageKey {
+        Self::seed_key(["winternitz"])
+    }
+
+    fn lamport_seed_key() -> StorageKey {
+        Self::seed_key(["lamport"])
+    }
+
+    fn key_derivation_seed_key() -> StorageKey {
+        Self::seed_key(["bip32"])
+    }
+
+    fn next_keypair_index_key(key_type_str: &str) -> StorageKey {
+        Self::index_key(["keypair", key_type_str])
+    }
+
+    fn next_winternitz_index_key() -> StorageKey {
+        Self::index_key(["winternitz"])
+    }
+
+    fn next_lamport_index_key() -> StorageKey {
+        Self::index_key(["lamport"])
+    }
+
+    fn winternitz_index_block_key(block_num: u64) -> StorageKey {
+        let block_str = block_num.to_string();
+        Self::index_block_key(["winternitz", block_str.as_str()])
+    }
+
+    fn lamport_index_block_key(block_num: u64) -> StorageKey {
+        let block_str = block_num.to_string();
+        Self::index_block_key(["lamport", block_str.as_str()])
+    }
+
+    /// BLAKE3 fingerprint of an RSA public PEM, used as the storage-key segment.
+    /// The PEM itself can't be a segment (or even a whole key): its base64 body
+    /// routinely contains `/`, and it's large.
+    fn rsa_key_fingerprint(public_key_pem: &str) -> String {
+        blake3::hash(public_key_pem.as_bytes()).to_hex().to_string()
+    }
+
+    fn rsa_key(public_key_pem: &str) -> StorageKey {
+        Self::key_manager_key("rsa", [Self::rsa_key_fingerprint(public_key_pem).as_str()])
+    }
 
     pub fn new(store: Rc<Storage>) -> Self {
         Self { store }
@@ -80,7 +157,7 @@ impl KeyStore {
         public_key: PublicKey,
         key_type: Option<BitcoinKeyType>,
     ) -> Result<(), KeyManagerError> {
-        let key = public_key.to_string();
+        let key = StorageKey::from(public_key.to_string());
 
         let key_type_str = match key_type {
             Some(kt) => format!("{:?}", kt),
@@ -98,18 +175,16 @@ impl KeyStore {
     }
 
     pub fn load_value<V: DeserializeOwned>(&self, key: &str) -> Result<Option<V>, KeyManagerError> {
-        Ok(self.store.get::<&str, V>(key, None)?)
+        Ok(self.store.get(StorageKey::from_joined(key), None)?)
     }
 
     pub fn load_keypair(
         &self,
         public_key: &PublicKey,
     ) -> Result<Option<(PrivateKey, PublicKey, Option<BitcoinKeyType>)>, KeyManagerError> {
-        let key = public_key.to_string();
-        let data: Option<Zeroizing<String>> = self
-            .store
-            .get::<String, String>(key, None)?
-            .map(Zeroizing::new);
+        let key = StorageKey::from(public_key.to_string());
+        let data: Option<Zeroizing<String>> =
+            self.store.get::<String>(key, None)?.map(Zeroizing::new);
 
         if let Some(private_key_str) = data {
             if let Some(colon_pos) = private_key_str.find(':') {
@@ -140,12 +215,9 @@ impl KeyStore {
         index: u32,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        let key_type_str = format!("{:?}", key_type);
-        let typed_next_keypair_index_key =
-            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        // this will store the next keypair index for the given key type e.g.: p2tr:next_keypair_index
-        self.store
-            .set(typed_next_keypair_index_key, index, transaction_id)?;
+        let key_type_str = format!("{:?}", key_type).to_lowercase();
+        let key = Self::next_keypair_index_key(&key_type_str);
+        self.store.set(key, index, transaction_id)?;
         Ok(())
     }
 
@@ -153,10 +225,9 @@ impl KeyStore {
         &self,
         key_type: BitcoinKeyType,
     ) -> Result<u32, KeyManagerError> {
-        let key_type_str = format!("{:?}", key_type);
-        let typed_next_keypair_index_key =
-            format!("{}:{}", key_type_str, Self::NEXT_KEYPAIR_INDEX_KEY);
-        match self.store.get(typed_next_keypair_index_key, None)? {
+        let key_type_str = format!("{:?}", key_type).to_lowercase();
+        let key = Self::next_keypair_index_key(&key_type_str);
+        match self.store.get(key, None)? {
             Some(next_index) => Ok(next_index),
             None => Err(KeyManagerError::NextKeypairIndexNotFound),
         }
@@ -170,12 +241,12 @@ impl KeyStore {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next winternitz index
         self.store
-            .set(Self::NEXT_WINTERNITZ_INDEX_KEY, index, transaction_id)?;
+            .set(Self::next_winternitz_index_key(), index, transaction_id)?;
         Ok(())
     }
 
     pub fn load_next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
-        match self.store.get(Self::NEXT_WINTERNITZ_INDEX_KEY, None)? {
+        match self.store.get(Self::next_winternitz_index_key(), None)? {
             Some(next_index) => Ok(next_index),
             None => Err(KeyManagerError::NextWinternitzIndexNotFound),
         }
@@ -189,12 +260,12 @@ impl KeyStore {
         // best practice: never reuse the index, as it can compromise security, even if the hash type changes
         // this will store the next lamport index
         self.store
-            .set(Self::NEXT_LAMPORT_INDEX_KEY, index, transaction_id)?;
+            .set(Self::next_lamport_index_key(), index, transaction_id)?;
         Ok(())
     }
 
     pub fn load_next_lamport_index(&self) -> Result<u32, KeyManagerError> {
-        match self.store.get(Self::NEXT_LAMPORT_INDEX_KEY, None)? {
+        match self.store.get(Self::next_lamport_index_key(), None)? {
             Some(next_index) => Ok(next_index),
             None => Err(KeyManagerError::NextLamportIndexNotFound),
         }
@@ -202,12 +273,12 @@ impl KeyStore {
 
     pub fn store_mnemonic(&self, mnemonic: &Mnemonic) -> Result<(), KeyManagerError> {
         let phrase = Zeroizing::new(mnemonic.to_string()); // normalized space-separated phrase
-        self.store.set(Self::MNEMONIC_KEY, &(*phrase), None)?;
+        self.store.set(Self::mnemonic_key(), &(*phrase), None)?;
         Ok(())
     }
 
     pub fn load_mnemonic(&self) -> Result<Mnemonic, KeyManagerError> {
-        let phrase: Zeroizing<String> = match self.store.get(Self::MNEMONIC_KEY, None)? {
+        let phrase: Zeroizing<String> = match self.store.get(Self::mnemonic_key(), None)? {
             Some(phrase) => Zeroizing::new(phrase),
             None => return Err(KeyManagerError::MnemonicNotFound),
         };
@@ -217,36 +288,36 @@ impl KeyStore {
 
     pub fn store_mnemonic_passphrase(&self, passphrase: &str) -> Result<(), KeyManagerError> {
         self.store
-            .set(Self::MNEMONIC_PASSPHRASE_KEY, passphrase, None)?;
+            .set(Self::mnemonic_passphrase_key(), passphrase, None)?;
         Ok(())
     }
 
     pub fn load_mnemonic_passphrase(&self) -> Result<Zeroizing<String>, KeyManagerError> {
-        match self.store.get(Self::MNEMONIC_PASSPHRASE_KEY, None)? {
+        match self.store.get(Self::mnemonic_passphrase_key(), None)? {
             Some(passphrase) => Ok(Zeroizing::new(passphrase)),
             None => Err(KeyManagerError::MnemonicPassphraseNotFound),
         }
     }
 
     pub fn store_winternitz_seed(&self, seed: Zeroizing<[u8; 32]>) -> Result<(), KeyManagerError> {
-        self.store.set(Self::WINTERNITZ_KEY, *seed, None)?;
+        self.store.set(Self::winternitz_seed_key(), *seed, None)?;
         Ok(())
     }
 
     pub fn load_winternitz_seed(&self) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
-        match self.store.get(Self::WINTERNITZ_KEY, None)? {
+        match self.store.get(Self::winternitz_seed_key(), None)? {
             Some(entry) => Ok(Zeroizing::new(entry)),
             None => Err(KeyManagerError::WinternitzSeedNotFound),
         }
     }
 
     pub fn store_lamport_seed(&self, seed: Zeroizing<[u8; 32]>) -> Result<(), KeyManagerError> {
-        self.store.set(Self::LAMPORT_KEY, *seed, None)?;
+        self.store.set(Self::lamport_seed_key(), *seed, None)?;
         Ok(())
     }
 
     pub fn load_lamport_seed(&self) -> Result<Zeroizing<[u8; 32]>, KeyManagerError> {
-        match self.store.get(Self::LAMPORT_KEY, None)? {
+        match self.store.get(Self::lamport_seed_key(), None)? {
             Some(entry) => Ok(Zeroizing::new(entry)),
             None => Err(KeyManagerError::LamportSeedNotFound),
         }
@@ -268,8 +339,8 @@ impl KeyStore {
         let bit_index = (bit_pos % 8) as u8;
 
         // Load the block from storage (or create new if doesn't exist)
-        let block_key = format!("{}:{}", Self::WINTERNITZ_INDEX_BLOCK_KEY, block_num);
-        let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone(), None)? {
+        let block_key = Self::winternitz_index_block_key(block_num);
+        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(block_key.clone(), None)? {
             Some(block) => block,
             None => vec![0u8; Self::WOTS_CHECK_BLOCK_BYTES], // Create new empty block
         };
@@ -301,7 +372,7 @@ impl KeyStore {
         // using base64 encoding to avoid 32 byte limitation in serde
         let mut encoded = general_purpose::STANDARD.encode(*seed);
         self.store
-            .set(Self::KEY_DERIVATION_SEED_KEY, &encoded, None)?;
+            .set(Self::key_derivation_seed_key(), &encoded, None)?;
         encoded.zeroize();
         Ok(())
     }
@@ -310,7 +381,7 @@ impl KeyStore {
         // using base64 encoding to avoid 32 byte limitation in serde
         let encoded: Option<Zeroizing<String>> = self
             .store
-            .get::<&str, String>(Self::KEY_DERIVATION_SEED_KEY, None)?
+            .get::<String>(Self::key_derivation_seed_key(), None)?
             .map(Zeroizing::new);
 
         let encoded = match encoded {
@@ -337,7 +408,12 @@ impl KeyStore {
     pub fn store_rsa_key(&self, rsa_key: RSAKeyPair) -> Result<(), KeyManagerError> {
         let pubk = rsa_key.export_public_pem()?;
         let privk = rsa_key.export_private_pem()?;
-        self.store.set(pubk, &(*privk), None)?;
+        let key = Self::rsa_key(&pubk);
+        let value = StoredRsaKeyPair {
+            public_key_pem: pubk,
+            private_key_pem: (*privk).clone(),
+        };
+        self.store.set(key, value, None)?;
         Ok(())
     }
 
@@ -347,12 +423,11 @@ impl KeyStore {
         rsa_pub_key: RsaPublicKey,
     ) -> Result<Option<RSAKeyPair>, KeyManagerError> {
         let pubk: String = RSAKeyPair::export_public_pem_from_pubk(rsa_pub_key)?;
-        let privk: Option<Zeroizing<String>> = self
-            .store
-            .get::<String, String>(pubk, None)?
-            .map(Zeroizing::new);
+        let key = Self::rsa_key(&pubk);
+        let stored: Option<StoredRsaKeyPair> = self.store.get(key, None)?;
 
-        if let Some(privk) = privk {
+        if let Some(stored) = stored {
+            let privk = Zeroizing::new(stored.private_key_pem);
             let rsa_keypair = RSAKeyPair::from_private_pem(&privk)?;
             return Ok(Some(rsa_keypair));
         }
@@ -362,8 +437,9 @@ impl KeyStore {
 
     // Blake3 fingerprint justification: the full LamportPublicKey can be large; using its
     // BLAKE3 hash as the storage key avoids rocksdb performance issues with big keys.
-    fn format_lamport_storage_key<K: LamportPubKeyId>(key: &K) -> String {
-        format!("{}:{}", Self::LAMPORT, key.key_id().to_hex())
+    fn format_lamport_storage_key<K: LamportPubKeyId>(key: &K) -> StorageKey {
+        let fingerprint = key.key_id().to_hex().to_string();
+        Self::key_manager_key("lamport", [fingerprint.as_str()])
     }
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
@@ -393,10 +469,8 @@ impl KeyStore {
         public_key: &K,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key);
-        let privk: Option<Zeroizing<String>> = self
-            .store
-            .get::<String, String>(pubk, None)?
-            .map(Zeroizing::new);
+        let privk: Option<Zeroizing<String>> =
+            self.store.get::<String>(pubk, None)?.map(Zeroizing::new);
 
         if let Some(privk) = privk {
             let parts: Vec<&str> = privk.split(':').collect();
@@ -449,8 +523,8 @@ impl KeyStore {
         let bit_index = (bit_pos % 8) as u8;
 
         // Load the block from storage (or create new if doesn't exist)
-        let block_key = format!("{}:{}", Self::LAMPORT_INDEX_BLOCK_KEY, block_num);
-        let mut block: Vec<u8> = match self.store.get::<String, Vec<u8>>(block_key.clone(), None)? {
+        let block_key = Self::lamport_index_block_key(block_num);
+        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(block_key.clone(), None)? {
             Some(block) => block,
             None => vec![0u8; Self::LAMPORT_CHECK_BLOCK_BYTES], // Create new empty block
         };

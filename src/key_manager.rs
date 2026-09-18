@@ -1868,12 +1868,12 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protocol.
+    // The API reveals the private key. Handling the private key securely becomes the responsibility of the caller.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,
     ) -> Result<(PrivateKey, PublicKey), KeyManagerError> {
-        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey).unwrap();
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
         match self.keystore.load_keypair(&my_pub_key)? {
             Some((private_key, public_key, _)) => Ok((private_key, public_key)),

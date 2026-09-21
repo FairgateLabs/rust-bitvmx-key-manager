@@ -24,7 +24,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
-    key_store::KeyStore,
+    key_store::{KeyStore, StoredRsaKeyPair},
     key_type::BitcoinKeyType,
     lamport::{
         Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
@@ -316,19 +316,25 @@ impl KeyManager {
                 continue;
             }
 
-            if key.starts_with("-----BEGIN PUBLIC KEY-----") {
-                if let Some(private_key_pem) = self.keystore.load_value::<String>(key)? {
-                    if private_key_pem.starts_with("-----BEGIN PRIVATE KEY-----") {
+            if key.starts_with("key_manager/rsa/") {
+                if let Some(stored) = self.keystore.load_value::<StoredRsaKeyPair>(key)? {
+                    if stored
+                        .public_key_pem
+                        .starts_with("-----BEGIN PUBLIC KEY-----")
+                        && stored
+                            .private_key_pem
+                            .starts_with("-----BEGIN PRIVATE KEY-----")
+                    {
                         rsa_keypairs.push(ExportedRsaKeyPair {
-                            public_key_pem: key.clone(),
-                            private_key_pem,
+                            public_key_pem: stored.public_key_pem,
+                            private_key_pem: stored.private_key_pem,
                         });
                     }
                 }
                 continue;
             }
 
-            if key.starts_with("lamport:") {
+            if key.starts_with("key_manager/lamport/") {
                 if let Some(value) = self.keystore.load_value::<String>(key)? {
                     lamport_imported_raw.push(ExportedLamportImportedKey {
                         storage_key: key.clone(),
@@ -339,7 +345,7 @@ impl KeyManager {
             }
         }
 
-        let session_prefix = "musig2/session/";
+        let session_prefix = "key_manager/musig2/session/";
         let participant_suffix = "/participant_pub_keys";
         for key in storage_keys
             .iter()
@@ -354,7 +360,8 @@ impl KeyManager {
                 .load_value::<Vec<PublicKey>>(key)?
                 .unwrap_or_default();
 
-            let my_public_key_key = format!("musig2/session/{aggregated_public_key}/my_public_key");
+            let my_public_key_key =
+                format!("key_manager/musig2/session/{aggregated_public_key}/my_public_key");
             let my_public_key = self.keystore.load_value::<PublicKey>(&my_public_key_key)?;
             let my_owned_keypair = match my_public_key {
                 Some(pubkey) => self.keystore.load_keypair(&pubkey)?.map(

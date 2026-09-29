@@ -308,6 +308,35 @@ mod musig2_tests {
     }
 
     #[test]
+    fn test_save_partial_signatures_tampered() -> Result<(), anyhow::Error> {
+        let (ctx, ps1, ps2) = create_session_with_partials("save_neg")?;
+
+        let tampered: Vec<(String, PartialSignature)> = ps2
+            .into_iter()
+            .map(|(mid, sig)| {
+                let mut bytes = sig.serialize();
+                bytes[0] ^= 0xFF;
+                (mid, PartialSignature::from_slice(&bytes).unwrap())
+            })
+            .collect();
+
+        let mut all = HashMap::new();
+        all.insert(ctx.pk1, ps1);
+        all.insert(ctx.pk2, tampered);
+
+        let result = ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::InvalidPartialSignature
+            ))
+        ));
+
+        clear_output();
+        Ok(())
+    }
+
+    #[test]
     fn test_verify_partial_signatures_missing_nonce() -> Result<(), anyhow::Error> {
         let (km1, pk1) = mock_data()?;
         let (km2, pk2) = mock_data()?;
@@ -335,8 +364,8 @@ mod musig2_tests {
             ))
         ));
 
-        // Saving them goes through the same verification. km1 can't sign without km2's nonce,
-        // so km2's signatures stand in for pk1's entry to get past the message id checks.
+        // Saving them goes through the same verification and returns the same error. km1 can't sign
+        // without km2's nonce, so km2's signatures stand in for pk1's entry to get past the message id checks.
         let mut all = HashMap::new();
         all.insert(pk1, ps2.clone());
         all.insert(pk2, ps2);
@@ -344,7 +373,7 @@ mod musig2_tests {
         assert!(matches!(
             result,
             Err(KeyManagerError::Musig2SignerError(
-                Musig2SignerError::InvalidPartialSignature
+                Musig2SignerError::IncompleteParticipantNonces
             ))
         ));
 

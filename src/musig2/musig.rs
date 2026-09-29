@@ -552,8 +552,8 @@ impl MuSig2SignerApi for MuSig2Signer {
                 id,
                 *pubkey,
                 partial_signatures.clone(),
-            );
-            if valid.is_err() || !valid.unwrap() {
+            )?;
+            if !valid {
                 return Err(Musig2SignerError::InvalidPartialSignature);
             }
         }

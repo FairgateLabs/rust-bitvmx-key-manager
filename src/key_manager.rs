@@ -1887,7 +1887,7 @@ impl KeyManager {
         &self,
         aggregated_pubkey: &PublicKey,
     ) -> Result<(PrivateKey, PublicKey), KeyManagerError> {
-        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey).unwrap();
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
 
         match self.keystore.load_keypair(&my_pub_key)? {
             Some((private_key, public_key, _)) => Ok((private_key, public_key)),

@@ -408,4 +408,21 @@ mod musig2_tests {
         clear_output();
         Ok(())
     }
+
+    #[test]
+    fn test_get_key_pair_for_too_insecure_unknown_aggregated_key() -> Result<(), anyhow::Error> {
+        let (km, pk1) = mock_data()?;
+
+        // No session was created, so pk1 is not a known aggregated key
+        let result = km.get_key_pair_for_too_insecure(&pk1);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::AggregatedPubkeyNotFound
+            ))
+        ));
+
+        clear_output();
+        Ok(())
+    }
 }

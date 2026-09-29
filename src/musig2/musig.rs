@@ -651,17 +651,22 @@ impl MuSig2SignerApi for MuSig2Signer {
             return Err(Musig2SignerError::InvalidPublicKey);
         }
 
+        // The aggregated nonce and the signer's own nonce are needed to verify, so all nonces must be present
+        self.validate_partial_nonces(participant_pubkeys, aggregated_pubkey, id)?;
+
         let mut data_to_iterate = HashMap::new();
 
         for message_id in message_ids.iter() {
             let message = self.get_message(aggregated_pubkey, id, message_id)?;
             let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, id, message_id)?;
             let tweak = self.get_tweak(aggregated_pubkey, id, message_id)?;
-            let pub_nonce = self.get_pub_nonce(aggregated_pubkey, id, message_id, &pubkey)?;
+            let pub_nonce = self
+                .get_pub_nonce(aggregated_pubkey, id, message_id, &pubkey)?
+                .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?;
 
             data_to_iterate.insert(
                 message_id.clone(),
-                (message, aggregated_nonce, pub_nonce.unwrap(), tweak),
+                (message, aggregated_nonce, pub_nonce, tweak),
             );
         }
 

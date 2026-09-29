@@ -308,6 +308,51 @@ mod musig2_tests {
     }
 
     #[test]
+    fn test_verify_partial_signatures_missing_nonce() -> Result<(), anyhow::Error> {
+        let (km1, pk1) = mock_data()?;
+        let (km2, pk2) = mock_data()?;
+        let participants = vec![pk1, pk2];
+        let id = "missing_nonce";
+
+        let agg = km1.musig2().new_session(participants.clone(), pk1)?;
+        km2.musig2().new_session(participants, pk2)?;
+
+        km1.generate_nonce("m", b"m".to_vec(), &agg, id, None)?;
+        km2.generate_nonce("m", b"m".to_vec(), &agg, id, None)?;
+
+        // km2 receives km1's nonce and can sign, but km1 never receives km2's nonce
+        let mut nonces_for_km2 = HashMap::new();
+        nonces_for_km2.insert(pk1, km1.musig2().get_my_pub_nonces(&agg, id)?);
+        km2.musig2().aggregate_nonces(&agg, id, nonces_for_km2)?;
+        let ps2 = km2.get_my_partial_signatures(&agg, id)?;
+
+        // Verifying km2's partial signatures on km1 returns an error instead of panicking
+        let result = km1.verify_partial_signatures(&agg, id, pk2, ps2.clone());
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::IncompleteParticipantNonces
+            ))
+        ));
+
+        // Saving them goes through the same verification. km1 can't sign without km2's nonce,
+        // so km2's signatures stand in for pk1's entry to get past the message id checks.
+        let mut all = HashMap::new();
+        all.insert(pk1, ps2.clone());
+        all.insert(pk2, ps2);
+        let result = km1.save_partial_signatures(&agg, id, all);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::InvalidPartialSignature
+            ))
+        ));
+
+        clear_output();
+        Ok(())
+    }
+
+    #[test]
     fn test_final_signature_aggregation_and_verify() -> Result<(), anyhow::Error> {
         let msg = "final_sig";
         let (ctx, ps1, ps2) = create_session_with_partials(msg)?;

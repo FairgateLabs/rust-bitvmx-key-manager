@@ -166,7 +166,8 @@ impl KeyManager {
                     None => {
                         let mut entropy = Zeroizing::new([0u8; 32]); // 256 bits for 24 words, automatically zeroized when dropped
                         secp256k1::rand::thread_rng().fill_bytes(&mut *entropy);
-                        let random_mnemonic = Mnemonic::from_entropy(&*entropy).unwrap();
+                        let random_mnemonic = Mnemonic::from_entropy(&*entropy)
+                            .map_err(|_| KeyManagerError::InvalidMnemonic)?;
                         keystore.store_mnemonic(&random_mnemonic)?;
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"

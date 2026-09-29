@@ -618,8 +618,10 @@ impl MuSig2SignerApi for MuSig2Signer {
         let mut partial_signatures_vec = Vec::new();
 
         for pubkey in participant_pubkeys.iter() {
-            let part_sigs = partial_signatures.get(pubkey).unwrap();
-            partial_signatures_vec.push(*part_sigs);
+            let part_sig = partial_signatures
+                .get(pubkey)
+                .ok_or(Musig2SignerError::InvalidParticipantPartialSignatures)?;
+            partial_signatures_vec.push(*part_sig);
         }
 
         let aggregated_signature: Vec<u8> = aggregate_partial_signatures(

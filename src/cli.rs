@@ -46,7 +46,13 @@ enum Commands {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: BitcoinKeyType,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        // BIP-32 normal (non-hardened) indexes are < 2^31
+        #[arg(
+            value_name = "key_index",
+            short = 'k',
+            long = "key_index",
+            value_parser = clap::value_parser!(u32).range(..2_147_483_648)
+        )]
         key_index: u32,
     },
 
@@ -59,7 +65,13 @@ enum Commands {
         #[arg(value_name = "key_type", short = 't', long = "key_type")]
         key_type: BitcoinKeyType,
 
-        #[arg(value_name = "key_index", short = 'k', long = "key_index")]
+        // BIP-32 normal (non-hardened) indexes are < 2^31
+        #[arg(
+            value_name = "key_index",
+            short = 'k',
+            long = "key_index",
+            value_parser = clap::value_parser!(u32).range(..2_147_483_648)
+        )]
         key_index: u32,
 
         #[arg(value_name = "account_xpub", short = 'a', long = "account_xpub")]

@@ -641,21 +641,21 @@ impl KeyManager {
         account: u32,
         change: u32,
         index: u32,
-    ) -> DerivationPath {
-        DerivationPath::from(vec![
-            ChildNumber::from_hardened_idx(purpose).unwrap(),
-            ChildNumber::from_hardened_idx(coin_type).unwrap(),
-            ChildNumber::from_hardened_idx(account).unwrap(),
-            ChildNumber::from_normal_idx(change).unwrap(),
-            ChildNumber::from_normal_idx(index).unwrap(),
-        ])
+    ) -> Result<DerivationPath, KeyManagerError> {
+        Ok(DerivationPath::from(vec![
+            ChildNumber::from_hardened_idx(purpose)?,
+            ChildNumber::from_hardened_idx(coin_type)?,
+            ChildNumber::from_hardened_idx(account)?,
+            ChildNumber::from_normal_idx(change)?,
+            ChildNumber::from_normal_idx(index)?,
+        ]))
     }
 
     fn build_derivation_path(
         key_type: BitcoinKeyType,
         network: Network,
         index: u32,
-    ) -> DerivationPath {
+    ) -> Result<DerivationPath, KeyManagerError> {
         Self::build_bip44_derivation_path(
             key_type.purpose_index(),
             Self::get_bitcoin_coin_type_by_network(network),
@@ -767,7 +767,7 @@ impl KeyManager {
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
-        );
+        )?;
 
         let hardened_wots_account_derivation_path =
             Self::extract_account_level_path(&wots_full_derivation_path);
@@ -797,7 +797,7 @@ impl KeyManager {
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
-        );
+        )?;
 
         let hardened_lamport_account_derivation_path =
             Self::extract_account_level_path(&lamport_full_derivation_path);
@@ -822,7 +822,7 @@ impl KeyManager {
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0)?; // index doesn't matter here
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
 
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
@@ -859,7 +859,7 @@ impl KeyManager {
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0)?;
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
 
@@ -888,7 +888,7 @@ impl KeyManager {
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index)?;
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -919,7 +919,7 @@ impl KeyManager {
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index)?;
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -1010,11 +1010,18 @@ impl KeyManager {
     }
 
     fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
-        match self.keystore.load_next_keypair_index(key_type) {
-            Ok(stored_index) => Ok(stored_index),
-            Err(KeyManagerError::NextKeypairIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
-            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
+        let index = match self.keystore.load_next_keypair_index(key_type) {
+            Ok(stored_index) => stored_index,
+            Err(KeyManagerError::NextKeypairIndexNotFound) => Self::STARTING_DERIVATION_INDEX,
+            Err(e) => return Err(e), // Propagate other errors (e.g., storage/decryption errors)
+        };
+
+        // BIP-32 normal (non-hardened) indexes stop at 2^31 - 1, so the counter must not advance past that
+        if ChildNumber::from_normal_idx(index).is_err() {
+            return Err(KeyManagerError::IndexOverflow);
         }
+
+        Ok(index)
     }
 
     // This method changes the parity of a keypair to be even, this is needed for Taproot.
@@ -1064,7 +1071,7 @@ impl KeyManager {
         // and we will add just the chain path, but we need it in order to know if we need to adjust parity or not for the final key
 
         // Build the full derivation path and extract only the chain part after account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index)?;
         let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
@@ -2695,6 +2702,79 @@ mod tests {
             first_p2wpkh_pubkey, derived_p2wpkh_pubkey,
             "Expected derive_keypair(P2wpkh, 0) to match first P2wpkh next_keypair result"
         );
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_derivation_index_out_of_range_returns_error() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("regtest".to_string(), None, None);
+
+        let key_manager =
+            crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
+
+        // BIP-32 normal (non-hardened) indexes go up to 2^31 - 1
+        let max_index: u32 = (1 << 31) - 1;
+        let out_of_range_index: u32 = 1 << 31;
+
+        // 1. The last valid index still derives
+        key_manager.derive_keypair(BitcoinKeyType::P2wpkh, max_index)?;
+
+        // 2. Explicit derivation past the limit returns an error instead of panicking
+        let result = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, out_of_range_index);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        let result =
+            key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, out_of_range_index);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        let account_xpub = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
+        let result = key_manager.derive_public_key_from_account_xpub(
+            account_xpub,
+            BitcoinKeyType::P2wpkh,
+            out_of_range_index,
+            false,
+        );
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        // 3. next_keypair uses the last valid index, then refuses to advance past it
+        key_manager
+            .keystore
+            .store_next_keypair_index(BitcoinKeyType::P2wpkh, max_index, None)?;
+        key_manager.next_keypair(BitcoinKeyType::P2wpkh)?;
+
+        let result = key_manager.next_keypair(BitcoinKeyType::P2wpkh);
+        assert!(matches!(result, Err(KeyManagerError::IndexOverflow)));
+
+        let result = key_manager.next_keypair_adjusted(BitcoinKeyType::P2wpkh);
+        assert!(matches!(result, Err(KeyManagerError::IndexOverflow)));
+
+        // 4. The failed calls did not move the stored counter
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
+        assert_eq!(stored_index, out_of_range_index);
 
         drop(key_manager);
         cleanup_storage(&keystore_path);

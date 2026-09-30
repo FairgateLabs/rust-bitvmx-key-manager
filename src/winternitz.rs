@@ -678,8 +678,9 @@ pub fn calculate_checksum(message_digits: &[u8]) -> Vec<u8> {
 pub fn checksum_length(message_digits_len: usize) -> usize {
     let log_digits_per_message: f32 =
         ((W * message_digits_len) as f32).log((W + 1) as f32).ceil() + 1.0;
-    let digits_per_checksum: usize = usize::try_from(log_digits_per_message as u32).unwrap();
-    digits_per_checksum
+    // `as` from float to integer saturates (NaN -> 0, -inf -> 0), so this cannot panic;
+    // the value is at most ~17 for usize::MAX digits.
+    log_digits_per_message as usize
 }
 
 pub fn message_digits_length(message_size_in_bytes: usize) -> usize {

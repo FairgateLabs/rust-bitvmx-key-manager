@@ -1,3 +1,4 @@
+use rsa::sha2::Sha256;
 pub use rsa::{
     pkcs1v15::Signature,
     rand_core::{CryptoRng, OsRng},
@@ -9,7 +10,6 @@ use rsa::{
     signature::{SignerMut, Verifier},
     Oaep, RsaPrivateKey, RsaPublicKey,
 };
-use rsa::sha2::Sha256;
 use thiserror::Error;
 use zeroize::Zeroizing;
 

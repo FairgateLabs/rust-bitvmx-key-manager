@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod winternitz_tests {
     use crate::{
+        errors::WinternitzError,
         tests::utils::helper::{clear_output, create_key_manager},
         verifier::SignatureVerifier,
         winternitz::{
@@ -273,6 +274,31 @@ mod winternitz_tests {
         let invalid_bytes = vec![0u8; 33];
         let result = WinternitzSignature::from_bytes(&invalid_bytes, 10, WinternitzType::SHA256);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_bytes_signature_has_no_message_digits() {
+        // from_bytes only reads hashes, so the signature carries no digits
+        let signature =
+            WinternitzSignature::from_bytes(&[0u8; 32 * 3], 10, WinternitzType::SHA256).unwrap();
+
+        assert_eq!(signature.checksum_length(), 0);
+        assert!(signature.message_digits().is_empty());
+        assert!(signature.message_bytes().is_empty());
+    }
+
+    #[test]
+    fn test_from_hashes_and_digits_not_enough_digits() {
+        let result = WinternitzSignature::from_hashes_and_digits(
+            &[0u8; 32 * 3],
+            &[1, 2],
+            10,
+            WinternitzType::SHA256,
+        );
+        assert!(matches!(
+            result,
+            Err(WinternitzError::NotEnoughDigits(2, 10))
+        ));
     }
 
     #[test]

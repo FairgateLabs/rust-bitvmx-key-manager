@@ -161,6 +161,13 @@ impl WinternitzSignature {
             ));
         }
 
+        if checksummed_digits.len() < message_length {
+            return Err(WinternitzError::NotEnoughDigits(
+                checksummed_digits.len(),
+                message_length,
+            ));
+        }
+
         let mut signature = WinternitzSignature::new(message_length);
 
         for i in 0..hashes.len() / hash_size {
@@ -203,16 +210,22 @@ impl WinternitzSignature {
         self.message_length
     }
 
+    /// Returns the number of checksum digits, or 0 if the signature has no digits
+    /// (e.g. when built with [`WinternitzSignature::from_bytes`]).
     pub fn checksum_length(&self) -> usize {
-        self.digits.len() - self.message_length
+        self.digits.len().saturating_sub(self.message_length)
     }
 
+    /// Returns the message digits, or an empty vector if the signature has no digits
+    /// (e.g. when built with [`WinternitzSignature::from_bytes`]).
     pub fn message_digits(&self) -> Vec<u8> {
         let mut copy = self.digits.clone();
         copy.reverse();
         copy[self.checksum_length()..].to_vec()
     }
 
+    /// Returns the message bytes, or an empty vector if the signature has no digits
+    /// (see [`WinternitzSignature::message_digits`]).
     pub fn message_bytes(&self) -> Vec<u8> {
         from_message_digits(&self.message_digits())
     }

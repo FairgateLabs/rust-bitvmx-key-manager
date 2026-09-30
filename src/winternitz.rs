@@ -558,6 +558,15 @@ impl Winternitz {
         Ok(private_key)
     }
 
+    /// Signs `checksummed_message` using one `private_key` hash per message digit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `private_key` has fewer hashes than `checksummed_message` has digits.
+    /// Callers of this function are responsible for passing a key generated for this
+    /// message size; calling it directly with a key for a shorter message will panic.
+    /// Signing through [`KeyManager`](crate::key_manager::KeyManager) cannot trigger it,
+    /// because it always generates the key from the message it signs.
     pub fn sign_message(
         &self,
         message_digits: usize,

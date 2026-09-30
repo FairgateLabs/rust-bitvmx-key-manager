@@ -1182,21 +1182,19 @@ impl MuSig2Signer {
             .iter()
             .map(|pubkey| to_musig_pubkey(*pubkey))
             .collect::<Result<Vec<_>, _>>()?;
+
+        // KeyAggContext::new panics on an empty list instead of returning an error
+        if participant_pubkeys.is_empty() {
+            return Err(Musig2SignerError::InvalidNumberOfParticipants);
+        }
+
+        let key_agg_context = KeyAggContext::new(participant_pubkeys)?;
+
         match tweak {
-            Some(tweak) => {
-                let key_agg_context = KeyAggContext::new(participant_pubkeys)
-                    .unwrap()
-                    .with_tweak(tweak, true)
-                    .map_err(|_| Musig2SignerError::InvalidPublicKey)?;
-
-                Ok(key_agg_context)
-            }
-            None => {
-                let key_agg_context = KeyAggContext::new(participant_pubkeys)
-                    .map_err(|_| Musig2SignerError::InvalidPublicKey)?;
-
-                Ok(key_agg_context)
-            }
+            Some(tweak) => key_agg_context
+                .with_tweak(tweak, true)
+                .map_err(|_| Musig2SignerError::InvalidPublicKey),
+            None => Ok(key_agg_context),
         }
     }
 

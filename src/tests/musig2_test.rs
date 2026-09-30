@@ -112,6 +112,28 @@ mod musig2_tests {
     }
 
     #[test]
+    fn test_key_agg_context_empty_participants() -> Result<(), anyhow::Error> {
+        let (km, _) = mock_data()?;
+
+        let result = km
+            .musig2()
+            .get_key_agg_context_aux(vec![], Some(musig2::secp256k1::Scalar::ONE));
+        assert!(matches!(
+            result,
+            Err(Musig2SignerError::InvalidNumberOfParticipants)
+        ));
+
+        let result = km.musig2().get_key_agg_context_aux(vec![], None);
+        assert!(matches!(
+            result,
+            Err(Musig2SignerError::InvalidNumberOfParticipants)
+        ));
+
+        clear_output();
+        Ok(())
+    }
+
+    #[test]
     fn test_nonce_determinism_and_uniqueness() -> Result<(), anyhow::Error> {
         let (km1, pk1) = mock_data()?;
         let (km2, pk2) = mock_data()?;

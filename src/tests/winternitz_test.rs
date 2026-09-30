@@ -210,6 +210,33 @@ mod winternitz_tests {
     }
 
     #[test]
+    fn test_truncated_signature_does_not_verify() {
+        let path = "test_output/suite5_truncated_signature";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
+
+        // Drop the last hash, as a signature received from outside could be
+        let bytes = signature.to_bytes();
+        let truncated = WinternitzSignature::from_bytes(
+            &bytes[..bytes.len() - public_key.hash_size()],
+            signature.message_length(),
+            WinternitzType::SHA256,
+        )
+        .unwrap();
+
+        assert!(!verifier.verify_winternitz_signature(&truncated, &message, &public_key));
+        clear_output();
+    }
+
+    #[test]
     fn test_signature_serialization_round_trip() {
         let path = "test_output/suite5_signature_serialization";
         let key_manager = create_key_manager(path, None).unwrap();

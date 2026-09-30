@@ -586,6 +586,11 @@ impl Winternitz {
         signature: &WinternitzSignature,
         public_key: &WinternitzPublicKey,
     ) -> Result<bool, WinternitzError> {
+        // A signature needs one hash per checksummed message digit
+        if signature.len() < checksummed_message.len() {
+            return Ok(false);
+        }
+
         let mut generated_public_key: WinternitzPublicKey =
             WinternitzPublicKey::new(public_key.key_type(), public_key.extra_data());
 

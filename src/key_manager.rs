@@ -1636,16 +1636,19 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_bytes.len());
         let checksummed_message = to_checksummed_message(message_bytes);
         let checksum_size = checksum_length(message_digits_length);
-        let message_size = checksummed_message.len() - checksum_size;
 
-        assert!(message_size == message_digits_length);
+        // The key must be sized like the public key, which is derived from these same formulas
+        debug_assert_eq!(
+            checksummed_message.len(),
+            message_digits_length + checksum_size
+        );
 
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(
             &*master_secret,
             key_type,
-            message_size,
+            message_digits_length,
             checksum_size,
             index,
         )?;

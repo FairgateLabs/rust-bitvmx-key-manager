@@ -7,7 +7,8 @@ use rsa::{
     pkcs1v15::{SigningKey, VerifyingKey},
     pkcs8::{spki, DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey},
     rand_core::RngCore,
-    signature::{SignerMut, Verifier},
+    signature::{Signer, Verifier},
+    traits::PublicKeyParts,
     Oaep, RsaPrivateKey, RsaPublicKey,
 };
 use thiserror::Error;
@@ -23,6 +24,9 @@ pub enum RSAError {
 
     #[error("Invalid private key for PEM {0}")]
     InvalidPrivateKey(#[from] rsa::pkcs8::Error),
+
+    #[error("Failed to sign message: {0}")]
+    SigningFailed(#[from] rsa::signature::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -56,10 +60,15 @@ impl RSAKeyPair {
         }
     }
 
+    /// Key size in bits (size of the modulus)
+    pub fn bits(&self) -> usize {
+        self.public_key.n().bits()
+    }
+
     /// Sign a message using PKCS#1 v1.5 with SHA-256
-    pub fn sign(&self, message: &[u8]) -> Signature {
-        let mut signer = SigningKey::<Sha256>::new_unprefixed(self.private_key.clone());
-        signer.sign(message)
+    pub fn sign(&self, message: &[u8]) -> Result<Signature, RSAError> {
+        let signer = SigningKey::<Sha256>::new_unprefixed(self.private_key.clone());
+        Ok(signer.try_sign(message)?)
     }
 
     /// Verify a signature using the public key
@@ -139,7 +148,7 @@ mod tests {
         let keypair2 = RSAKeyPair::from_private_key(RsaPrivateKey::new(&mut rng, 2048).unwrap());
 
         let message = b"Hello, RSA!";
-        let signature = keypair.sign(message);
+        let signature = keypair.sign(message).unwrap();
         assert!(
             RSAKeyPair::verify(message, &keypair.export_public_pem().unwrap(), &signature).unwrap()
         );
@@ -152,5 +161,14 @@ mod tests {
         .unwrap();
         let decrypted_message = keypair2.decrypt(&ciphertext).unwrap();
         assert_eq!(decrypted_message, message);
+    }
+
+    #[test]
+    fn test_rsa_sign_with_too_small_key_returns_error() {
+        // 256 bits is below what PKCS#1 v1.5 with SHA-256 needs to fit the padded hash
+        let keypair = RSAKeyPair::new(&mut OsRng, 256).unwrap();
+
+        let result = keypair.sign(b"Hello, RSA!");
+        assert!(matches!(result, Err(RSAError::SigningFailed(_))));
     }
 }

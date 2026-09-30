@@ -2,6 +2,7 @@
 mod rsa_tests {
     use crate::{
         errors::KeyManagerError,
+        rsa::RSAKeyPair,
         tests::utils::helper::{clear_output, create_key_manager},
         verifier::SignatureVerifier,
     };
@@ -101,6 +102,42 @@ mod rsa_tests {
 
         let result = key_manager.decrypt_rsa_message(&encrypted, &foreign_pubkey_pem);
         assert!(matches!(result, Err(KeyManagerError::RsaKeyNotFound)));
+        clear_output();
+    }
+
+    #[test]
+    fn test_generate_custom_key_below_minimum_size_returns_error() {
+        let key_manager = create_key_manager("test_output/rsa_custom_too_small", None).unwrap();
+
+        let result = key_manager.generate_rsa_keypair_custom(&mut thread_rng(), 1024);
+        assert!(matches!(result, Err(KeyManagerError::InvalidRSAKeySize(_))));
+        clear_output();
+    }
+
+    #[test]
+    fn test_import_key_below_minimum_size_returns_error() {
+        let key_manager = create_key_manager("test_output/rsa_import_too_small", None).unwrap();
+        let small_key_pem = RSAKeyPair::new(&mut thread_rng(), 1024)
+            .unwrap()
+            .export_private_pem()
+            .unwrap();
+
+        let result = key_manager.import_rsa_private_key(&small_key_pem);
+        assert!(matches!(result, Err(KeyManagerError::InvalidRSAKeySize(_))));
+        clear_output();
+    }
+
+    #[test]
+    fn test_import_key_above_maximum_size_returns_error() {
+        let key_manager = create_key_manager("test_output/rsa_import_too_large", None).unwrap();
+        // Just above the 4096-bit maximum, larger keys are slow to generate
+        let large_key_pem = RSAKeyPair::new(&mut thread_rng(), 4160)
+            .unwrap()
+            .export_private_pem()
+            .unwrap();
+
+        let result = key_manager.import_rsa_private_key(&large_key_pem);
+        assert!(matches!(result, Err(KeyManagerError::InvalidRSAKeySize(_))));
         clear_output();
     }
 }

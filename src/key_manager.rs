@@ -45,7 +45,8 @@ use crate::{
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
 const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
-const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid performance issues
+const MAX_RSA_BITS: usize = ::rsa::RsaPublicKey::MAX_SIZE; // maximum RSA key size in bits, larger public keys are rejected when parsed from PEM, so the key could not be used
+const MIN_RSA_BITS: usize = 2048; // minimum RSA key size in bits, smaller keys are insecure (and below ~344 bits cannot sign)
 
 // HKDF domain separator for MuSig2 nonce seed generation
 // Version 1 - ensures derived nonce seeds are unique to this specific use case
@@ -585,6 +586,7 @@ impl KeyManager {
         private_key: &str, // PEM format
     ) -> Result<String, KeyManagerError> {
         let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
+        Self::validate_rsa_key_size(rsa_keypair.bits())?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)
@@ -1383,16 +1385,27 @@ impl KeyManager {
         rng: &mut R,
         bits: usize,
     ) -> Result<String, KeyManagerError> {
+        Self::validate_rsa_key_size(bits)?;
+        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
+        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
+        Ok(rsa_pubkey_pem)
+    }
+
+    fn validate_rsa_key_size(bits: usize) -> Result<(), KeyManagerError> {
         if bits > MAX_RSA_BITS {
             return Err(KeyManagerError::InvalidRSAKeySize(format!(
                 "RSA key size too large, maximum is {} bits",
                 MAX_RSA_BITS
             )));
         }
-        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
-        self.keystore.store_rsa_key(rsa_keypair.clone())?;
-        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
-        Ok(rsa_pubkey_pem)
+        if bits < MIN_RSA_BITS {
+            return Err(KeyManagerError::InvalidRSAKeySize(format!(
+                "RSA key size too small, minimum is {} bits",
+                MIN_RSA_BITS
+            )));
+        }
+        Ok(())
     }
 
     /*********************************/
@@ -1853,7 +1866,7 @@ impl KeyManager {
         let pubk = RSAKeyPair::pubkey_from_public_key_pem(pub_key)?;
         let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
-            Some(rsa_key) => Ok(rsa_key.sign(message)),
+            Some(rsa_key) => Ok(rsa_key.sign(message)?),
             None => Err(KeyManagerError::RsaKeyNotFound),
         }
     }

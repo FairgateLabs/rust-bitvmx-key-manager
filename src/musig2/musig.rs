@@ -1375,12 +1375,11 @@ impl MuSig2Signer {
         tx_id
     }
 
-    // Private local commit transaction wrapper to manage feature flag
+    // Private local commit transaction wrapper, None means no transaction was begun (feature flag off)
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), StorageError> {
-        #[cfg(feature = "transactional")]
-        self.store.commit_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.store.commit_transaction(tx_id)?;
+        }
 
         Ok(())
     }

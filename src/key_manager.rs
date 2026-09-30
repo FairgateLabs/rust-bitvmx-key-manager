@@ -2225,22 +2225,20 @@ impl KeyManager {
         tx_id
     }
 
-    // Private local rollback transaction wrapper to manage feature flag
+    // Private local rollback transaction wrapper, None means no transaction was begun (feature flag off)
     fn rollback_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
-        #[cfg(feature = "transactional")]
-        self.keystore.rollback_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.keystore.rollback_transaction(tx_id)?;
+        }
 
         Ok(())
     }
 
-    // Private local commit transaction wrapper to manage feature flag
+    // Private local commit transaction wrapper, None means no transaction was begun (feature flag off)
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
-        #[cfg(feature = "transactional")]
-        self.keystore.commit_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.keystore.commit_transaction(tx_id)?;
+        }
 
         Ok(())
     }

@@ -349,7 +349,7 @@ impl KeyStore {
 
         // Load the block from storage (or create new if doesn't exist)
         let block_key = Self::winternitz_index_block_key(block_num)?;
-        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(block_key.clone(), None)? {
+        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(&block_key, None)? {
             Some(block) => block,
             None => vec![0u8; Self::WOTS_CHECK_BLOCK_BYTES], // Create new empty block
         };
@@ -535,7 +535,7 @@ impl KeyStore {
 
         // Load the block from storage (or create new if doesn't exist)
         let block_key = Self::lamport_index_block_key(block_num)?;
-        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(block_key.clone(), None)? {
+        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(&block_key, None)? {
             Some(block) => block,
             None => vec![0u8; Self::LAMPORT_CHECK_BLOCK_BYTES], // Create new empty block
         };

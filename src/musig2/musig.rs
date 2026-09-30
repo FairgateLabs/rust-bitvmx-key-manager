@@ -415,7 +415,7 @@ impl MuSig2SignerApi for MuSig2Signer {
                     message_id: message_id_nonce.to_string(),
                     participant_pubkey: pub_key.to_string(),
                 })?;
-                let exist_nonce = self.store.has_key(key.clone(), None)?;
+                let exist_nonce = self.store.has_key(&key, None)?;
 
                 if exist_nonce {
                     return Err(Musig2SignerError::NonceAlreadyExists);
@@ -913,9 +913,7 @@ impl MuSig2Signer {
         let new_index = {
             let db_tx_id = self.begin_transaction();
 
-            let current_index = self
-                .store
-                .get::<u32>(key_index_used_by_me.clone(), db_tx_id)?;
+            let current_index = self.store.get::<u32>(&key_index_used_by_me, db_tx_id)?;
             let new_index = current_index.map_or(0, |idx| idx + 1);
             self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
 

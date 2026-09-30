@@ -11,7 +11,7 @@ use bitcoin::{
     hashes::{self, Hash},
     key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey, TapNodeHash,
+    Network, NetworkKind, PrivateKey, PublicKey, TapNodeHash,
 };
 use hkdf::Hkdf;
 use itertools::izip;
@@ -691,12 +691,9 @@ impl KeyManager {
     }
 
     fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
-        match network {
-            Network::Bitcoin => 0,  // Bitcoin mainnet
-            Network::Testnet => 1,  // Bitcoin testnet
-            Network::Testnet4 => 1, // Bitcoin testnet4
-            Network::Regtest => 1,  // Bitcoin regtest (same as testnet)
-            _ => panic!("Unsupported network"),
+        match NetworkKind::from(network) {
+            NetworkKind::Main => 0, // Bitcoin mainnet
+            NetworkKind::Test => 1, // all test networks (testnet, testnet4, signet, regtest) share coin type 1
         }
     }
 
@@ -2790,6 +2787,40 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_signet_derives_same_keys_as_testnet() -> Result<(), KeyManagerError> {
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+        let signet_path = temp_storage();
+        let signet_manager = KeyManager::new(
+            Network::Signet,
+            Some(Mnemonic::parse(mnemonic_sentence).unwrap()),
+            None,
+            &database_keystore_config(&signet_path)?,
+        )?;
+
+        let testnet_path = temp_storage();
+        let testnet_manager = KeyManager::new(
+            Network::Testnet,
+            Some(Mnemonic::parse(mnemonic_sentence).unwrap()),
+            None,
+            &database_keystore_config(&testnet_path)?,
+        )?;
+
+        // All test networks share BIP-44 coin type 1, so the same mnemonic gives the same keys
+        assert_eq!(
+            signet_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?,
+            testnet_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?
+        );
+
+        drop(signet_manager);
+        drop(testnet_manager);
+        cleanup_storage(&signet_path);
+        cleanup_storage(&testnet_path);
         Ok(())
     }
 

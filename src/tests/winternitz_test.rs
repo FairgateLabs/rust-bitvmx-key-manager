@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod winternitz_tests {
     use crate::{
+        errors::WinternitzError,
         tests::utils::helper::{clear_output, create_key_manager},
         verifier::SignatureVerifier,
         winternitz::{
@@ -210,6 +211,33 @@ mod winternitz_tests {
     }
 
     #[test]
+    fn test_truncated_signature_does_not_verify() {
+        let path = "test_output/suite5_truncated_signature";
+        let key_manager = create_key_manager(path, None).unwrap();
+        let verifier = SignatureVerifier::new();
+        let message = random_message();
+
+        let public_key = key_manager
+            .next_winternitz(message.len(), WinternitzType::SHA256)
+            .unwrap();
+        let signature = key_manager
+            .sign_winternitz_message_by_pubkey(&message, &public_key)
+            .unwrap();
+
+        // Drop the last hash, as a signature received from outside could be
+        let bytes = signature.to_bytes();
+        let truncated = WinternitzSignature::from_bytes(
+            &bytes[..bytes.len() - public_key.hash_size()],
+            signature.message_length(),
+            WinternitzType::SHA256,
+        )
+        .unwrap();
+
+        assert!(!verifier.verify_winternitz_signature(&truncated, &message, &public_key));
+        clear_output();
+    }
+
+    #[test]
     fn test_signature_serialization_round_trip() {
         let path = "test_output/suite5_signature_serialization";
         let key_manager = create_key_manager(path, None).unwrap();
@@ -246,6 +274,31 @@ mod winternitz_tests {
         let invalid_bytes = vec![0u8; 33];
         let result = WinternitzSignature::from_bytes(&invalid_bytes, 10, WinternitzType::SHA256);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_bytes_signature_has_no_message_digits() {
+        // from_bytes only reads hashes, so the signature carries no digits
+        let signature =
+            WinternitzSignature::from_bytes(&[0u8; 32 * 3], 10, WinternitzType::SHA256).unwrap();
+
+        assert_eq!(signature.checksum_length(), 0);
+        assert!(signature.message_digits().is_empty());
+        assert!(signature.message_bytes().is_empty());
+    }
+
+    #[test]
+    fn test_from_hashes_and_digits_not_enough_digits() {
+        let result = WinternitzSignature::from_hashes_and_digits(
+            &[0u8; 32 * 3],
+            &[1, 2],
+            10,
+            WinternitzType::SHA256,
+        );
+        assert!(matches!(
+            result,
+            Err(WinternitzError::NotEnoughDigits(2, 10))
+        ));
     }
 
     #[test]

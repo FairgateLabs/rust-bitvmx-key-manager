@@ -552,8 +552,8 @@ impl MuSig2SignerApi for MuSig2Signer {
                 id,
                 *pubkey,
                 partial_signatures.clone(),
-            );
-            if valid.is_err() || !valid.unwrap() {
+            )?;
+            if !valid {
                 return Err(Musig2SignerError::InvalidPartialSignature);
             }
         }
@@ -618,8 +618,10 @@ impl MuSig2SignerApi for MuSig2Signer {
         let mut partial_signatures_vec = Vec::new();
 
         for pubkey in participant_pubkeys.iter() {
-            let part_sigs = partial_signatures.get(pubkey).unwrap();
-            partial_signatures_vec.push(*part_sigs);
+            let part_sig = partial_signatures
+                .get(pubkey)
+                .ok_or(Musig2SignerError::InvalidParticipantPartialSignatures)?;
+            partial_signatures_vec.push(*part_sig);
         }
 
         let aggregated_signature: Vec<u8> = aggregate_partial_signatures(
@@ -651,17 +653,22 @@ impl MuSig2SignerApi for MuSig2Signer {
             return Err(Musig2SignerError::InvalidPublicKey);
         }
 
+        // The aggregated nonce and the signer's own nonce are needed to verify, so all nonces must be present
+        self.validate_partial_nonces(participant_pubkeys, aggregated_pubkey, id)?;
+
         let mut data_to_iterate = HashMap::new();
 
         for message_id in message_ids.iter() {
             let message = self.get_message(aggregated_pubkey, id, message_id)?;
             let aggregated_nonce = self.get_aggregated_nonce(aggregated_pubkey, id, message_id)?;
             let tweak = self.get_tweak(aggregated_pubkey, id, message_id)?;
-            let pub_nonce = self.get_pub_nonce(aggregated_pubkey, id, message_id, &pubkey)?;
+            let pub_nonce = self
+                .get_pub_nonce(aggregated_pubkey, id, message_id, &pubkey)?
+                .ok_or_else(|| Musig2SignerError::MissingNonce(message_id.to_string()))?;
 
             data_to_iterate.insert(
                 message_id.clone(),
-                (message, aggregated_nonce, pub_nonce.unwrap(), tweak),
+                (message, aggregated_nonce, pub_nonce, tweak),
             );
         }
 
@@ -1175,21 +1182,19 @@ impl MuSig2Signer {
             .iter()
             .map(|pubkey| to_musig_pubkey(*pubkey))
             .collect::<Result<Vec<_>, _>>()?;
+
+        // KeyAggContext::new panics on an empty list instead of returning an error
+        if participant_pubkeys.is_empty() {
+            return Err(Musig2SignerError::InvalidNumberOfParticipants);
+        }
+
+        let key_agg_context = KeyAggContext::new(participant_pubkeys)?;
+
         match tweak {
-            Some(tweak) => {
-                let key_agg_context = KeyAggContext::new(participant_pubkeys)
-                    .unwrap()
-                    .with_tweak(tweak, true)
-                    .map_err(|_| Musig2SignerError::InvalidPublicKey)?;
-
-                Ok(key_agg_context)
-            }
-            None => {
-                let key_agg_context = KeyAggContext::new(participant_pubkeys)
-                    .map_err(|_| Musig2SignerError::InvalidPublicKey)?;
-
-                Ok(key_agg_context)
-            }
+            Some(tweak) => key_agg_context
+                .with_tweak(tweak, true)
+                .map_err(|_| Musig2SignerError::InvalidPublicKey),
+            None => Ok(key_agg_context),
         }
     }
 
@@ -1370,12 +1375,11 @@ impl MuSig2Signer {
         tx_id
     }
 
-    // Private local commit transaction wrapper to manage feature flag
+    // Private local commit transaction wrapper, None means no transaction was begun (feature flag off)
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), StorageError> {
-        #[cfg(feature = "transactional")]
-        self.store.commit_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.store.commit_transaction(tx_id)?;
+        }
 
         Ok(())
     }

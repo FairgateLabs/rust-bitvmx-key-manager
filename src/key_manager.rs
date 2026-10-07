@@ -961,7 +961,13 @@ impl KeyManager {
         let index = {
             let tx_id = self.begin_transaction();
 
-            let index = self.next_keypair_index(key_type)?;
+            let index = match self.next_keypair_index(key_type) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(error);
+                }
+            };
             let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
                 .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;
@@ -995,7 +1001,13 @@ impl KeyManager {
         let index = {
             let tx_id = self.begin_transaction();
 
-            let index = self.next_keypair_index(key_type)?;
+            let index = match self.next_keypair_index(key_type) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(error);
+                }
+            };
             let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
                 .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;

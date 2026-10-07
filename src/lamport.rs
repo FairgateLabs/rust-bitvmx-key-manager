@@ -1240,20 +1240,20 @@ impl Lamport {
         signature: &LamportSignature,
         public_key: &LamportPublicKey,
     ) -> Result<(bool, Option<Vec<bool>>), LamportError> {
-        // validate only if the message was provided
-        if message.is_some() {
-            let message_bits = message.clone().unwrap().into_message_bits();
+        let expected_bits = message.map(LamportMessage::into_message_bits);
 
-            if message_bits.len() != signature.message_bit_length() {
+        // validate only if the message was provided
+        if let Some(bits) = &expected_bits {
+            if bits.len() != signature.message_bit_length() {
                 return Err(LamportError::MessageLengthMismatch(
-                    message_bits.len(),
+                    bits.len(),
                     signature.message_bit_length(),
                 ));
             }
 
-            if message_bits.len() != public_key.len() {
+            if bits.len() != public_key.len() {
                 return Err(LamportError::MessageLengthMismatch(
-                    message_bits.len(),
+                    bits.len(),
                     public_key.len(),
                 ));
             }
@@ -1279,8 +1279,8 @@ impl Lamport {
         }
 
         // check only if the message was provided
-        if let Some(m) = message {
-            if reconstructed_message != m.into_message_bits() {
+        if let Some(bits) = expected_bits {
+            if reconstructed_message != bits {
                 return Ok((false, None));
             }
         }

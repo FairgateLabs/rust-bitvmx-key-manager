@@ -161,6 +161,13 @@ impl WinternitzSignature {
             ));
         }
 
+        if checksummed_digits.len() < message_length {
+            return Err(WinternitzError::NotEnoughDigits(
+                checksummed_digits.len(),
+                message_length,
+            ));
+        }
+
         let mut signature = WinternitzSignature::new(message_length);
 
         for i in 0..hashes.len() / hash_size {
@@ -203,16 +210,22 @@ impl WinternitzSignature {
         self.message_length
     }
 
+    /// Returns the number of checksum digits, or 0 if the signature has no digits
+    /// (e.g. when built with [`WinternitzSignature::from_bytes`]).
     pub fn checksum_length(&self) -> usize {
-        self.digits.len() - self.message_length
+        self.digits.len().saturating_sub(self.message_length)
     }
 
+    /// Returns the message digits, or an empty vector if the signature has no digits
+    /// (e.g. when built with [`WinternitzSignature::from_bytes`]).
     pub fn message_digits(&self) -> Vec<u8> {
         let mut copy = self.digits.clone();
         copy.reverse();
         copy[self.checksum_length()..].to_vec()
     }
 
+    /// Returns the message bytes, or an empty vector if the signature has no digits
+    /// (see [`WinternitzSignature::message_digits`]).
     pub fn message_bytes(&self) -> Vec<u8> {
         from_message_digits(&self.message_digits())
     }
@@ -558,6 +571,15 @@ impl Winternitz {
         Ok(private_key)
     }
 
+    /// Signs `checksummed_message` using one `private_key` hash per message digit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `private_key` has fewer hashes than `checksummed_message` has digits.
+    /// Callers of this function are responsible for passing a key generated for this
+    /// message size; calling it directly with a key for a shorter message will panic.
+    /// Signing through [`KeyManager`](crate::key_manager::KeyManager) cannot trigger it,
+    /// because it always generates the key from the message it signs.
     pub fn sign_message(
         &self,
         message_digits: usize,
@@ -586,6 +608,11 @@ impl Winternitz {
         signature: &WinternitzSignature,
         public_key: &WinternitzPublicKey,
     ) -> Result<bool, WinternitzError> {
+        // A signature needs one hash per checksummed message digit
+        if signature.len() < checksummed_message.len() {
+            return Ok(false);
+        }
+
         let mut generated_public_key: WinternitzPublicKey =
             WinternitzPublicKey::new(public_key.key_type(), public_key.extra_data());
 
@@ -678,8 +705,9 @@ pub fn calculate_checksum(message_digits: &[u8]) -> Vec<u8> {
 pub fn checksum_length(message_digits_len: usize) -> usize {
     let log_digits_per_message: f32 =
         ((W * message_digits_len) as f32).log((W + 1) as f32).ceil() + 1.0;
-    let digits_per_checksum: usize = usize::try_from(log_digits_per_message as u32).unwrap();
-    digits_per_checksum
+    // `as` from float to integer saturates (NaN -> 0, -inf -> 0), so this cannot panic;
+    // the value is at most ~17 for usize::MAX digits.
+    log_digits_per_message as usize
 }
 
 pub fn message_digits_length(message_size_in_bytes: usize) -> usize {

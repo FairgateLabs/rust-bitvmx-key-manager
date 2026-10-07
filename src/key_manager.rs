@@ -11,7 +11,7 @@ use bitcoin::{
     hashes::{self, Hash},
     key::{rand::RngCore, Keypair, Parity, TapTweak},
     secp256k1::{self, All, Message, Scalar, SecretKey},
-    Network, PrivateKey, PublicKey, TapNodeHash,
+    Network, NetworkKind, PrivateKey, PublicKey, TapNodeHash,
 };
 use hkdf::Hkdf;
 use itertools::izip;
@@ -24,7 +24,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
-    key_store::KeyStore,
+    key_store::{KeyStore, StoredRsaKeyPair},
     key_type::BitcoinKeyType,
     lamport::{
         Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
@@ -45,7 +45,8 @@ use crate::{
 use musig2::{sign_partial, AggNonce, PartialSignature, PubNonce, SecNonce};
 
 const DEFAULT_RSA_BITS: usize = 2048; // default RSA key size in bits (other sizes could also be defined)
-const MAX_RSA_BITS: usize = 16384; // maximum RSA key size in bits to avoid performance issues
+const MAX_RSA_BITS: usize = ::rsa::RsaPublicKey::MAX_SIZE; // maximum RSA key size in bits, larger public keys are rejected when parsed from PEM, so the key could not be used
+const MIN_RSA_BITS: usize = 2048; // minimum RSA key size in bits, smaller keys are insecure (and below ~344 bits cannot sign)
 
 // HKDF domain separator for MuSig2 nonce seed generation
 // Version 1 - ensures derived nonce seeds are unique to this specific use case
@@ -166,7 +167,8 @@ impl KeyManager {
                     None => {
                         let mut entropy = Zeroizing::new([0u8; 32]); // 256 bits for 24 words, automatically zeroized when dropped
                         secp256k1::rand::thread_rng().fill_bytes(&mut *entropy);
-                        let random_mnemonic = Mnemonic::from_entropy(&*entropy).unwrap();
+                        let random_mnemonic = Mnemonic::from_entropy(&*entropy)
+                            .map_err(|_| KeyManagerError::InvalidMnemonic)?;
                         keystore.store_mnemonic(&random_mnemonic)?;
                         tracing::warn!(
                             "Random mnemonic generated, make sure to back it up securely!"
@@ -316,19 +318,25 @@ impl KeyManager {
                 continue;
             }
 
-            if key.starts_with("-----BEGIN PUBLIC KEY-----") {
-                if let Some(private_key_pem) = self.keystore.load_value::<String>(key)? {
-                    if private_key_pem.starts_with("-----BEGIN PRIVATE KEY-----") {
+            if key.starts_with("key_manager/rsa/") {
+                if let Some(stored) = self.keystore.load_value::<StoredRsaKeyPair>(key)? {
+                    if stored
+                        .public_key_pem
+                        .starts_with("-----BEGIN PUBLIC KEY-----")
+                        && stored
+                            .private_key_pem
+                            .starts_with("-----BEGIN PRIVATE KEY-----")
+                    {
                         rsa_keypairs.push(ExportedRsaKeyPair {
-                            public_key_pem: key.clone(),
-                            private_key_pem,
+                            public_key_pem: stored.public_key_pem,
+                            private_key_pem: stored.private_key_pem,
                         });
                     }
                 }
                 continue;
             }
 
-            if key.starts_with("lamport:") {
+            if key.starts_with("key_manager/lamport/") {
                 if let Some(value) = self.keystore.load_value::<String>(key)? {
                     lamport_imported_raw.push(ExportedLamportImportedKey {
                         storage_key: key.clone(),
@@ -339,7 +347,7 @@ impl KeyManager {
             }
         }
 
-        let session_prefix = "musig2/session/";
+        let session_prefix = "key_manager/musig2/session/";
         let participant_suffix = "/participant_pub_keys";
         for key in storage_keys
             .iter()
@@ -354,7 +362,8 @@ impl KeyManager {
                 .load_value::<Vec<PublicKey>>(key)?
                 .unwrap_or_default();
 
-            let my_public_key_key = format!("musig2/session/{aggregated_public_key}/my_public_key");
+            let my_public_key_key =
+                format!("key_manager/musig2/session/{aggregated_public_key}/my_public_key");
             let my_public_key = self.keystore.load_value::<PublicKey>(&my_public_key_key)?;
             let my_owned_keypair = match my_public_key {
                 Some(pubkey) => self.keystore.load_keypair(&pubkey)?.map(
@@ -577,6 +586,7 @@ impl KeyManager {
         private_key: &str, // PEM format
     ) -> Result<String, KeyManagerError> {
         let rsa_keypair = RSAKeyPair::from_private_pem(private_key)?;
+        Self::validate_rsa_key_size(rsa_keypair.bits())?;
         self.keystore.store_rsa_key(rsa_keypair.clone())?;
         let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
         Ok(rsa_pubkey_pem)
@@ -634,21 +644,21 @@ impl KeyManager {
         account: u32,
         change: u32,
         index: u32,
-    ) -> DerivationPath {
-        DerivationPath::from(vec![
-            ChildNumber::from_hardened_idx(purpose).unwrap(),
-            ChildNumber::from_hardened_idx(coin_type).unwrap(),
-            ChildNumber::from_hardened_idx(account).unwrap(),
-            ChildNumber::from_normal_idx(change).unwrap(),
-            ChildNumber::from_normal_idx(index).unwrap(),
-        ])
+    ) -> Result<DerivationPath, KeyManagerError> {
+        Ok(DerivationPath::from(vec![
+            ChildNumber::from_hardened_idx(purpose)?,
+            ChildNumber::from_hardened_idx(coin_type)?,
+            ChildNumber::from_hardened_idx(account)?,
+            ChildNumber::from_normal_idx(change)?,
+            ChildNumber::from_normal_idx(index)?,
+        ]))
     }
 
     fn build_derivation_path(
         key_type: BitcoinKeyType,
         network: Network,
         index: u32,
-    ) -> DerivationPath {
+    ) -> Result<DerivationPath, KeyManagerError> {
         Self::build_bip44_derivation_path(
             key_type.purpose_index(),
             Self::get_bitcoin_coin_type_by_network(network),
@@ -681,12 +691,9 @@ impl KeyManager {
     }
 
     fn get_bitcoin_coin_type_by_network(network: Network) -> u32 {
-        match network {
-            Network::Bitcoin => 0,  // Bitcoin mainnet
-            Network::Testnet => 1,  // Bitcoin testnet
-            Network::Testnet4 => 1, // Bitcoin testnet4
-            Network::Regtest => 1,  // Bitcoin regtest (same as testnet)
-            _ => panic!("Unsupported network"),
+        match NetworkKind::from(network) {
+            NetworkKind::Main => 0, // Bitcoin mainnet
+            NetworkKind::Test => 1, // all test networks (testnet, testnet4, signet, regtest) share coin type 1
         }
     }
 
@@ -760,7 +767,7 @@ impl KeyManager {
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
-        );
+        )?;
 
         let hardened_wots_account_derivation_path =
             Self::extract_account_level_path(&wots_full_derivation_path);
@@ -790,7 +797,7 @@ impl KeyManager {
             account,
             Self::CHANGE_DERIVATION_INDEX,
             0, // index does not matter here
-        );
+        )?;
 
         let hardened_lamport_account_derivation_path =
             Self::extract_account_level_path(&lamport_full_derivation_path);
@@ -815,7 +822,7 @@ impl KeyManager {
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0); // index doesn't matter here
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0)?; // index doesn't matter here
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
 
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
@@ -852,7 +859,7 @@ impl KeyManager {
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
 
         // Build the full derivation path and extract only up to account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0);
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, 0)?;
         let account_derivation_path = Self::extract_account_level_path(&full_derivation_path);
         let account_xpriv = master_xpriv.derive_priv(&self.secp, &account_derivation_path)?;
 
@@ -881,7 +888,7 @@ impl KeyManager {
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index)?;
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -912,7 +919,7 @@ impl KeyManager {
     ) -> Result<PublicKey, KeyManagerError> {
         let key_derivation_seed = self.keystore.load_key_derivation_seed()?;
         let master_xpriv = Xpriv::new_master(self.network, &*key_derivation_seed)?;
-        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index);
+        let derivation_path = KeyManager::build_derivation_path(key_type, self.network, index)?;
 
         let xpriv = master_xpriv.derive_priv(&self.secp, &derivation_path)?;
         let internal_keypair = xpriv.to_keypair(&self.secp);
@@ -954,7 +961,13 @@ impl KeyManager {
         let index = {
             let tx_id = self.begin_transaction();
 
-            let index = self.next_keypair_index(key_type)?;
+            let index = match self.next_keypair_index(key_type) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(error);
+                }
+            };
             let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
                 .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;
@@ -988,7 +1001,13 @@ impl KeyManager {
         let index = {
             let tx_id = self.begin_transaction();
 
-            let index = self.next_keypair_index(key_type)?;
+            let index = match self.next_keypair_index(key_type) {
+                Ok(index) => index,
+                Err(error) => {
+                    self.rollback_transaction(tx_id)?;
+                    return Err(error);
+                }
+            };
             let next_index_to_store = index.checked_add(1).ok_or(KeyManagerError::IndexOverflow)?;
             self.keystore
                 .store_next_keypair_index(key_type, next_index_to_store, tx_id)?;
@@ -1003,11 +1022,18 @@ impl KeyManager {
     }
 
     fn next_keypair_index(&self, key_type: BitcoinKeyType) -> Result<u32, KeyManagerError> {
-        match self.keystore.load_next_keypair_index(key_type) {
-            Ok(stored_index) => Ok(stored_index),
-            Err(KeyManagerError::NextKeypairIndexNotFound) => Ok(Self::STARTING_DERIVATION_INDEX),
-            Err(e) => Err(e), // Propagate other errors (e.g., storage/decryption errors)
+        let index = match self.keystore.load_next_keypair_index(key_type) {
+            Ok(stored_index) => stored_index,
+            Err(KeyManagerError::NextKeypairIndexNotFound) => Self::STARTING_DERIVATION_INDEX,
+            Err(e) => return Err(e), // Propagate other errors (e.g., storage/decryption errors)
+        };
+
+        // BIP-32 normal (non-hardened) indexes stop at 2^31 - 1, so the counter must not advance past that
+        if ChildNumber::from_normal_idx(index).is_err() {
+            return Err(KeyManagerError::IndexOverflow);
         }
+
+        Ok(index)
     }
 
     // This method changes the parity of a keypair to be even, this is needed for Taproot.
@@ -1057,7 +1083,7 @@ impl KeyManager {
         // and we will add just the chain path, but we need it in order to know if we need to adjust parity or not for the final key
 
         // Build the full derivation path and extract only the chain part after account level
-        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index);
+        let full_derivation_path = Self::build_derivation_path(key_type, self.network, index)?;
         let chain_derivation_path = Self::extract_chain_path(&full_derivation_path);
 
         let xpub = account_xpub.derive_pub(&secp, &chain_derivation_path)?;
@@ -1368,16 +1394,27 @@ impl KeyManager {
         rng: &mut R,
         bits: usize,
     ) -> Result<String, KeyManagerError> {
+        Self::validate_rsa_key_size(bits)?;
+        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
+        self.keystore.store_rsa_key(rsa_keypair.clone())?;
+        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
+        Ok(rsa_pubkey_pem)
+    }
+
+    fn validate_rsa_key_size(bits: usize) -> Result<(), KeyManagerError> {
         if bits > MAX_RSA_BITS {
             return Err(KeyManagerError::InvalidRSAKeySize(format!(
                 "RSA key size too large, maximum is {} bits",
                 MAX_RSA_BITS
             )));
         }
-        let rsa_keypair = RSAKeyPair::new(rng, bits)?;
-        self.keystore.store_rsa_key(rsa_keypair.clone())?;
-        let rsa_pubkey_pem = rsa_keypair.export_public_pem()?;
-        Ok(rsa_pubkey_pem)
+        if bits < MIN_RSA_BITS {
+            return Err(KeyManagerError::InvalidRSAKeySize(format!(
+                "RSA key size too small, minimum is {} bits",
+                MIN_RSA_BITS
+            )));
+        }
+        Ok(())
     }
 
     /*********************************/
@@ -1611,16 +1648,19 @@ impl KeyManager {
         let message_digits_length = winternitz::message_digits_length(message_bytes.len());
         let checksummed_message = to_checksummed_message(message_bytes);
         let checksum_size = checksum_length(message_digits_length);
-        let message_size = checksummed_message.len() - checksum_size;
 
-        assert!(message_size == message_digits_length);
+        // The key must be sized like the public key, which is derived from these same formulas
+        debug_assert_eq!(
+            checksummed_message.len(),
+            message_digits_length + checksum_size
+        );
 
         let master_secret = self.keystore.load_winternitz_seed()?;
         let winternitz = winternitz::Winternitz::new();
         let private_key = winternitz.generate_private_key(
             &*master_secret,
             key_type,
-            message_size,
+            message_digits_length,
             checksum_size,
             index,
         )?;
@@ -1838,7 +1878,7 @@ impl KeyManager {
         let pubk = RSAKeyPair::pubkey_from_public_key_pem(pub_key)?;
         let rsa_key = self.keystore.load_rsa_key(pubk)?;
         match rsa_key {
-            Some(rsa_key) => Ok(rsa_key.sign(message)),
+            Some(rsa_key) => Ok(rsa_key.sign(message)?),
             None => Err(KeyManagerError::RsaKeyNotFound),
         }
     }
@@ -2197,22 +2237,20 @@ impl KeyManager {
         tx_id
     }
 
-    // Private local rollback transaction wrapper to manage feature flag
+    // Private local rollback transaction wrapper, None means no transaction was begun (feature flag off)
     fn rollback_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
-        #[cfg(feature = "transactional")]
-        self.keystore.rollback_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.keystore.rollback_transaction(tx_id)?;
+        }
 
         Ok(())
     }
 
-    // Private local commit transaction wrapper to manage feature flag
+    // Private local commit transaction wrapper, None means no transaction was begun (feature flag off)
     fn commit_transaction(&self, tx_id: Option<Uuid>) -> Result<(), KeyManagerError> {
-        #[cfg(feature = "transactional")]
-        self.keystore.commit_transaction(tx_id.unwrap())?;
-        #[cfg(not(feature = "transactional"))]
-        let _ = tx_id;
+        if let Some(tx_id) = tx_id {
+            self.keystore.commit_transaction(tx_id)?;
+        }
 
         Ok(())
     }
@@ -2691,6 +2729,113 @@ mod tests {
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_derivation_index_out_of_range_returns_error() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let keystore_storage_config = database_keystore_config(&keystore_path)?;
+
+        let key_manager_config =
+            crate::config::KeyManagerConfig::new("regtest".to_string(), None, None);
+
+        let key_manager =
+            crate::create_key_manager_from_config(&key_manager_config, &keystore_storage_config)?;
+
+        // BIP-32 normal (non-hardened) indexes go up to 2^31 - 1
+        let max_index: u32 = (1 << 31) - 1;
+        let out_of_range_index: u32 = 1 << 31;
+
+        // 1. The last valid index still derives
+        key_manager.derive_keypair(BitcoinKeyType::P2wpkh, max_index)?;
+
+        // 2. Explicit derivation past the limit returns an error instead of panicking
+        let result = key_manager.derive_keypair(BitcoinKeyType::P2wpkh, out_of_range_index);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        let result =
+            key_manager.derive_keypair_adjust_parity(BitcoinKeyType::P2tr, out_of_range_index);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        let account_xpub = key_manager.get_account_xpub(BitcoinKeyType::P2wpkh)?;
+        let result = key_manager.derive_public_key_from_account_xpub(
+            account_xpub,
+            BitcoinKeyType::P2wpkh,
+            out_of_range_index,
+            false,
+        );
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::Bip32Error(
+                bitcoin::bip32::Error::InvalidChildNumber(_)
+            ))
+        ));
+
+        // 3. next_keypair uses the last valid index, then refuses to advance past it
+        key_manager
+            .keystore
+            .store_next_keypair_index(BitcoinKeyType::P2wpkh, max_index, None)?;
+        key_manager.next_keypair(BitcoinKeyType::P2wpkh)?;
+
+        let result = key_manager.next_keypair(BitcoinKeyType::P2wpkh);
+        assert!(matches!(result, Err(KeyManagerError::IndexOverflow)));
+
+        let result = key_manager.next_keypair_adjusted(BitcoinKeyType::P2wpkh);
+        assert!(matches!(result, Err(KeyManagerError::IndexOverflow)));
+
+        // 4. The failed calls did not move the stored counter
+        let stored_index = key_manager
+            .keystore
+            .load_next_keypair_index(BitcoinKeyType::P2wpkh)?;
+        assert_eq!(stored_index, out_of_range_index);
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_signet_derives_same_keys_as_testnet() -> Result<(), KeyManagerError> {
+        // WARNING NEVER USE THIS EXAMPLE MNEMONIC TO STORE REAL FUNDS
+        let mnemonic_sentence = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+        let signet_path = temp_storage();
+        let signet_manager = KeyManager::new(
+            Network::Signet,
+            Some(Mnemonic::parse(mnemonic_sentence).unwrap()),
+            None,
+            &database_keystore_config(&signet_path)?,
+        )?;
+
+        let testnet_path = temp_storage();
+        let testnet_manager = KeyManager::new(
+            Network::Testnet,
+            Some(Mnemonic::parse(mnemonic_sentence).unwrap()),
+            None,
+            &database_keystore_config(&testnet_path)?,
+        )?;
+
+        // All test networks share BIP-44 coin type 1, so the same mnemonic gives the same keys
+        assert_eq!(
+            signet_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?,
+            testnet_manager.derive_keypair(BitcoinKeyType::P2wpkh, 0)?
+        );
+
+        drop(signet_manager);
+        drop(testnet_manager);
+        cleanup_storage(&signet_path);
+        cleanup_storage(&testnet_path);
         Ok(())
     }
 

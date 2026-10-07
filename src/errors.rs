@@ -225,6 +225,9 @@ pub enum WinternitzError {
 
     #[error("Extra data in Winternitz Public Key missing {0}")]
     ExtraDataMissing(String),
+
+    #[error("Signature has {0} digits but the message alone needs {1}")]
+    NotEnoughDigits(usize, usize),
 }
 
 #[derive(Error, Debug)]

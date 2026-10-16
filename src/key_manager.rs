@@ -139,7 +139,9 @@ impl KeyManager {
         mnemonic_passphrase: Option<String>,
         storage_config: &StorageConfig,
     ) -> Result<Self, KeyManagerError> {
-        let key_store = Rc::new(Storage::new(storage_config)?);
+        // Keys are written outside transactions and must survive a machine crash once handed out.
+        let storage_config = storage_config.clone().with_sync_writes(true);
+        let key_store = Rc::new(Storage::new(&storage_config)?);
         let keystore = KeyStore::new(key_store);
 
         // Store or load mnemonic

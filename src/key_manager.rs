@@ -2193,6 +2193,79 @@ impl KeyManager {
         )?)
     }
 
+    /// Commit to a nonce for **several** messages at once.
+    ///
+    /// The batch form of [`KeyManager::generate_nonce`], and it exists
+    /// for the cost of durability rather than for convenience: each
+    /// single-message call gets its own transaction, and
+    /// `storage-backend` syncs every transaction. No caller commits to
+    /// one nonce --- a MuSig2 session covers every input it is signing
+    /// --- so committing to a session's worth costs one fsync per
+    /// input, in series. For the payment-channel update that prompted
+    /// this that is 22 inputs at about 11 ms each, which was most of
+    /// what a channel update cost.
+    ///
+    /// The result is the same as the loop, not merely equivalent to
+    /// it: the indices are reserved together but handed out in order,
+    /// one per message, so each message is built from the seed the
+    /// loop would have given it. Two things make that exact:
+    ///
+    /// - a message whose nonce is already stored is skipped **before**
+    ///   any index is taken, because the single-message form checks
+    ///   before it asks for one;
+    /// - each remaining message gets its own index, and so its own
+    ///   seed. Sharing one seed across a session would still produce
+    ///   nonces that differ --- `SecNonceBuilder` takes the message
+    ///   --- and signatures that verify, which is what makes it worth
+    ///   saying: a node that committed through one path and came back
+    ///   through the other would derive two nonces for one message,
+    ///   and that is the one thing MuSig2 does not survive.
+    ///
+    /// What is saved is the I/O: two synced transactions for a whole
+    /// session (the indices, then the nonces) instead of two per
+    /// message.
+    pub fn generate_nonces(
+        &self,
+        items: &[crate::musig2::types::NonceRequest],
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+    ) -> Result<(), KeyManagerError> {
+        // Already-stored messages take no index in the one-at-a-time
+        // path, because it checks before asking for one. Check here
+        // too, so the indices line up message for message.
+        let mut fresh = Vec::with_capacity(items.len());
+        for (message_id, message, tweak) in items {
+            if self.musig2.message_nonce_already_stored(
+                message_id,
+                message.clone(),
+                aggregated_pubkey,
+                id,
+            )? {
+                continue;
+            }
+            fresh.push((message_id.clone(), message.clone(), *tweak));
+        }
+        if fresh.is_empty() {
+            return Ok(());
+        }
+
+        let public_key = self.musig2.my_public_key(aggregated_pubkey)?;
+        let indices = self
+            .musig2
+            .reserve_indices(aggregated_pubkey, fresh.len())?;
+        let mut seeded = Vec::with_capacity(fresh.len());
+        for ((message_id, message, tweak), index) in fresh.into_iter().zip(indices) {
+            let nonce_seed: Zeroizing<[u8; 32]> = self
+                .generate_nonce_seed(index, public_key)
+                .map_err(|_| Musig2SignerError::NonceSeedError)?;
+            seeded.push((message_id, message, tweak, nonce_seed));
+        }
+
+        Ok(self
+            .musig2
+            .generate_nonces(&seeded, aggregated_pubkey, id)?)
+    }
+
     pub fn verify_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,

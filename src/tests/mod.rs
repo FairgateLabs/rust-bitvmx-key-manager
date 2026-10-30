@@ -1,3 +1,4 @@
+pub mod batched_nonces_test;
 pub mod final_msg_signature_test;
 pub mod init_musig_method_test;
 pub mod multiple_msgs_test;

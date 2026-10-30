@@ -47,6 +47,9 @@ pub enum Musig2SignerError {
     #[error("Nonce seed error")]
     NonceSeedError,
 
+    #[error("Nonce generation index space exhausted")]
+    NonceIndexExhausted,
+
     #[error("Failed to convert public key")]
     ConvertionPublicKeyError,
 

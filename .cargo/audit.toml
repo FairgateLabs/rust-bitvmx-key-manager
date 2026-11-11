@@ -6,4 +6,12 @@ ignore = [
     # an upstream migration. Re-evaluate when `rsa` ships a patched release.
     # https://rustsec.org/advisories/RUSTSEC-2023-0071
     "RUSTSEC-2023-0071",
+    # RUSTSEC-2026-0387 (crypto-bigint timing variability).
+    # Fix is in crypto-bigint >=0.7.6, a semver-incompatible release. The
+    # vulnerable 0.5.5 is pulled in via elliptic-curve 0.13 -> p256 -> hpke/age,
+    # used by `bitvmx-settings` and `rust-bitvmx-storage-backend`. No
+    # semver-compatible fix exists; re-evaluate when `age` moves to the
+    # elliptic-curve 0.14 / crypto-bigint 0.7 line.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0387
+    "RUSTSEC-2026-0387",
 ]

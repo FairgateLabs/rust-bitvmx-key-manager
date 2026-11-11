@@ -155,6 +155,15 @@ pub enum KeyManagerError {
     IndexOverflow,
 }
 
+impl KeyManagerError {
+    pub fn is_storage_error(&self) -> bool {
+        matches!(
+            self,
+            KeyManagerError::StorageError(_) | KeyManagerError::ReadError(_)
+        )
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum CliError {
     #[error("Bad argument: {msg}")]

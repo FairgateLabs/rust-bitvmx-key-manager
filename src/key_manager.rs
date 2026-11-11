@@ -1908,7 +1908,7 @@ impl KeyManager {
     /*********** MuSig2 **************/
     /*********************************/
 
-    //TODO: Revisit this decision. The private key is used for the TOO protocol.
+    // The API reveals the private key. Handling the private key securely becomes the responsibility of the caller.
     pub fn get_key_pair_for_too_insecure(
         &self,
         aggregated_pubkey: &PublicKey,

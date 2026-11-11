@@ -3,6 +3,7 @@ use crate::{
     key_type::BitcoinKeyType,
     lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
     rsa::RSAKeyPair,
+    winternitz::{WinternitzPublicKey, WinternitzType},
 };
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
@@ -25,6 +26,40 @@ use zeroize::{Zeroize, Zeroizing};
 pub struct StoredRsaKeyPair {
     pub public_key_pem: String,
     pub private_key_pem: String,
+}
+
+/// Issue-time metadata of a Winternitz key, stored under `key_manager/winternitz_key/<index>`.
+///
+/// The chain secrets at an index depend only on the seed and the index, so signing a longer
+/// message or another hash type at that index would reveal the issued key's secrets. Signing
+/// checks every request against this record before the index is marked as used.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct WinternitzKeyRecord {
+    pub key_type: WinternitzType,
+    pub message_size: usize,
+    /// BLAKE3 over the hash type and the public key hashes.
+    pub fingerprint: [u8; 32],
+}
+
+impl WinternitzKeyRecord {
+    pub fn new(public_key: &WinternitzPublicKey, message_size: usize) -> Self {
+        WinternitzKeyRecord {
+            key_type: public_key.key_type(),
+            message_size,
+            fingerprint: Self::fingerprint_of(public_key),
+        }
+    }
+
+    pub fn fingerprint_of(public_key: &WinternitzPublicKey) -> [u8; 32] {
+        let type_tag: u8 = match public_key.key_type() {
+            WinternitzType::SHA256 => 0,
+            WinternitzType::HASH160 => 1,
+        };
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&[type_tag]);
+        hasher.update(&public_key.to_bytes());
+        *hasher.finalize().as_bytes()
+    }
 }
 
 pub struct KeyStore {
@@ -112,6 +147,11 @@ impl KeyStore {
     fn winternitz_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
         let block_str = block_num.to_string();
         Self::index_block_key(["winternitz", block_str.as_str()])
+    }
+
+    fn winternitz_key_record_key(index: u32) -> Result<StorageKey, KeyManagerError> {
+        let index_str = index.to_string();
+        Self::key_manager_key("winternitz_key", [index_str.as_str()])
     }
 
     fn lamport_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
@@ -252,6 +292,29 @@ impl KeyStore {
         self.store
             .set(Self::next_winternitz_index_key()?, index, transaction_id)?;
         Ok(())
+    }
+
+    pub fn store_winternitz_key_record(
+        &self,
+        index: u32,
+        record: &WinternitzKeyRecord,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+        self.store.set(
+            Self::winternitz_key_record_key(index)?,
+            record,
+            transaction_id,
+        )?;
+        Ok(())
+    }
+
+    pub fn load_winternitz_key_record(
+        &self,
+        index: u32,
+    ) -> Result<Option<WinternitzKeyRecord>, KeyManagerError> {
+        Ok(self
+            .store
+            .get(Self::winternitz_key_record_key(index)?, None)?)
     }
 
     pub fn load_next_winternitz_index(&self) -> Result<u32, KeyManagerError> {

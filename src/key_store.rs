@@ -30,9 +30,9 @@ pub struct StoredRsaKeyPair {
 
 /// Issue-time metadata of a Winternitz key, stored under `key_manager/winternitz_key/<index>`.
 ///
-/// The chain secrets at an index depend only on the seed and the index, so signing a longer
-/// message or another hash type at that index would reveal the issued key's secrets. Signing
-/// checks every request against this record before the index is marked as used.
+/// Signing checks every request against this record before the index is marked as used, so a
+/// request of another hash type or message size, or for an index that was never issued, is
+/// rejected instead of burning the index.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct WinternitzKeyRecord {
     pub key_type: WinternitzType,
@@ -51,12 +51,8 @@ impl WinternitzKeyRecord {
     }
 
     pub fn fingerprint_of(public_key: &WinternitzPublicKey) -> [u8; 32] {
-        let type_tag: u8 = match public_key.key_type() {
-            WinternitzType::SHA256 => 0,
-            WinternitzType::HASH160 => 1,
-        };
         let mut hasher = blake3::Hasher::new();
-        hasher.update(&[type_tag]);
+        hasher.update(&[public_key.key_type().type_tag()]);
         hasher.update(&public_key.to_bytes());
         *hasher.finalize().as_bytes()
     }

@@ -3,7 +3,7 @@ use crate::{
     key_type::BitcoinKeyType,
     lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
     rsa::RSAKeyPair,
-    winternitz::{WinternitzPublicKey, WinternitzType},
+    winternitz::WinternitzType,
 };
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
@@ -37,25 +37,6 @@ pub struct StoredRsaKeyPair {
 pub struct WinternitzKeyRecord {
     pub key_type: WinternitzType,
     pub message_size: usize,
-    /// BLAKE3 over the hash type and the public key hashes.
-    pub fingerprint: [u8; 32],
-}
-
-impl WinternitzKeyRecord {
-    pub fn new(public_key: &WinternitzPublicKey, message_size: usize) -> Self {
-        WinternitzKeyRecord {
-            key_type: public_key.key_type(),
-            message_size,
-            fingerprint: Self::fingerprint_of(public_key),
-        }
-    }
-
-    pub fn fingerprint_of(public_key: &WinternitzPublicKey) -> [u8; 32] {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(&[public_key.key_type().type_tag()]);
-        hasher.update(&public_key.to_bytes());
-        *hasher.finalize().as_bytes()
-    }
 }
 
 pub struct KeyStore {

@@ -19,7 +19,7 @@ pub enum WinternitzType {
 }
 
 impl WinternitzType {
-    /// Byte that identifies the hash type in key derivation and key fingerprints.
+    /// Byte that identifies the hash type in key derivation.
     pub fn type_tag(&self) -> u8 {
         match self {
             WinternitzType::SHA256 => 0,

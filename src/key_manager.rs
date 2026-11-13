@@ -1172,7 +1172,10 @@ impl KeyManager {
         message_size_in_bytes: usize,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        let record = WinternitzKeyRecord::new(public_key, message_size_in_bytes);
+        let record = WinternitzKeyRecord {
+            key_type: public_key.key_type(),
+            message_size: message_size_in_bytes,
+        };
         self.keystore.store_winternitz_key_record(
             public_key.derivation_index()?,
             &record,
@@ -1687,7 +1690,9 @@ impl KeyManager {
     /// Signs `message_bytes` with the one-time Winternitz key `public_key`.
     ///
     /// `public_key` must be the key issued at the index it carries, and the message must have
-    /// the size that key was issued for. Both are checked before the index is marked as used.
+    /// the size that key was issued for. Both are checked before the index is marked as used:
+    /// the issued key is re-derived from the hash type and message size recorded at that index
+    /// and compared with `public_key`.
     pub fn sign_winternitz_message_by_pubkey(
         &self,
         message_bytes: &[u8],
@@ -1696,7 +1701,8 @@ impl KeyManager {
         let index = public_key.derivation_index()?;
 
         let record = self.load_issued_winternitz_key(index)?;
-        if record.fingerprint != WinternitzKeyRecord::fingerprint_of(public_key) {
+        let issued = self.derive_winternitz(record.message_size, record.key_type, index)?;
+        if issued != *public_key {
             return Err(KeyManagerError::WinternitzPublicKeyMismatch(index));
         }
 
@@ -7613,7 +7619,13 @@ mod tests {
                 .keystore
                 .load_winternitz_key_record(index)?
                 .expect("record stored at issue time");
-            assert_eq!(record, crate::key_store::WinternitzKeyRecord::new(pk, 4));
+            assert_eq!(
+                record,
+                crate::key_store::WinternitzKeyRecord {
+                    key_type: WinternitzType::HASH160,
+                    message_size: 4,
+                }
+            );
             assert!(key_manager
                 .sign_winternitz_message_by_pubkey(&[0u8; 5], pk)
                 .is_err());

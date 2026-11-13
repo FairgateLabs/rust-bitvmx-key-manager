@@ -1694,15 +1694,13 @@ impl KeyManager {
         public_key: &WinternitzPublicKey,
     ) -> Result<WinternitzSignature, KeyManagerError> {
         let index = public_key.derivation_index()?;
-        let key_type = public_key.key_type();
 
         let record = self.load_issued_winternitz_key(index)?;
         if record.fingerprint != WinternitzKeyRecord::fingerprint_of(public_key) {
             return Err(KeyManagerError::WinternitzPublicKeyMismatch(index));
         }
-        Self::check_winternitz_request(&record, index, message_bytes.len(), key_type)?;
 
-        self.sign_winternitz_message_unchecked(message_bytes, key_type, index)
+        self.sign_winternitz_message_by_index(message_bytes, public_key.key_type(), index)
     }
 
     fn load_issued_winternitz_key(

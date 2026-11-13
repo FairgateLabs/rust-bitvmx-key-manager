@@ -3,6 +3,7 @@ use crate::{
     key_type::BitcoinKeyType,
     lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
     rsa::RSAKeyPair,
+    winternitz::WinternitzType,
 };
 use base64::{engine::general_purpose, Engine as _};
 use bip39::Mnemonic;
@@ -25,6 +26,17 @@ use zeroize::{Zeroize, Zeroizing};
 pub struct StoredRsaKeyPair {
     pub public_key_pem: String,
     pub private_key_pem: String,
+}
+
+/// Issue-time metadata of a Winternitz key, stored under `key_manager/winternitz_key/<index>`.
+///
+/// Signing checks every request against this record before the index is marked as used, so a
+/// request of another hash type or message size, or for an index that was never issued, is
+/// rejected instead of burning the index.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct WinternitzKeyRecord {
+    pub key_type: WinternitzType,
+    pub message_size: usize,
 }
 
 pub struct KeyStore {
@@ -112,6 +124,11 @@ impl KeyStore {
     fn winternitz_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
         let block_str = block_num.to_string();
         Self::index_block_key(["winternitz", block_str.as_str()])
+    }
+
+    fn winternitz_key_record_key(index: u32) -> Result<StorageKey, KeyManagerError> {
+        let index_str = index.to_string();
+        Self::key_manager_key("winternitz_key", [index_str.as_str()])
     }
 
     fn lamport_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
@@ -252,6 +269,29 @@ impl KeyStore {
         self.store
             .set(Self::next_winternitz_index_key()?, index, transaction_id)?;
         Ok(())
+    }
+
+    pub fn store_winternitz_key_record(
+        &self,
+        index: u32,
+        record: &WinternitzKeyRecord,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+        self.store.set(
+            Self::winternitz_key_record_key(index)?,
+            record,
+            transaction_id,
+        )?;
+        Ok(())
+    }
+
+    pub fn load_winternitz_key_record(
+        &self,
+        index: u32,
+    ) -> Result<Option<WinternitzKeyRecord>, KeyManagerError> {
+        Ok(self
+            .store
+            .get(Self::winternitz_key_record_key(index)?, None)?)
     }
 
     pub fn load_next_winternitz_index(&self) -> Result<u32, KeyManagerError> {

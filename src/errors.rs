@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use config as settings;
 
-use crate::{musig2::errors::Musig2SignerError, rsa::RSAError};
+use crate::{musig2::errors::Musig2SignerError, rsa::RSAError, winternitz::WinternitzType};
 
 #[derive(Error, Debug)]
 pub enum KeyManagerError {
@@ -132,6 +132,24 @@ pub enum KeyManagerError {
 
     #[error("Winternitz index {0} has already been used")]
     WinternitzIndexAlreadyUsed(u32),
+
+    #[error("Winternitz index {0} was not issued by this key manager")]
+    WinternitzKeyNotIssued(u32),
+
+    #[error(
+        "Winternitz sign request for index {index} does not match the issued key: expected \
+         {expected_type:?} over {expected_size} bytes, got {requested_type:?} over {requested_size} bytes"
+    )]
+    WinternitzSignRequestMismatch {
+        index: u32,
+        expected_type: WinternitzType,
+        expected_size: usize,
+        requested_type: WinternitzType,
+        requested_size: usize,
+    },
+
+    #[error("Winternitz public key does not match the key issued at index {0}")]
+    WinternitzPublicKeyMismatch(u32),
 
     #[error("Corrupted Winternitz index bitmap")]
     CorruptedWinternitzIndexBitmap,

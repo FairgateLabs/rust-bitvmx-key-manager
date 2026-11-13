@@ -24,7 +24,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     errors::KeyManagerError,
-    key_store::{KeyStore, StoredRsaKeyPair},
+    key_store::{KeyStore, StoredRsaKeyPair, WinternitzKeyRecord},
     key_type::BitcoinKeyType,
     lamport::{
         Lamport, LamportCompressedPubKey, LamportMessage, LamportPrivateKey, LamportPublicKey,
@@ -1131,11 +1131,14 @@ impl KeyManager {
     /// This is the **recommended** function for Winternitz key generation as it provides automatic index management,
     /// preventing accidental key reuse and simplifying key generation workflows compared to [`derive_winternitz`](Self::derive_winternitz).
     ///
-    /// The function automatically tracks and increments the derivation index for each Winternitz type and message size combination, ensuring that:
+    /// The function takes the next derivation index from a single counter shared by every Winternitz
+    /// type and message size, ensuring that:
     /// - Each call generates a unique Winternitz key
     /// - No derivation indices are accidentally reused
     /// - The sequence of generated keys is deterministic and recoverable
-    /// - Different message sizes for the same Winternitz type have separate index counters
+    ///
+    /// The key's hash type and message size are recorded under its index, and signing at that index
+    /// only accepts requests of that type and size.
     ///
     pub fn next_winternitz(
         &self,
@@ -1158,7 +1161,26 @@ impl KeyManager {
         };
 
         let pubkey = self.derive_winternitz(message_size_in_bytes, key_type, index)?;
+        self.record_issued_winternitz_key(&pubkey, message_size_in_bytes, None)?;
         Ok(pubkey)
+    }
+
+    /// Stores the issue-time record that signing checks requests against.
+    fn record_issued_winternitz_key(
+        &self,
+        public_key: &WinternitzPublicKey,
+        message_size_in_bytes: usize,
+        transaction_id: Option<Uuid>,
+    ) -> Result<(), KeyManagerError> {
+        let record = WinternitzKeyRecord {
+            key_type: public_key.key_type(),
+            message_size: message_size_in_bytes,
+        };
+        self.keystore.store_winternitz_key_record(
+            public_key.derivation_index()?,
+            &record,
+            transaction_id,
+        )
     }
 
     fn next_winternitz_index(&self) -> Result<u32, KeyManagerError> {
@@ -1239,6 +1261,17 @@ impl KeyManager {
             initial_index,
             number_of_keys,
         )?;
+
+        let tx_id = self.begin_transaction();
+        let recorded = pubkeys.iter().try_for_each(|pubkey| {
+            self.record_issued_winternitz_key(pubkey, message_size_in_bytes, tx_id)
+        });
+        if let Err(e) = recorded {
+            self.rollback_transaction(tx_id)?;
+            return Err(e);
+        }
+        self.commit_transaction(tx_id)?;
+
         Ok(pubkeys)
     }
 
@@ -1637,9 +1670,74 @@ impl KeyManager {
         Ok(signatures)
     }
 
-    // TODO: make this fun private to force sign by key? Protocol should store the key and not the index
-    // For one-time winternitz keys
+    /// Signs `message_bytes` with the one-time Winternitz key issued at `index`.
+    ///
+    /// The request must match the key issued at that index: same hash type and same message
+    /// size in bytes. A mismatch, or an index that was never issued, is rejected before the
+    /// index is marked as used.
     pub fn sign_winternitz_message_by_index(
+        &self,
+        message_bytes: &[u8],
+        key_type: WinternitzType,
+        index: u32,
+    ) -> Result<WinternitzSignature, KeyManagerError> {
+        let record = self.load_issued_winternitz_key(index)?;
+        Self::check_winternitz_request(&record, index, message_bytes.len(), key_type)?;
+
+        self.sign_winternitz_message_unchecked(message_bytes, key_type, index)
+    }
+
+    /// Signs `message_bytes` with the one-time Winternitz key `public_key`.
+    ///
+    /// `public_key` must be the key issued at the index it carries, and the message must have
+    /// the size that key was issued for. Both are checked before the index is marked as used:
+    /// the issued key is re-derived from the hash type and message size recorded at that index
+    /// and compared with `public_key`.
+    pub fn sign_winternitz_message_by_pubkey(
+        &self,
+        message_bytes: &[u8],
+        public_key: &WinternitzPublicKey,
+    ) -> Result<WinternitzSignature, KeyManagerError> {
+        let index = public_key.derivation_index()?;
+
+        let record = self.load_issued_winternitz_key(index)?;
+        let issued = self.derive_winternitz(record.message_size, record.key_type, index)?;
+        if issued != *public_key {
+            return Err(KeyManagerError::WinternitzPublicKeyMismatch(index));
+        }
+
+        self.sign_winternitz_message_by_index(message_bytes, public_key.key_type(), index)
+    }
+
+    fn load_issued_winternitz_key(
+        &self,
+        index: u32,
+    ) -> Result<WinternitzKeyRecord, KeyManagerError> {
+        self.keystore
+            .load_winternitz_key_record(index)?
+            .ok_or(KeyManagerError::WinternitzKeyNotIssued(index))
+    }
+
+    fn check_winternitz_request(
+        record: &WinternitzKeyRecord,
+        index: u32,
+        message_size: usize,
+        key_type: WinternitzType,
+    ) -> Result<(), KeyManagerError> {
+        if record.key_type != key_type || record.message_size != message_size {
+            return Err(KeyManagerError::WinternitzSignRequestMismatch {
+                index,
+                expected_type: record.key_type,
+                expected_size: record.message_size,
+                requested_type: key_type,
+                requested_size: message_size,
+            });
+        }
+        Ok(())
+    }
+
+    // Callers must have checked the request against the key issued at `index`.
+    fn sign_winternitz_message_unchecked(
         &self,
         message_bytes: &[u8],
         key_type: WinternitzType,
@@ -1685,19 +1783,6 @@ impl KeyManager {
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
-    }
-
-    // For one-time winternitz keys
-    pub fn sign_winternitz_message_by_pubkey(
-        &self,
-        message_bytes: &[u8],
-        public_key: &WinternitzPublicKey,
-    ) -> Result<WinternitzSignature, KeyManagerError> {
-        self.sign_winternitz_message_by_index(
-            message_bytes,
-            public_key.key_type(),
-            public_key.derivation_index()?,
-        )
     }
 
     /// Sign a message
@@ -2413,7 +2498,7 @@ mod tests {
 
         let message = random_message();
 
-        let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::SHA256, 0)?;
+        let pk = issue_winternitz_at(&key_manager, message[..].len(), WinternitzType::SHA256, 0)?;
         let signature = key_manager.sign_winternitz_message_by_index(
             &message[..],
             WinternitzType::SHA256,
@@ -2439,7 +2524,7 @@ mod tests {
         let digest: [u8; 32] = [0xFE; 32];
         let message = Message::from_digest(digest);
 
-        let pk = key_manager.derive_winternitz(message[..].len(), WinternitzType::HASH160, 0)?;
+        let pk = issue_winternitz_at(&key_manager, message[..].len(), WinternitzType::HASH160, 0)?;
         let signature = key_manager.sign_winternitz_message_by_index(
             &message[..],
             WinternitzType::HASH160,
@@ -3391,6 +3476,19 @@ mod tests {
             musig2,
             keystore,
         })
+    }
+
+    /// Issues the Winternitz key at `index` (derives it and stores its issue-time record),
+    /// as `next_winternitz` would, without walking the counter up to `index`.
+    fn issue_winternitz_at(
+        key_manager: &KeyManager,
+        message_size: usize,
+        key_type: WinternitzType,
+        index: u32,
+    ) -> Result<crate::winternitz::WinternitzPublicKey, KeyManagerError> {
+        let public_key = key_manager.derive_winternitz(message_size, key_type, index)?;
+        key_manager.record_issued_winternitz_key(&public_key, message_size, None)?;
+        Ok(public_key)
     }
 
     fn random_message() -> Message {
@@ -6996,6 +7094,7 @@ mod tests {
         let key_manager = test_random_key_manager(keystore_storage_config)?;
 
         let message = random_message();
+        issue_winternitz_at(&key_manager, message[..].len(), WinternitzType::SHA256, 5)?;
 
         // First signature should succeed
         let signature_result =
@@ -7090,6 +7189,12 @@ mod tests {
 
         // Test marking indices in the same block (0-1023)
         for index in [0, 1, 50, 100, 500, 1023] {
+            issue_winternitz_at(
+                &key_manager,
+                message[..].len(),
+                WinternitzType::SHA256,
+                index,
+            )?;
             let result = key_manager.sign_winternitz_message_by_index(
                 &message[..],
                 WinternitzType::SHA256,
@@ -7142,6 +7247,12 @@ mod tests {
         ];
 
         for &index in &test_indices {
+            issue_winternitz_at(
+                &key_manager,
+                message[..].len(),
+                WinternitzType::SHA256,
+                index,
+            )?;
             let result = key_manager.sign_winternitz_message_by_index(
                 &message[..],
                 WinternitzType::SHA256,
@@ -7193,6 +7304,12 @@ mod tests {
         ];
 
         for &index in &boundary_indices {
+            issue_winternitz_at(
+                &key_manager,
+                message[..].len(),
+                WinternitzType::SHA256,
+                index,
+            )?;
             let result = key_manager.sign_winternitz_message_by_index(
                 &message[..],
                 WinternitzType::SHA256,
@@ -7236,6 +7353,12 @@ mod tests {
 
         // Test all 8 bits within a single byte (indices 0-7 are in the first byte)
         for bit_index in 0..8 {
+            issue_winternitz_at(
+                &key_manager,
+                message[..].len(),
+                WinternitzType::SHA256,
+                bit_index,
+            )?;
             let result = key_manager.sign_winternitz_message_by_index(
                 &message[..],
                 WinternitzType::SHA256,
@@ -7277,6 +7400,15 @@ mod tests {
         {
             let key_manager = test_deterministic_key_manager(keystore_storage_config.clone())?;
             let message = random_message();
+
+            for index in [10, 20, 30, 40] {
+                issue_winternitz_at(
+                    &key_manager,
+                    message[..].len(),
+                    WinternitzType::SHA256,
+                    index,
+                )?;
+            }
 
             // Mark indices 10, 20, 30
             for index in [10, 20, 30] {
@@ -7322,6 +7454,207 @@ mod tests {
 
         cleanup_storage(&keystore_path);
         Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_sign_by_index_rejects_wrong_size_without_burning_index(
+    ) -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        let pk = key_manager.next_winternitz(4, WinternitzType::HASH160)?;
+        let index = pk.derivation_index()?;
+
+        for wrong in [&[0u8; 6][..], &[0u8; 3][..], &[][..]] {
+            let result =
+                key_manager.sign_winternitz_message_by_index(wrong, WinternitzType::HASH160, index);
+            assert!(matches!(
+                result,
+                Err(KeyManagerError::WinternitzSignRequestMismatch {
+                    index: i,
+                    expected_size: 4,
+                    ..
+                }) if i == index
+            ));
+        }
+
+        // The index was not burnt: the issued shape still signs and verifies.
+        let message = [1u8, 2, 3, 4];
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message,
+            WinternitzType::HASH160,
+            index,
+        )?;
+        assert!(SignatureVerifier::new().verify_winternitz_signature(&signature, &message, &pk));
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_sign_by_index_rejects_wrong_hash_type() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        let pk = key_manager.next_winternitz(4, WinternitzType::HASH160)?;
+        let index = pk.derivation_index()?;
+
+        let result =
+            key_manager.sign_winternitz_message_by_index(&[0u8; 4], WinternitzType::SHA256, index);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::WinternitzSignRequestMismatch {
+                expected_type: WinternitzType::HASH160,
+                requested_type: WinternitzType::SHA256,
+                ..
+            })
+        ));
+        assert!(key_manager
+            .sign_winternitz_message_by_index(&[0u8; 4], WinternitzType::HASH160, index)
+            .is_ok());
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_sign_by_index_rejects_unissued_index() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        key_manager.next_winternitz(32, WinternitzType::SHA256)?; // index 0
+        let result =
+            key_manager.sign_winternitz_message_by_index(&[0u8; 32], WinternitzType::SHA256, 1);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::WinternitzKeyNotIssued(1))
+        ));
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_sign_by_pubkey_rejects_wrong_message_size() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        let pk = key_manager.next_winternitz(32, WinternitzType::SHA256)?;
+        let result = key_manager.sign_winternitz_message_by_pubkey(&[0u8; 34], &pk);
+        assert!(matches!(
+            result,
+            Err(KeyManagerError::WinternitzSignRequestMismatch {
+                expected_size: 32,
+                requested_size: 34,
+                ..
+            })
+        ));
+
+        let message = [7u8; 32];
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &pk)?;
+        assert!(SignatureVerifier::new().verify_winternitz_signature(&signature, &message, &pk));
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_sign_by_pubkey_rejects_key_not_issued_at_its_index(
+    ) -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        let reserved = key_manager.next_winternitz(32, WinternitzType::SHA256)?; // index 0
+        let other = key_manager.next_winternitz(32, WinternitzType::SHA256)?; // index 1
+
+        // Index 1's key relabelled as index 0.
+        let mut value = serde_json::to_value(&other).expect("serialize");
+        value["extra_data"]["derivation_index"] = serde_json::json!(0);
+        let relabelled: crate::winternitz::WinternitzPublicKey =
+            serde_json::from_value(value).expect("deserialize");
+        assert_eq!(relabelled.derivation_index()?, 0);
+
+        // Index 0's chains claimed with another message size.
+        let resized = key_manager.derive_winternitz(64, WinternitzType::SHA256, 0)?;
+
+        for forged in [&relabelled, &resized] {
+            let result = key_manager.sign_winternitz_message_by_pubkey(&[0u8; 32], forged);
+            assert!(matches!(
+                result,
+                Err(KeyManagerError::WinternitzPublicKeyMismatch(0))
+            ));
+        }
+
+        // Neither attempt burnt index 0.
+        let message = [9u8; 32];
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message, &reserved)?;
+        assert!(
+            SignatureVerifier::new().verify_winternitz_signature(&signature, &message, &reserved)
+        );
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_next_multiple_winternitz_records_every_key() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let key_manager = test_random_key_manager(config)?;
+
+        let keys = key_manager.next_multiple_winternitz(4, WinternitzType::HASH160, 5)?;
+        for pk in &keys {
+            let index = pk.derivation_index()?;
+            let record = key_manager
+                .keystore
+                .load_winternitz_key_record(index)?
+                .expect("record stored at issue time");
+            assert_eq!(
+                record,
+                crate::key_store::WinternitzKeyRecord {
+                    key_type: WinternitzType::HASH160,
+                    message_size: 4,
+                }
+            );
+            assert!(key_manager
+                .sign_winternitz_message_by_pubkey(&[0u8; 5], pk)
+                .is_err());
+            let message = [index as u8, 0, 0, 1];
+            let signature = key_manager.sign_winternitz_message_by_pubkey(&message, pk)?;
+            assert!(SignatureVerifier::new().verify_winternitz_signature(&signature, &message, pk));
+        }
+
+        drop(key_manager);
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_winternitz_request_errors_are_not_storage_errors() {
+        let errors = [
+            KeyManagerError::WinternitzKeyNotIssued(0),
+            KeyManagerError::WinternitzPublicKeyMismatch(0),
+            KeyManagerError::WinternitzSignRequestMismatch {
+                index: 0,
+                expected_type: WinternitzType::HASH160,
+                expected_size: 4,
+                requested_type: WinternitzType::SHA256,
+                requested_size: 6,
+            },
+        ];
+        for error in errors {
+            assert!(!error.is_storage_error(), "{error}");
+        }
     }
 
     #[test]

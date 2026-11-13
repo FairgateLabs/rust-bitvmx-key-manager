@@ -27,6 +27,48 @@ mod winternitz_tests {
     }
 
     #[test]
+    fn test_keys_of_different_shape_at_the_same_index_share_no_secrets(
+    ) -> Result<(), WinternitzError> {
+        let winternitz = Winternitz::new();
+        let master_secret = create_master_secret();
+        let index = 7;
+
+        let shapes = [
+            (WinternitzType::SHA256, 4),
+            (WinternitzType::SHA256, 6),
+            (WinternitzType::HASH160, 4),
+            (WinternitzType::HASH160, 6),
+        ];
+
+        // Compare on the first 20 bytes: a HASH160 secret is that long.
+        let mut secrets = Vec::new();
+        for (key_type, message_bytes) in shapes {
+            let digits = message_digits_length(message_bytes);
+            let private_key = winternitz.generate_private_key(
+                &master_secret,
+                key_type,
+                digits,
+                checksum_length(digits),
+                index,
+            )?;
+            let prefixes: Vec<Vec<u8>> = private_key
+                .to_hashes()
+                .iter()
+                .map(|hash| hash[..20].to_vec())
+                .collect();
+            secrets.push(prefixes);
+        }
+
+        for (i, a) in secrets.iter().enumerate() {
+            for b in &secrets[i + 1..] {
+                assert!(a.iter().all(|secret| !b.contains(secret)));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_sign_and_verify() {
         // Overview: This test validates the complete Winternitz signature workflow:
         // 1. Generate private/public key pair from master secret

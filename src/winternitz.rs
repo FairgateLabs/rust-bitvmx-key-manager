@@ -18,6 +18,16 @@ pub enum WinternitzType {
     HASH160,
 }
 
+impl WinternitzType {
+    /// Byte that identifies the hash type in key derivation.
+    pub fn type_tag(&self) -> u8 {
+        match self {
+            WinternitzType::SHA256 => 0,
+            WinternitzType::HASH160 => 1,
+        }
+    }
+}
+
 pub trait HashFunction {
     fn hash(&self, data: &WinternitzHash) -> WinternitzHash;
     fn hash_size(&self) -> usize;
@@ -652,7 +662,8 @@ impl Winternitz {
         for i in 0..message_size + checksum_size {
             let privk = self.generate_hash(
                 master_secret,
-                key_type.hash_size(),
+                key_type,
+                message_size,
                 derivation_index,
                 i as u32,
             );
@@ -662,19 +673,27 @@ impl Winternitz {
         Ok(private_key)
     }
 
+    /// Chain secret at `internal_index` of the key at `index`.
+    ///
+    /// The hash type and the message size are part of the input, so keys of different shapes at
+    /// the same index share no secrets: signing at an index with another type or size cannot
+    /// reveal the chains of the key issued there.
     fn generate_hash(
         &self,
         master_secret: &[u8],
-        key_size: usize,
+        key_type: WinternitzType,
+        message_size: usize,
         index: u32,
         internal_index: u32,
     ) -> WinternitzHash {
         let mut engine = HmacEngine::<sha256::Hash>::new(master_secret);
-        let input = [index.to_le_bytes(), internal_index.to_le_bytes()].concat();
-        engine.input(&input);
+        engine.input(&index.to_le_bytes());
+        engine.input(&internal_index.to_le_bytes());
+        engine.input(&[key_type.type_tag()]);
+        engine.input(&(message_size as u64).to_le_bytes());
 
         let hash = Hmac::<sha256::Hash>::from_engine(engine);
-        WinternitzHash::new(hash[..key_size].to_vec())
+        WinternitzHash::new(hash[..key_type.hash_size()].to_vec())
     }
 }
 

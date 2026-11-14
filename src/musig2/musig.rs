@@ -21,7 +21,7 @@ use musig2::{KeyAggContext, PubNonce};
 use super::{
     errors::Musig2SignerError,
     helper::{to_bitcoin_pubkey, to_musig_pubkey},
-    types::{MessageId, Musig2MessageData, Musig2SessionData},
+    types::{MessageId, Musig2MessageData, Musig2SessionData, SeededNonceRequest},
 };
 
 /// Keys used for storing data in the key-value store
@@ -797,6 +797,82 @@ impl MuSig2Signer {
         Ok(())
     }
 
+    /// Commit to a nonce for **several** messages, with one transaction
+    /// for all of them.
+    ///
+    /// `generate_nonce` gives each message its own transaction, and
+    /// `storage-backend` syncs every transaction, so committing to N
+    /// nonces costs N fsyncs in series. No caller commits to one: a
+    /// MuSig2 session covers every input of every transaction it is
+    /// signing, and for a LeanBolt channel update that is 22 of them,
+    /// measured at about 11 ms each. The writes are one logical act
+    /// and this lets them share the durability they already needed.
+    ///
+    /// Each item carries its own seed, as each single-message call
+    /// would have had its own: see [`MuSig2Signer::reserve_indices`]
+    /// and `KeyManager::generate_nonces`, which is what derives them.
+    /// Deriving the seeds is the key manager's job because it is the
+    /// half that holds the keystore.
+    ///
+    /// Idempotent per message, exactly as the single-message form is:
+    /// one already stored is skipped rather than replaced, because
+    /// replacing a committed nonce is how a signer comes to use two of
+    /// them for one message.
+    pub fn generate_nonces(
+        &self,
+        items: &[SeededNonceRequest],
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+    ) -> Result<(), Musig2SignerError> {
+        let my_pub_key = self.my_public_key(aggregated_pubkey)?;
+        let mut fresh: Vec<(&MessageId, Musig2MessageData)> = Vec::new();
+        for (message_id, message, tweak, nonce_seed) in items {
+            if self.message_nonce_already_stored(
+                message_id,
+                message.clone(),
+                aggregated_pubkey,
+                id,
+            )? {
+                continue;
+            }
+            // Built exactly as the per-message form builds it: this
+            // message's own seed, the same binding to our key and the
+            // aggregated key, and the same message.
+            let sec_nonce =
+                musig2::SecNonceBuilder::from_pubkey(**nonce_seed, to_musig_pubkey(my_pub_key)?)
+                    .with_aggregated_pubkey(to_musig_pubkey(*aggregated_pubkey)?)
+                    .with_message(message)
+                    .build();
+            let mut pub_nonces = HashMap::new();
+            pub_nonces.insert(my_pub_key, sec_nonce.public_nonce());
+            fresh.push((message_id, (message.clone(), pub_nonces, sec_nonce, *tweak)));
+        }
+        if fresh.is_empty() {
+            return Ok(());
+        }
+
+        let transaction_id = self.begin_transaction();
+        let ids_key = self.get_key(StoreKey::MuSig2MessageIds {
+            aggregated_pubkey: aggregated_pubkey.to_string(),
+            session_id: id.to_string(),
+        })?;
+        // Read once and extended in memory rather than per message:
+        // one read instead of N, and the list is written once at the
+        // end for the same reason the nonces are.
+        let mut message_ids = self
+            .store
+            .get::<Vec<MessageId>>(ids_key.clone(), transaction_id)?
+            .unwrap_or_default();
+
+        for (message_id, data) in fresh {
+            self.write_message_data(transaction_id, message_id, aggregated_pubkey, id, data)?;
+            message_ids.push(message_id.clone());
+        }
+        self.store.set(ids_key, message_ids, transaction_id)?;
+        self.commit_transaction(transaction_id)?;
+        Ok(())
+    }
+
     fn save_musig_message_data(
         &self,
         message_id: &str,
@@ -805,7 +881,45 @@ impl MuSig2Signer {
         data: Musig2MessageData,
     ) -> Result<(), Musig2SignerError> {
         let transaction_id = self.begin_transaction();
+        self.write_message_data(transaction_id, message_id, aggregated_pubkey, id, data)?;
 
+        let message_ids = self.store.get::<Vec<MessageId>>(
+            self.get_key(StoreKey::MuSig2MessageIds {
+                aggregated_pubkey: aggregated_pubkey.to_string(),
+                session_id: id.to_string(),
+            })?,
+            transaction_id,
+        )?;
+
+        let mut message_ids = message_ids.unwrap_or(Vec::new());
+        message_ids.push(message_id.to_string());
+        self.store.set(
+            self.get_key(StoreKey::MuSig2MessageIds {
+                aggregated_pubkey: aggregated_pubkey.to_string(),
+                session_id: id.to_string(),
+            })?,
+            message_ids,
+            transaction_id,
+        )?;
+
+        self.commit_transaction(transaction_id)?;
+
+        Ok(())
+    }
+
+    /// One message's records, into a transaction the caller owns.
+    ///
+    /// Split out of `save_musig_message_data` so that the batch form
+    /// writes exactly the same things: two copies of this would be two
+    /// places for a record to be forgotten.
+    fn write_message_data(
+        &self,
+        transaction_id: Option<Uuid>,
+        message_id: &str,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        data: Musig2MessageData,
+    ) -> Result<(), Musig2SignerError> {
         self.store.set(
             self.get_key(StoreKey::MuSig2Message {
                 aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -847,27 +961,6 @@ impl MuSig2Signer {
                 transaction_id,
             )?;
         }
-        let message_ids = self.store.get::<Vec<MessageId>>(
-            self.get_key(StoreKey::MuSig2MessageIds {
-                aggregated_pubkey: aggregated_pubkey.to_string(),
-                session_id: id.to_string(),
-            })?,
-            transaction_id,
-        )?;
-
-        let mut message_ids = message_ids.unwrap_or(Vec::new());
-        message_ids.push(message_id.to_string());
-        self.store.set(
-            self.get_key(StoreKey::MuSig2MessageIds {
-                aggregated_pubkey: aggregated_pubkey.to_string(),
-                session_id: id.to_string(),
-            })?,
-            message_ids,
-            transaction_id,
-        )?;
-
-        self.commit_transaction(transaction_id)?;
-
         Ok(())
     }
 
@@ -913,23 +1006,50 @@ impl MuSig2Signer {
     }
 
     pub fn get_index(&self, aggregated_pubkey: &PublicKey) -> Result<u32, Musig2SignerError> {
+        Ok(self.reserve_indices(aggregated_pubkey, 1)?[0])
+    }
+
+    /// Take `how_many` consecutive nonce-generation indices at once.
+    ///
+    /// `get_index` is this with `how_many` of 1, and that is the only
+    /// reason this exists: a caller generating a whole session's
+    /// nonces would otherwise pay one transaction --- one fsync ---
+    /// per index, before paying another per nonce. Taking them in one
+    /// go keeps every index used exactly once and in the same order,
+    /// so the nonces that come out are the ones the one-at-a-time
+    /// path would have produced.
+    pub fn reserve_indices(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        how_many: usize,
+    ) -> Result<Vec<u32>, Musig2SignerError> {
+        if how_many == 0 {
+            return Ok(Vec::new());
+        }
         let my_pub_key = self.my_public_key(aggregated_pubkey)?;
         let key_index_used_by_me = self.get_key(StoreKey::IndexForNonceGeneration(my_pub_key))?;
 
         // Atomic transaction: increment and return nonce index, using a closure just for readability
-        let new_index = {
+        let indices = {
             let db_tx_id = self.begin_transaction();
 
             let current_index = self.store.get::<u32>(&key_index_used_by_me, db_tx_id)?;
-            let new_index = current_index.map_or(0, |idx| idx + 1);
-            self.store.set(key_index_used_by_me, new_index, db_tx_id)?;
+            let first = current_index.map_or(0, |idx| idx + 1);
+            // The last one handed out is what the store must remember,
+            // so that a crash in the middle never hands one out twice.
+            let last = u32::try_from(how_many)
+                .ok()
+                .and_then(|n| first.checked_add(n - 1))
+                .ok_or(Musig2SignerError::NonceIndexExhausted)?;
+            self.store
+                .set(key_index_used_by_me.clone(), last, db_tx_id)?;
 
             self.commit_transaction(db_tx_id)?;
 
-            new_index
+            (first..=last).collect::<Vec<u32>>()
         };
 
-        Ok(new_index)
+        Ok(indices)
     }
 
     pub fn my_public_key(

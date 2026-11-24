@@ -6,7 +6,7 @@ use musig2::{
     aggregate_partial_signatures, secp::Scalar, verify_partial, verify_single, AggNonce,
     CompactSignature, PartialSignature, SecNonce,
 };
-use std::{collections::HashMap, rc::Rc, str::FromStr};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::{
     error::StorageError,
     key::StorageKey,
@@ -88,8 +88,27 @@ enum StoreKey {
 /// 5. Get your partial signatures with `get_my_partial_signatures()`
 /// 6. Aggregate all partial signatures with `aggregate_partial_signatures()`
 /// 7. Get final signature for a message with `get_aggregate_partial_signature()`
+/// How many key aggregation contexts to memoise at once.
+///
+/// A caller normally holds a handful of aggregate keys and one tweak
+/// per message set, so this is not reached in practice. It exists so
+/// that an unusual caller cannot grow the map without limit; the cost
+/// of discarding an entry is one rebuild.
+const MAX_CACHED_CONTEXTS: usize = 256;
+
 pub struct MuSig2Signer {
     store: Rc<Storage>,
+    /// Memoised key aggregation contexts, keyed by aggregated public
+    /// key and tweak.
+    ///
+    /// `get_key_agg_context` is a pure function of the participant
+    /// set and the tweak, and the participant set is fixed by the
+    /// aggregated public key because that key is derived from it. So
+    /// one `(aggregated_pubkey, tweak)` always yields the same
+    /// context, and rebuilding it reads the participants back out of
+    /// storage and re-runs `KeyAggContext::new` for a result that
+    /// cannot differ.
+    contexts: RefCell<HashMap<(PublicKey, Option<[u8; 32]>), KeyAggContext>>,
 }
 
 pub type PartialSignatureData = HashMap<
@@ -731,7 +750,10 @@ impl MuSig2SignerApi for MuSig2Signer {
 
 impl MuSig2Signer {
     pub fn new(store: Rc<Storage>) -> Self {
-        Self { store }
+        Self {
+            store,
+            contexts: RefCell::new(HashMap::new()),
+        }
     }
 
     pub fn message_nonce_already_stored(
@@ -1203,8 +1225,18 @@ impl MuSig2Signer {
         aggregated_pubkey: &PublicKey,
         tweak: Option<musig2::secp256k1::Scalar>,
     ) -> Result<KeyAggContext, Musig2SignerError> {
+        let key = (*aggregated_pubkey, tweak.map(|t| t.to_be_bytes()));
+        if let Some(hit) = self.contexts.borrow().get(&key) {
+            return Ok(hit.clone());
+        }
         let participant_pubkeys = self.get_participant_pub_keys(aggregated_pubkey)?;
-        self.get_key_agg_context_aux(participant_pubkeys, tweak)
+        let built = self.get_key_agg_context_aux(participant_pubkeys, tweak)?;
+        let mut contexts = self.contexts.borrow_mut();
+        if contexts.len() >= MAX_CACHED_CONTEXTS {
+            contexts.clear();
+        }
+        contexts.insert(key, built.clone());
+        Ok(built)
     }
 
     fn get_key(&self, key: StoreKey) -> Result<StorageKey, StorageError> {

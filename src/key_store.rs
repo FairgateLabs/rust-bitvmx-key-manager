@@ -13,7 +13,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{rc::Rc, str::FromStr};
 use storage_backend::{
     key::StorageKey,
-    storage::{KeyValueStore, Storage},
+    storage::Storage,
 };
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};

@@ -200,21 +200,29 @@ mod musig2_tests {
     }
 
     #[test]
-    fn test_aggregate_nonces_duplicate() -> Result<(), anyhow::Error> {
+    fn test_aggregate_nonces_identical_replay() -> Result<(), anyhow::Error> {
         let (km, pk1) = mock_data()?;
-        let (_, pk2) = mock_data()?;
+        let (km2, pk2) = mock_data()?;
         let id = "dup_nonce";
 
         let agg = km.musig2().new_session(vec![pk1, pk2], pk1)?;
+        km2.musig2().new_session(vec![pk1, pk2], pk2)?;
         km.generate_nonce("m", b"m".to_vec(), &agg, id, None)?;
+        km2.generate_nonce("m", b"m".to_vec(), &agg, id, None)?;
 
-        let nonces = km.musig2().get_my_pub_nonces(&agg, id)?;
+        let participant_nonces = km2.musig2().get_my_pub_nonces(&agg, id)?;
         let mut map = HashMap::new();
-        map.insert(pk2, nonces);
+        map.insert(pk2, participant_nonces);
 
         km.musig2().aggregate_nonces(&agg, id, map.clone())?;
-        let result = km.musig2().aggregate_nonces(&agg, id, map);
-        assert!(matches!(result, Err(Musig2SignerError::NonceAlreadyExists)));
+        km.musig2().aggregate_nonces(&agg, id, map)?;
+
+        let mut conflicting = HashMap::new();
+        conflicting.insert(pk2, km.musig2().get_my_pub_nonces(&agg, id)?);
+        assert!(matches!(
+            km.musig2().aggregate_nonces(&agg, id, conflicting),
+            Err(Musig2SignerError::ConflictingParticipantNonce)
+        ));
 
         clear_output();
         Ok(())
@@ -242,7 +250,7 @@ mod musig2_tests {
     }
 
     #[test]
-    fn test_save_partial_signatures_duplicate() -> Result<(), anyhow::Error> {
+    fn test_save_partial_signatures_identical_replay() -> Result<(), anyhow::Error> {
         let (ctx, ps1, ps2) = create_session_with_partials("msg_dup")?;
 
         let mut all = HashMap::new();
@@ -252,13 +260,7 @@ mod musig2_tests {
         ctx.km1
             .save_partial_signatures(&ctx.agg, &ctx.id1, all.clone())?;
 
-        let result = ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all);
-        assert!(matches!(
-            result,
-            Err(KeyManagerError::Musig2SignerError(
-                Musig2SignerError::PartialSignatureAlreadyExists
-            ))
-        ));
+        ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all)?;
 
         clear_output();
         Ok(())

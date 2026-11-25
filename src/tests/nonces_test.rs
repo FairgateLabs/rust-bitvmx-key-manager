@@ -83,11 +83,9 @@ mod tests {
         let mut pub_nonces_map = HashMap::new();
         pub_nonces_map.insert(participant_2, nonces.clone());
 
-        // Test adding duplicate nonces fails
+        // Identical nonce replays are idempotent.
         musig.aggregate_nonces(&aggregated_pubkey, id, pub_nonces_map.clone())?;
-        let result = musig.aggregate_nonces(&aggregated_pubkey, id, pub_nonces_map.clone());
-
-        assert!(matches!(result, Err(Musig2SignerError::NonceAlreadyExists)));
+        musig.aggregate_nonces(&aggregated_pubkey, id, pub_nonces_map.clone())?;
 
         clear_output();
 

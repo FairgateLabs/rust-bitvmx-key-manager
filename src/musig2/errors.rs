@@ -14,6 +14,9 @@ pub enum Musig2SignerError {
     #[error("Partial signature already exists")]
     PartialSignatureAlreadyExists,
 
+    #[error("Conflicting partial signature already exists")]
+    ConflictingPartialSignature,
+
     #[error("Incomplete number of partial signatures")]
     InvalidParticipantPartialSignatures,
 
@@ -55,6 +58,9 @@ pub enum Musig2SignerError {
 
     #[error("Nonce already exists")]
     NonceAlreadyExists,
+
+    #[error("Conflicting participant nonce already exists")]
+    ConflictingParticipantNonce,
 
     #[error("Invalid message id")]
     InvalidMessageId,

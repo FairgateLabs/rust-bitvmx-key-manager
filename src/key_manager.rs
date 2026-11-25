@@ -299,6 +299,14 @@ impl KeyManager {
         &self.musig2
     }
 
+    /// Returns the key manager's storage so an embedding application can include key state in
+    /// its event-level global transaction. With the `transactional` feature disabled, key-manager
+    /// writes use `None` transaction IDs and therefore automatically join an active global
+    /// transaction on this storage.
+    pub fn storage(&self) -> Rc<Storage> {
+        self.keystore.store_clone()
+    }
+
     pub fn export_keys(&self) -> Result<ExportedKeys, KeyManagerError> {
         let storage_keys = self.keystore.keys()?;
         let mut bitcoin_keypairs = Vec::new();
@@ -2127,6 +2135,20 @@ impl KeyManager {
             .aggregate_nonces(aggregated_pubkey, id, pub_nonces_map)?)
     }
 
+    /// Ensures received participant nonces are stored, accepting an identical replay as success.
+    ///
+    /// This is required when an application commits key storage before its main state storage: a
+    /// crash between those commits retries the event against already-committed key data. Conflicting
+    /// replayed values are still rejected by the MuSig2 signer.
+    pub fn ensure_participant_nonces(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        pub_nonces_map: HashMap<PublicKey, Vec<(MessageId, PubNonce)>>,
+    ) -> Result<(), KeyManagerError> {
+        self.aggregate_nonces(aggregated_pubkey, id, pub_nonces_map)
+    }
+
     pub fn get_my_pub_nonces(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -2164,6 +2186,22 @@ impl KeyManager {
         self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)
     }
 
+    /// Completes a multi-party signature set with our signatures and stores it idempotently.
+    /// This named replay-safe entry point is used by applications that commit key storage before
+    /// main state and may therefore repeat the operation after a crash between those commits.
+    pub fn ensure_partial_signatures_multi(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        mut partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    ) -> Result<(), KeyManagerError> {
+        let my_partial_signatures = self.get_my_partial_signatures(aggregated_pubkey, id)?;
+        let my_pub_key = self.musig2.my_public_key(aggregated_pubkey)?;
+        partial_signatures_mapping.insert(my_pub_key, my_partial_signatures);
+
+        self.ensure_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)
+    }
+
     pub fn save_partial_signatures(
         &self,
         aggregated_pubkey: &PublicKey,
@@ -2175,6 +2213,20 @@ impl KeyManager {
             id,
             partial_signatures_mapping,
         )?)
+    }
+
+    /// Ensures participant partial signatures are stored, accepting an identical replay as success.
+    ///
+    /// The replay can occur after key storage commits but before the embedding application's main
+    /// state commits. Existing signatures must match exactly; a conflicting signature remains an
+    /// error rather than being silently overwritten.
+    pub fn ensure_partial_signatures(
+        &self,
+        aggregated_pubkey: &PublicKey,
+        id: &str,
+        partial_signatures_mapping: HashMap<PublicKey, Vec<(MessageId, PartialSignature)>>,
+    ) -> Result<(), KeyManagerError> {
+        self.save_partial_signatures(aggregated_pubkey, id, partial_signatures_mapping)
     }
 
     pub fn get_my_partial_signatures(

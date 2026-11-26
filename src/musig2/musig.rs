@@ -415,13 +415,13 @@ impl MuSig2SignerApi for MuSig2Signer {
                     message_id: message_id_nonce.to_string(),
                     participant_pubkey: pub_key.to_string(),
                 })?;
-                let exist_nonce = self.store.has_key(&key, None)?;
-
-                if exist_nonce {
-                    return Err(Musig2SignerError::NonceAlreadyExists);
-                } else {
-                    // Save the public nonce
-                    self.store.set(key, nonce.clone(), None)?;
+                match self.store.get::<PubNonce>(&key, None)? {
+                    Some(existing) if existing == *nonce => {
+                        // An identical value means the caller is replaying an event whose key
+                        // storage commit succeeded before its main-state commit.
+                    }
+                    Some(_) => return Err(Musig2SignerError::ConflictingParticipantNonce),
+                    None => self.store.set(key, nonce.clone(), None)?,
                 }
             }
         }
@@ -530,17 +530,23 @@ impl MuSig2SignerApi for MuSig2Signer {
 
         let message_ids = self.get_message_ids(aggregated_pubkey, id)?;
 
-        // Validate that all partial signatures were not already inserted, and that each partial signature has a valid message id
+        // Validate message coverage and make replays idempotent. A key-first commit can survive
+        // while the caller's main-state commit does not, so identical existing signatures are a
+        // successful replay; conflicting signatures must still fail.
         for message_id in message_ids.iter() {
-            let partial_signatures =
+            let stored_signatures =
                 self.get_partial_signatures(aggregated_pubkey, id, message_id)?;
             for (pub_key, signatures) in &partial_signatures_to_save {
-                if signatures.iter().any(|(id, _)| id == message_id) {
-                    if partial_signatures.contains_key(pub_key) {
-                        return Err(Musig2SignerError::PartialSignatureAlreadyExists);
+                let signature = signatures
+                    .iter()
+                    .find(|(mid, _)| mid == message_id)
+                    .map(|(_, signature)| signature)
+                    .ok_or(Musig2SignerError::InvalidMessageId)?;
+
+                if let Some(existing) = stored_signatures.get(pub_key) {
+                    if existing != signature {
+                        return Err(Musig2SignerError::ConflictingPartialSignature);
                     }
-                } else {
-                    return Err(Musig2SignerError::InvalidMessageId);
                 }
             }
         }

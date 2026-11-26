@@ -299,6 +299,18 @@ impl KeyManager {
         &self.musig2
     }
 
+    /// Returns the key manager's storage so an embedding application can include key state in
+    /// its event-level global transaction. With the `transactional` feature disabled, key-manager
+    /// writes use `None` transaction IDs and therefore automatically join an active global
+    /// transaction on this storage.
+    pub fn storage(&self) -> Rc<Storage> {
+        #[cfg(feature = "transactional")]
+        tracing::warn!(
+            "Key manager storage exposed with the `transactional` feature enabled: key-manager              writes use their own transactions and will not join the caller's global transaction"
+        );
+        self.keystore.store_clone()
+    }
+
     pub fn export_keys(&self) -> Result<ExportedKeys, KeyManagerError> {
         let storage_keys = self.keystore.keys()?;
         let mut bitcoin_keypairs = Vec::new();

@@ -10,7 +10,7 @@ use std::{collections::HashMap, rc::Rc, str::FromStr};
 use storage_backend::{
     error::StorageError,
     key::StorageKey,
-    storage::{KeyValueStore, Storage},
+    storage::Storage,
 };
 use tracing::{debug, error};
 use uuid::Uuid;
@@ -1016,7 +1016,7 @@ impl MuSig2Signer {
         message_id: &str,
     ) -> Result<HashMap<PublicKey, PartialSignature>, Musig2SignerError> {
         let mut partial_signatures = HashMap::new();
-        let result = self.store.partial_compare(
+        let result = self.store.partial_compare::<PartialSignature>(
             &self
                 .get_key(StoreKey::MuSig2PartialSignatures {
                     aggregated_pubkey: aggregated_pubkey.to_string(),
@@ -1027,14 +1027,10 @@ impl MuSig2Signer {
             None,
         )?;
 
-        for (key, value) in result {
+        for (key, partial_signature) in result {
             let pubkey_str = key.split('/').next_back().unwrap_or("");
             let pubkey = PublicKey::from_str(pubkey_str)
                 .map_err(|_| Musig2SignerError::CantReconstructValue("PublicKey".to_string()))?;
-            let partial_signature: PartialSignature =
-                serde_json::from_str(&value).map_err(|_| {
-                    Musig2SignerError::CantReconstructValue("PartialSignature".to_string())
-                })?;
             partial_signatures.insert(pubkey, partial_signature);
         }
 
@@ -1087,7 +1083,7 @@ impl MuSig2Signer {
         id: &str,
         message_id: &str,
     ) -> Result<usize, Musig2SignerError> {
-        let result = self.store.partial_compare(
+        let result = self.store.partial_compare_keys(
             &self
                 .get_key(StoreKey::MuSig2PubNonces {
                     aggregated_pubkey: aggregated_pubkey.to_string(),

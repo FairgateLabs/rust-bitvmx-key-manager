@@ -254,13 +254,25 @@ mod musig2_tests {
         let (ctx, ps1, ps2) = create_session_with_partials("msg_dup")?;
 
         let mut all = HashMap::new();
-        all.insert(ctx.pk1, ps1);
+        all.insert(ctx.pk1, ps1.clone());
         all.insert(ctx.pk2, ps2);
 
         ctx.km1
             .save_partial_signatures(&ctx.agg, &ctx.id1, all.clone())?;
 
         ctx.km1.save_partial_signatures(&ctx.agg, &ctx.id1, all)?;
+
+        // A replay carrying a different signature for an already stored participant is rejected.
+        let mut conflicting = HashMap::new();
+        conflicting.insert(ctx.pk1, ps1.clone());
+        conflicting.insert(ctx.pk2, ps1);
+        assert!(matches!(
+            ctx.km1
+                .save_partial_signatures(&ctx.agg, &ctx.id1, conflicting),
+            Err(KeyManagerError::Musig2SignerError(
+                Musig2SignerError::ConflictingPartialSignature
+            ))
+        ));
 
         clear_output();
         Ok(())

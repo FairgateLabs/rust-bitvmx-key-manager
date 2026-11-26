@@ -539,7 +539,7 @@ impl MuSig2SignerApi for MuSig2Signer {
             for (pub_key, signatures) in &partial_signatures_to_save {
                 let signature = signatures
                     .iter()
-                    .find(|(id, _)| id == message_id)
+                    .find(|(mid, _)| mid == message_id)
                     .map(|(_, signature)| signature)
                     .ok_or(Musig2SignerError::InvalidMessageId)?;
 

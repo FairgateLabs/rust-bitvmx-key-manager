@@ -11,9 +11,6 @@ pub enum Musig2SignerError {
     #[error("ID not found")]
     IdNotFound,
 
-    #[error("Partial signature already exists")]
-    PartialSignatureAlreadyExists,
-
     #[error("Conflicting partial signature already exists")]
     ConflictingPartialSignature,
 
@@ -55,9 +52,6 @@ pub enum Musig2SignerError {
 
     #[error("Duplicated message")]
     DuplicatedMessage,
-
-    #[error("Nonce already exists")]
-    NonceAlreadyExists,
 
     #[error("Conflicting participant nonce already exists")]
     ConflictingParticipantNonce,

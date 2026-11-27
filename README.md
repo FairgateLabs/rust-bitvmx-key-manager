@@ -139,6 +139,8 @@ The library provides several compile-time feature flags to customize behavior:
 
 - **`lamport_idx_check`** (enabled by default): Enables index validation checks for Lamport One-Time Signature  keys. This ensures that each lamport key index is only used once, preventing security vulnerabilities from key reuse. It's highly recommended to keep this enabled for production use.
 
+> **OTS replay behavior:** with the default checks enabled, the keystore records the canonical value signed by each one-time key. Retrying the same value is idempotent; attempting to sign a different value with that key is rejected.
+
 - **`strict`** (disabled by default): Enables strict validation and additional safety checks throughout the library. When enabled, operations perform extra validation steps that may impact performance but provide stronger guarantees. Useful for development and testing environments.
 
 To use without default features:

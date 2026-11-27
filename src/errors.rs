@@ -151,9 +151,6 @@ pub enum KeyManagerError {
     #[error("Winternitz public key does not match the key issued at index {0}")]
     WinternitzPublicKeyMismatch(u32),
 
-    #[error("Corrupted Winternitz index bitmap")]
-    CorruptedWinternitzIndexBitmap,
-
     #[error("Lamport index {0} has already been used")]
     LamportIndexAlreadyUsed(u32),
 
@@ -165,9 +162,6 @@ pub enum KeyManagerError {
 
     #[error("Lamport private key not found")]
     LamportPrivateKeyNotFound,
-
-    #[error("Corrupted Lamport index bitmap")]
-    CorruptedLamportIndexBitmap,
 
     #[error("Index overflow: cannot generate more keys")]
     IndexOverflow,

@@ -1,7 +1,7 @@
 use crate::{
     errors::KeyManagerError,
     key_type::BitcoinKeyType,
-    lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey},
+    lamport::{LamportPrivateKey, LamportPubKeyId, LamportPublicKey, LamportType},
     rsa::RSAKeyPair,
     winternitz::WinternitzType,
 };
@@ -11,10 +11,7 @@ use bitcoin::{PrivateKey, PublicKey};
 use rsa::RsaPublicKey;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{rc::Rc, str::FromStr};
-use storage_backend::{
-    key::StorageKey,
-    storage::Storage,
-};
+use storage_backend::{key::StorageKey, storage::Storage};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -39,6 +36,13 @@ pub struct WinternitzKeyRecord {
     pub message_size: usize,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+struct OtsUsageRecord {
+    canonical_value: Vec<u8>,
+    bit_length: usize,
+    lamport_type: Option<LamportType>,
+}
+
 pub struct KeyStore {
     store: Rc<Storage>,
 }
@@ -52,11 +56,6 @@ This could be a future improvement to consider after evaluating the current impl
 
 impl KeyStore {
     const UNKNOWN_TYPE: &str = "unknown"; // Key type string for unknown/unspecified key types
-                                          // TODO adjust block size to optimize storage, according to the estimation of max winternitz keys needed
-    const WOTS_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
-    const WOTS_CHECK_BLOCK_BYTES: usize = (Self::WOTS_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
-    const LAMPORT_CHECK_BLOCK_SIZE: u64 = 1024; // Number of indices per bitmap block
-    const LAMPORT_CHECK_BLOCK_BYTES: usize = (Self::LAMPORT_CHECK_BLOCK_SIZE / 8) as usize; // 128 bytes per block
     const LAMPORT: &str = "lamport"; // Value tag inside the stored payload, NOT a storage key
 
     fn key_manager_key<'a>(
@@ -81,12 +80,6 @@ impl KeyStore {
         tail: impl IntoIterator<Item = &'a str>,
     ) -> Result<StorageKey, KeyManagerError> {
         Self::key_manager_key("index", tail)
-    }
-
-    fn index_block_key<'a>(
-        tail: impl IntoIterator<Item = &'a str>,
-    ) -> Result<StorageKey, KeyManagerError> {
-        Self::key_manager_key("index_block", tail)
     }
 
     fn mnemonic_key() -> Result<StorageKey, KeyManagerError> {
@@ -121,19 +114,19 @@ impl KeyStore {
         Self::index_key(["lamport"])
     }
 
-    fn winternitz_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
-        let block_str = block_num.to_string();
-        Self::index_block_key(["winternitz", block_str.as_str()])
-    }
-
     fn winternitz_key_record_key(index: u32) -> Result<StorageKey, KeyManagerError> {
         let index_str = index.to_string();
         Self::key_manager_key("winternitz_key", [index_str.as_str()])
     }
 
-    fn lamport_index_block_key(block_num: u64) -> Result<StorageKey, KeyManagerError> {
-        let block_str = block_num.to_string();
-        Self::index_block_key(["lamport", block_str.as_str()])
+    fn winternitz_usage_key(index: u32) -> Result<StorageKey, KeyManagerError> {
+        let index_str = index.to_string();
+        Self::key_manager_key("winternitz_usage", [index_str.as_str()])
+    }
+
+    fn lamport_usage_key(index: u32) -> Result<StorageKey, KeyManagerError> {
+        let index_str = index.to_string();
+        Self::key_manager_key("lamport_usage", [index_str.as_str()])
     }
 
     /// BLAKE3 fingerprint of an RSA public PEM, used as the storage-key segment.
@@ -372,45 +365,31 @@ impl KeyStore {
         }
     }
 
-    // this index is independent of the index used for key derivation, it is marked when used in a signature
-    pub fn check_and_mark_winternitz_index_used(
+    pub fn check_and_record_winternitz_usage(
         &self,
         index: u32,
+        message: &[u8],
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        // Bitmap with block size of 1024 indices for efficiency
-        // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
-
-        let block_num = (index as u64) / Self::WOTS_CHECK_BLOCK_SIZE;
-        let bit_pos = (index as u64) % Self::WOTS_CHECK_BLOCK_SIZE;
-
-        let byte_index = (bit_pos / 8) as usize;
-        let bit_index = (bit_pos % 8) as u8;
-
-        // Load the block from storage (or create new if doesn't exist)
-        let block_key = Self::winternitz_index_block_key(block_num)?;
-        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(&block_key, None)? {
-            Some(block) => block,
-            None => vec![0u8; Self::WOTS_CHECK_BLOCK_BYTES], // Create new empty block
+        let usage_key = Self::winternitz_usage_key(index)?;
+        let requested = OtsUsageRecord {
+            canonical_value: message.to_vec(),
+            bit_length: message.len().saturating_mul(8),
+            lamport_type: None,
         };
 
-        // Validate block size
-        if block.len() != Self::WOTS_CHECK_BLOCK_BYTES {
-            return Err(KeyManagerError::CorruptedWinternitzIndexBitmap);
+        if let Some(stored) = self
+            .store
+            .get::<OtsUsageRecord>(&usage_key, transaction_id)?
+        {
+            return if stored == requested {
+                Ok(())
+            } else {
+                Err(KeyManagerError::WinternitzIndexAlreadyUsed(index))
+            };
         }
 
-        // Check if the bit is already set (index already used)
-        let mask = 1u8 << bit_index;
-        if block[byte_index] & mask != 0 {
-            return Err(KeyManagerError::WinternitzIndexAlreadyUsed(index));
-        }
-
-        // Mark the bit as used
-        block[byte_index] |= mask;
-
-        // Store the updated block back to storage
-        self.store.set(block_key, block, transaction_id)?;
-
+        self.store.set(usage_key, requested, transaction_id)?;
         Ok(())
     }
 
@@ -495,10 +474,22 @@ impl KeyStore {
 
     fn format_lamport_storage_value(private_key: &LamportPrivateKey) -> String {
         format!(
-            "{}:{}:{}",
+            "{}:{}:false",
             Self::LAMPORT,
             general_purpose::STANDARD.encode(private_key.to_bytes()),
-            private_key.spent(),
+        )
+    }
+
+    fn format_used_lamport_storage_value(
+        private_key: &LamportPrivateKey,
+        usage: &OtsUsageRecord,
+    ) -> String {
+        format!(
+            "{}:{}:true:{}:{}",
+            Self::LAMPORT,
+            general_purpose::STANDARD.encode(private_key.to_bytes()),
+            usage.bit_length,
+            general_purpose::STANDARD.encode(&usage.canonical_value),
         )
     }
 
@@ -509,9 +500,77 @@ impl KeyStore {
         public_key: &LamportPublicKey,
     ) -> Result<(), KeyManagerError> {
         let pubk = Self::format_lamport_storage_key(public_key)?;
+        let existing = self.store.get::<String>(&pubk, None)?.map(Zeroizing::new);
+        if existing.is_some() {
+            return Ok(());
+        }
+
         let privk = Zeroizing::new(Self::format_lamport_storage_value(private_key));
         self.store.set(pubk, &(*privk), None)?;
         Ok(())
+    }
+
+    fn load_lamport_imported_record<K: LamportPubKeyId>(
+        &self,
+        public_key: &K,
+        transaction_id: Option<Uuid>,
+    ) -> Result<Option<(LamportPrivateKey, Option<OtsUsageRecord>)>, KeyManagerError> {
+        let pubk = Self::format_lamport_storage_key(public_key)?;
+        let privk: Option<Zeroizing<String>> = self
+            .store
+            .get::<String>(pubk, transaction_id)?
+            .map(Zeroizing::new);
+
+        let Some(privk) = privk else {
+            return Ok(None);
+        };
+        let parts: Vec<&str> = privk.split(':').collect();
+        if !matches!(parts.len(), 3 | 5) || parts[0] != Self::LAMPORT {
+            return Err(KeyManagerError::InvalidLamportPrivateKey);
+        }
+
+        let used = match (parts.len(), parts[2]) {
+            (3, "false") => false,
+            (5, "true") => true,
+            _ => return Err(KeyManagerError::InvalidLamportPrivateKey),
+        };
+        let expected_bit_length = public_key.message_bit_length()?;
+        let private_key_decoded = general_purpose::STANDARD
+            .decode(parts[1].as_bytes())
+            .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+        let mut private_key = LamportPrivateKey::from_bytes(
+            &private_key_decoded,
+            expected_bit_length,
+            public_key.hash_type(),
+            None,
+            true,
+        )?;
+        if used {
+            private_key.mark_spent();
+        }
+
+        let usage = if used {
+            let bit_length = parts[3]
+                .parse::<usize>()
+                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            let canonical_value = general_purpose::STANDARD
+                .decode(parts[4].as_bytes())
+                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
+            if bit_length != expected_bit_length || canonical_value.len() != bit_length.div_ceil(8)
+            {
+                return Err(KeyManagerError::InvalidLamportPrivateKey);
+            }
+
+            Some(OtsUsageRecord {
+                canonical_value,
+                bit_length,
+                lamport_type: Some(public_key.hash_type()),
+            })
+        } else {
+            None
+        };
+
+        Ok(Some((private_key, usage)))
     }
 
     // we are not storing derived keys
@@ -519,119 +578,75 @@ impl KeyStore {
         &self,
         public_key: &K,
     ) -> Result<Option<LamportPrivateKey>, KeyManagerError> {
-        let pubk = Self::format_lamport_storage_key(public_key)?;
-        let privk: Option<Zeroizing<String>> =
-            self.store.get::<String>(pubk, None)?.map(Zeroizing::new);
-
-        if let Some(privk) = privk {
-            let parts: Vec<&str> = privk.split(':').collect();
-
-            // Expected format: lamport:base64_key:spent
-            if parts.len() != 3 || parts[0] != Self::LAMPORT {
-                return Err(KeyManagerError::InvalidLamportPrivateKey);
-            }
-
-            let key_bytes_part = parts[1];
-            let spent = parts[2]
-                .parse::<bool>()
-                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-
-            let private_key_decoded = general_purpose::STANDARD
-                .decode(key_bytes_part.as_bytes())
-                .map_err(|_| KeyManagerError::InvalidLamportPrivateKey)?;
-            let mut private_key = LamportPrivateKey::from_bytes(
-                &private_key_decoded,
-                public_key.message_bit_length()?,
-                public_key.hash_type(),
-                None,
-                true, // imported: true for imported keys
-            )?;
-
-            // Set the spent flag
-            if spent {
-                private_key.mark_spent();
-            }
-
-            return Ok(Some(private_key));
-        }
-
-        Ok(None)
+        Ok(self
+            .load_lamport_imported_record(public_key, None)?
+            .map(|(private_key, _)| private_key))
     }
 
-    // this index is independent of the index used for key derivation, it is marked when used in a signature
-    pub fn check_and_mark_lamport_index_used_derivated(
+    pub fn check_and_record_lamport_usage(
         &self,
         index: u32,
+        key_type: LamportType,
+        canonical_value: &[u8],
+        bit_length: usize,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        // Bitmap with block size of 1024 indices for efficiency
-        // Each block represents 1024 indices and uses 128 bytes (1024 bits / 8)
-
-        let block_num = (index as u64) / Self::LAMPORT_CHECK_BLOCK_SIZE;
-        let bit_pos = (index as u64) % Self::LAMPORT_CHECK_BLOCK_SIZE;
-
-        let byte_index = (bit_pos / 8) as usize;
-        let bit_index = (bit_pos % 8) as u8;
-
-        // Load the block from storage (or create new if doesn't exist)
-        let block_key = Self::lamport_index_block_key(block_num)?;
-        let mut block: Vec<u8> = match self.store.get::<Vec<u8>>(&block_key, None)? {
-            Some(block) => block,
-            None => vec![0u8; Self::LAMPORT_CHECK_BLOCK_BYTES], // Create new empty block
+        let usage_key = Self::lamport_usage_key(index)?;
+        let requested = OtsUsageRecord {
+            canonical_value: canonical_value.to_vec(),
+            bit_length,
+            lamport_type: Some(key_type),
         };
 
-        // Validate block size
-        if block.len() != Self::LAMPORT_CHECK_BLOCK_BYTES {
-            return Err(KeyManagerError::CorruptedLamportIndexBitmap);
+        if let Some(stored) = self
+            .store
+            .get::<OtsUsageRecord>(&usage_key, transaction_id)?
+        {
+            return if stored == requested {
+                Ok(())
+            } else {
+                Err(KeyManagerError::LamportIndexAlreadyUsed(index))
+            };
         }
 
-        // Check if the bit is already set (index already used)
-        let mask = 1u8 << bit_index;
-        if block[byte_index] & mask != 0 {
-            return Err(KeyManagerError::LamportIndexAlreadyUsed(index));
-        }
-
-        // Mark the bit as used
-        block[byte_index] |= mask;
-
-        // Store the updated block back to storage
-        self.store.set(block_key, block, transaction_id)?;
-
+        self.store.set(usage_key, requested, transaction_id)?;
         Ok(())
     }
 
-    pub fn check_and_mark_lamport_used_imported(
+    pub fn check_and_record_lamport_imported_usage(
         &self,
         public_key: &LamportPublicKey,
+        canonical_value: &[u8],
+        bit_length: usize,
         transaction_id: Option<Uuid>,
     ) -> Result<(), KeyManagerError> {
-        // Check if the public key is marked as imported
         if !public_key.imported() {
             return Err(KeyManagerError::LamportKeyNotMarkedAsImported);
         }
 
-        // Load the key from storage
-        let optional_private_key = self.load_lamport_imported_key(public_key)?;
-
-        // Check if the key exists
-        let mut private_key = match optional_private_key {
-            Some(key) => key,
-            None => return Err(KeyManagerError::LamportPrivateKeyNotFound),
+        let (private_key, stored_usage) = self
+            .load_lamport_imported_record(public_key, transaction_id)?
+            .ok_or(KeyManagerError::LamportPrivateKeyNotFound)?;
+        let requested = OtsUsageRecord {
+            canonical_value: canonical_value.to_vec(),
+            bit_length,
+            lamport_type: Some(public_key.hash_type()),
         };
 
-        // Check if the key was already used to sign (spent)
-        if private_key.spent() {
-            return Err(KeyManagerError::LamportImportedKeyAlreadyUsed);
+        if let Some(stored) = stored_usage {
+            return if stored == requested {
+                Ok(())
+            } else {
+                Err(KeyManagerError::LamportImportedKeyAlreadyUsed)
+            };
         }
 
-        // Mark the key as spent
-        private_key.mark_spent();
-
-        // Store the updated key
         let pubk = Self::format_lamport_storage_key(public_key)?;
-        let privk = Zeroizing::new(Self::format_lamport_storage_value(&private_key));
+        let privk = Zeroizing::new(Self::format_used_lamport_storage_value(
+            &private_key,
+            &requested,
+        ));
         self.store.set(pubk, &(*privk), transaction_id)?;
-
         Ok(())
     }
 }

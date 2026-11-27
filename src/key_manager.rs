@@ -353,7 +353,7 @@ impl KeyManager {
                     lamport_imported_raw.push(ExportedLamportImportedKey {
                         storage_key: key.clone(),
                         encoded_private_key_and_spent_flag: value,
-                        note: "Imported Lamport keys are stored by BLAKE3 public-key id. The stored value is `lamport:<base64_private_key_bytes>:<spent>`. Full public-key metadata is not stored separately.".to_string(),
+                        note: "Imported Lamport keys are stored by BLAKE3 public-key id. Unused values use `lamport:<base64_private_key_bytes>:false`; used values use `lamport:<base64_private_key_bytes>:true:<bit_length>:<base64_canonical_value>`. Full public-key metadata is not stored separately.".to_string(),
                     });
                 }
             }
@@ -1775,23 +1775,18 @@ impl KeyManager {
             index,
         )?;
 
-        let tx_id = self.begin_transaction();
-
-        // check if index was already used, if its error, if not mark and save
-        #[cfg(feature = "wots_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_winternitz_index_used(index, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
-        }
-
         let signature =
             winternitz.sign_message(message_digits_length, &checksummed_message, &private_key);
+
+        let tx_id = self.begin_transaction();
+        #[cfg(feature = "wots_idx_check")]
+        if let Err(error) =
+            self.keystore
+                .check_and_record_winternitz_usage(index, message_bytes, tx_id)
+        {
+            self.rollback_transaction(tx_id)?;
+            return Err(error);
+        }
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
@@ -1838,7 +1833,7 @@ impl KeyManager {
                 ));
             }
 
-            self.sign_lamport_message_by_index(message, public_key.hash_type(), index)
+            self.sign_lamport_message_by_index(&message_bits, public_key.hash_type(), index)
         }
     }
 
@@ -1852,26 +1847,26 @@ impl KeyManager {
             .keystore
             .load_lamport_imported_key(public_key)?
             .ok_or(KeyManagerError::LamportKeyNotFound)?;
+        let message_bits = message.into_message_bits();
+        let lamport = Lamport::new();
+        let signature = lamport.sign_message(&message_bits, &private_key)?;
+        #[cfg(feature = "lamport_idx_check")]
+        let canonical_value = Self::canonical_lamport_value(&message_bits);
 
         let tx_id = self.begin_transaction();
-        // check if index was already used, if its error, if not mark and save
         #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_used_imported(public_key, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
+        if let Err(error) = self.keystore.check_and_record_lamport_imported_usage(
+            public_key,
+            &canonical_value,
+            message_bits.len(),
+            tx_id,
+        ) {
+            self.rollback_transaction(tx_id)?;
+            return Err(error);
         }
 
-        let lamport = Lamport::new();
-        let sig = lamport.sign_message(message, &private_key)?;
-
         self.commit_transaction(tx_id)?;
-        Ok(sig)
+        Ok(signature)
     }
 
     // For one-time lamport keys
@@ -1886,29 +1881,39 @@ impl KeyManager {
     ) -> Result<LamportSignature, KeyManagerError> {
         let master_secret = self.keystore.load_lamport_seed()?;
         let lamport = Lamport::new();
-        let message_bits = message.clone().into_message_bits();
+        let message_bits = message.into_message_bits();
         let private_key =
             lamport.generate_private_key(&*master_secret, key_type, message_bits.len(), index)?;
+        let signature = lamport.sign_message(&message_bits, &private_key)?;
+        #[cfg(feature = "lamport_idx_check")]
+        let canonical_value = Self::canonical_lamport_value(&message_bits);
 
         let tx_id = self.begin_transaction();
-
-        // check if index was already used, if its error, if not mark and save
         #[cfg(feature = "lamport_idx_check")]
-        match self
-            .keystore
-            .check_and_mark_lamport_index_used_derivated(index, tx_id)
-        {
-            Ok(()) => {}
-            Err(e) => {
-                self.rollback_transaction(tx_id)?;
-                return Err(e);
-            }
+        if let Err(error) = self.keystore.check_and_record_lamport_usage(
+            index,
+            key_type,
+            &canonical_value,
+            message_bits.len(),
+            tx_id,
+        ) {
+            self.rollback_transaction(tx_id)?;
+            return Err(error);
         }
-
-        let signature = lamport.sign_message(message, &private_key)?;
 
         self.commit_transaction(tx_id)?;
         Ok(signature)
+    }
+
+    #[cfg(feature = "lamport_idx_check")]
+    fn canonical_lamport_value(message_bits: &[bool]) -> Vec<u8> {
+        let mut canonical = vec![0u8; message_bits.len().div_ceil(8)];
+        for (index, bit) in message_bits.iter().enumerate() {
+            if *bit {
+                canonical[index / 8] |= 1 << (7 - (index % 8));
+            }
+        }
+        canonical
     }
 
     /// Expands a derived (non-imported) [`LamportCompressedPubKey`] back into the full
@@ -2368,6 +2373,8 @@ mod tests {
     };
     use redact::Secret;
     use std::{env, fs, panic, rc::Rc, str::FromStr};
+    #[cfg(feature = "lamport_idx_check")]
+    use storage_backend::key::StorageKey;
     use storage_backend::{storage::Storage, storage_config::StorageConfig};
     use zeroize::Zeroizing;
 
@@ -7099,7 +7106,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_index_reuse_prevention() -> Result<(), KeyManagerError> {
+    fn test_winternitz_replay_by_index_is_idempotent() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
@@ -7108,26 +7115,28 @@ mod tests {
         let message = random_message();
         issue_winternitz_at(&key_manager, message[..].len(), WinternitzType::SHA256, 5)?;
 
-        // First signature should succeed
-        let signature_result =
-            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
-        assert!(signature_result.is_ok(), "First signature should succeed");
+        let signature = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::SHA256,
+            5,
+        )?;
+        let replay = key_manager.sign_winternitz_message_by_index(
+            &message[..],
+            WinternitzType::SHA256,
+            5,
+        )?;
+        assert_eq!(signature, replay);
 
-        // Second signature with the same index should fail
-        let second_signature_result =
-            key_manager.sign_winternitz_message_by_index(&message[..], WinternitzType::SHA256, 5);
-        assert!(
-            second_signature_result.is_err(),
-            "Second signature with same index should fail"
-        );
-
-        // Verify it's the correct error type
-        match second_signature_result {
-            Err(KeyManagerError::WinternitzIndexAlreadyUsed(idx)) => {
-                assert_eq!(idx, 5, "Error should report the correct index");
-            }
-            _ => panic!("Expected WinternitzIndexAlreadyUsed error"),
-        }
+        let mut different_message = message[..].to_vec();
+        different_message[0] ^= 1;
+        assert!(matches!(
+            key_manager.sign_winternitz_message_by_index(
+                &different_message[..],
+                WinternitzType::SHA256,
+                5,
+            ),
+            Err(KeyManagerError::WinternitzIndexAlreadyUsed(5))
+        ));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -7136,7 +7145,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_index_reuse_prevention_by_key() -> Result<(), KeyManagerError> {
+    fn test_winternitz_replay_by_public_key_is_idempotent() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
@@ -7148,41 +7157,17 @@ mod tests {
         // Derive a key using the public API (next_winternitz)
         let public_key = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
 
-        // First signature should succeed
-        let signature_result =
-            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
-        assert!(signature_result.is_ok(), "First signature should succeed");
+        let signature = key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key)?;
+        let replay = key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key)?;
+        assert_eq!(signature, replay);
 
-        // Second signature with the same key should fail
-        let second_signature_result =
-            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key);
-        assert!(
-            second_signature_result.is_err(),
-            "Second signature with same key should fail"
-        );
-
-        // Verify it's the correct error type
-        match second_signature_result {
-            Err(KeyManagerError::WinternitzIndexAlreadyUsed(idx)) => {
-                assert_eq!(
-                    idx,
-                    public_key.derivation_index()?,
-                    "Error should report the correct index"
-                );
-            }
-            _ => panic!("Expected WinternitzIndexAlreadyUsed error"),
-        }
-
-        // Derive another key using the public API (next_winternitz)
-        let public_key2 = key_manager.next_winternitz(message_size, WinternitzType::SHA256)?;
-
-        // First signature should succeed
-        let signature_result_for_k2 =
-            key_manager.sign_winternitz_message_by_pubkey(&message[..], &public_key2);
-        assert!(
-            signature_result_for_k2.is_ok(),
-            "First signature for k2 should succeed"
-        );
+        let mut different_message = message[..].to_vec();
+        different_message[0] ^= 1;
+        assert!(matches!(
+            key_manager.sign_winternitz_message_by_pubkey(&different_message[..], &public_key),
+            Err(KeyManagerError::WinternitzIndexAlreadyUsed(index))
+                if index == public_key.derivation_index()?
+        ));
 
         drop(key_manager);
         cleanup_storage(&keystore_path);
@@ -7191,227 +7176,14 @@ mod tests {
 
     #[test]
     #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_bitmap_basic_operations() -> Result<(), KeyManagerError> {
+    fn test_winternitz_usage_persistence() -> Result<(), KeyManagerError> {
         let keystore_path = temp_storage();
         let keystore_storage_config = database_keystore_config(&keystore_path)?;
-
-        let key_manager = test_random_key_manager(keystore_storage_config)?;
-
         let message = random_message();
-
-        // Test marking indices in the same block (0-1023)
-        for index in [0, 1, 50, 100, 500, 1023] {
-            issue_winternitz_at(
-                &key_manager,
-                message[..].len(),
-                WinternitzType::SHA256,
-                index,
-            )?;
-            let result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                result.is_ok(),
-                "Should succeed marking index {} for first time",
-                index
-            );
-
-            // Try to reuse the same index
-            let reuse_result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                reuse_result.is_err(),
-                "Should fail when reusing index {}",
-                index
-            );
-        }
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        Ok(())
-    }
-
-    #[test]
-    #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_bitmap_multiple_blocks() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore_storage_config = database_keystore_config(&keystore_path)?;
-
-        let key_manager = test_random_key_manager(keystore_storage_config)?;
-
-        let message = random_message();
-
-        // Test indices across multiple blocks
-        // Block 0: 0-1023, Block 1: 1024-2047, Block 2: 2048-3071
-        let test_indices = [
-            0,      // First index of block 0
-            1023,   // Last index of block 0
-            1024,   // First index of block 1
-            2047,   // Last index of block 1
-            2048,   // First index of block 2
-            10000,  // Index in block 9
-            100000, // Index in block 97
-        ];
-
-        for &index in &test_indices {
-            issue_winternitz_at(
-                &key_manager,
-                message[..].len(),
-                WinternitzType::SHA256,
-                index,
-            )?;
-            let result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                result.is_ok(),
-                "Should succeed marking index {} in its block",
-                index
-            );
-
-            // Verify reuse fails
-            let reuse_result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                reuse_result.is_err(),
-                "Should fail reusing index {} in its block",
-                index
-            );
-        }
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        Ok(())
-    }
-
-    #[test]
-    #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_bitmap_boundary_conditions() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore_storage_config = database_keystore_config(&keystore_path)?;
-
-        let key_manager = test_random_key_manager(keystore_storage_config)?;
-
-        let message = random_message();
-
-        // Test boundary conditions: block boundaries and edge cases
-        let boundary_indices = [
-            0,      // Very first index
-            1,      // Second index
-            1022,   // Second to last in block 0
-            1023,   // Last in block 0
-            1024,   // First in block 1
-            1025,   // Second in block 1
-            100000, // Large index in block 97
-        ];
-
-        for &index in &boundary_indices {
-            issue_winternitz_at(
-                &key_manager,
-                message[..].len(),
-                WinternitzType::SHA256,
-                index,
-            )?;
-            let result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                result.is_ok(),
-                "Should handle boundary index {} correctly",
-                index
-            );
-        }
-
-        // Verify all marked indices cannot be reused
-        for &index in &boundary_indices {
-            let reuse_result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                index,
-            );
-            assert!(
-                reuse_result.is_err(),
-                "Boundary index {} should be marked as used",
-                index
-            );
-        }
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        Ok(())
-    }
-
-    #[test]
-    #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_bitmap_all_bits_in_byte() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore_storage_config = database_keystore_config(&keystore_path)?;
-
-        let key_manager = test_random_key_manager(keystore_storage_config)?;
-
-        let message = random_message();
-
-        // Test all 8 bits within a single byte (indices 0-7 are in the first byte)
-        for bit_index in 0..8 {
-            issue_winternitz_at(
-                &key_manager,
-                message[..].len(),
-                WinternitzType::SHA256,
-                bit_index,
-            )?;
-            let result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                bit_index,
-            );
-            assert!(
-                result.is_ok(),
-                "Should mark bit {} in first byte",
-                bit_index
-            );
-        }
-
-        // Verify all bits are marked
-        for bit_index in 0..8 {
-            let reuse_result = key_manager.sign_winternitz_message_by_index(
-                &message[..],
-                WinternitzType::SHA256,
-                bit_index,
-            );
-            assert!(
-                reuse_result.is_err(),
-                "Bit {} should be marked as used",
-                bit_index
-            );
-        }
-
-        drop(key_manager);
-        cleanup_storage(&keystore_path);
-        Ok(())
-    }
-
-    #[test]
-    #[cfg(feature = "wots_idx_check")]
-    fn test_winternitz_bitmap_persistence() -> Result<(), KeyManagerError> {
-        let keystore_path = temp_storage();
-        let keystore_storage_config = database_keystore_config(&keystore_path)?;
 
         // Create first key manager and mark some indices
         {
             let key_manager = test_deterministic_key_manager(keystore_storage_config.clone())?;
-            let message = random_message();
 
             for index in [10, 20, 30, 40] {
                 issue_winternitz_at(
@@ -7436,20 +7208,25 @@ mod tests {
         // Create new key manager with same storage and verify indices are still marked
         {
             let key_manager = test_deterministic_key_manager(keystore_storage_config)?;
-            let message = random_message();
 
-            // Try to reuse the previously marked indices
+            // Identical replays remain idempotent after reopening storage.
             for index in [10, 20, 30] {
-                let reuse_result = key_manager.sign_winternitz_message_by_index(
+                key_manager.sign_winternitz_message_by_index(
                     &message[..],
                     WinternitzType::SHA256,
                     index,
-                );
-                assert!(
-                    reuse_result.is_err(),
-                    "Index {} should still be marked after recreation",
-                    index
-                );
+                )?;
+
+                let mut different_message = message[..].to_vec();
+                different_message[0] ^= 1;
+                assert!(matches!(
+                    key_manager.sign_winternitz_message_by_index(
+                        &different_message[..],
+                        WinternitzType::SHA256,
+                        index,
+                    ),
+                    Err(KeyManagerError::WinternitzIndexAlreadyUsed(i)) if i == index
+                ));
             }
 
             // But index 40 should still be available
@@ -8123,7 +7900,8 @@ mod tests {
     }
 
     #[test]
-    fn test_lamport_key_reuse_prevention_imported() -> Result<(), KeyManagerError> {
+    #[cfg(feature = "lamport_idx_check")]
+    fn test_lamport_imported_replay_is_idempotent() -> Result<(), KeyManagerError> {
         run_test_with_key_manager(|key_manager| {
             let lamport = Lamport::new();
             let mut rng = rand::thread_rng();
@@ -8145,60 +7923,239 @@ mod tests {
                 LamportType::SHA256,
             )?;
 
-            // Sign once - should succeed
+            let invalid_message = vec![true; 255];
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&invalid_message, &public_key),
+                Err(KeyManagerError::LamportGenerationError(
+                    crate::errors::LamportError::MessageLengthMismatch(255, 256)
+                ))
+            ));
+
+            // The invalid request did not consume the imported key.
             let message_bits = vec![true; 256];
-            let _signature =
+            let signature =
                 key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key)?;
+            // Retrying the import must preserve the usage record.
+            let reimported = key_manager.import_lamport_private_key(
+                &bytes_0s,
+                &bytes_1s,
+                256,
+                LamportType::SHA256,
+            )?;
+            assert_eq!(public_key, reimported);
 
-            // Try to sign again - should fail (key should be marked as spent)
-            let result = key_manager.sign_lamport_message_by_pubkey(&message_bits, &public_key);
+            // Equivalent byte and bit representations have the same canonical signed value.
+            let message_bytes = vec![0xff; 32];
+            let replay = key_manager.sign_lamport_message_by_pubkey(&message_bytes, &public_key)?;
+            assert_eq!(signature, replay);
 
-            assert!(
-                result.is_err(),
-                "Should not be able to reuse an imported Lamport key"
-            );
-
-            if let Err(KeyManagerError::LamportImportedKeyAlreadyUsed) = result {
-                // Expected error
-            } else {
-                panic!(
-                    "Expected LamportImportedKeyAlreadyUsed error, got {:?}",
-                    result
-                );
-            }
+            let mut different_message = message_bits;
+            different_message[0] = false;
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&different_message, &public_key),
+                Err(KeyManagerError::LamportImportedKeyAlreadyUsed)
+            ));
 
             Ok(())
         })
     }
 
     #[test]
-    fn test_lamport_key_reuse_prevention_derived() -> Result<(), KeyManagerError> {
+    #[cfg(feature = "lamport_idx_check")]
+    fn test_imported_lamport_rejects_used_record_without_canonical_value(
+    ) -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let private_key =
+                Lamport::new().generate_private_key(&[17u8; 32], LamportType::SHA256, 32, 0)?;
+            let (zeros, ones) = private_key.to_bytes_splitted();
+            let public_key =
+                key_manager.import_lamport_private_key(&zeros, &ones, 32, LamportType::SHA256)?;
+
+            let exported = key_manager.export_keys()?;
+            let raw = &exported.lamport_imported_raw[0];
+            let prefix = raw
+                .encoded_private_key_and_spent_flag
+                .strip_suffix(":false")
+                .expect("new imported keys use the unused record format");
+            key_manager.storage().set(
+                StorageKey::from_joined(&raw.storage_key)?,
+                format!("{prefix}:true"),
+                None,
+            )?;
+
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&vec![false; 32], &public_key),
+                Err(KeyManagerError::InvalidLamportPrivateKey)
+            ));
+
+            key_manager.storage().set(
+                StorageKey::from_joined(&raw.storage_key)?,
+                format!("{prefix}:true:31:AAAAAA=="),
+                None,
+            )?;
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&vec![false; 32], &public_key),
+                Err(KeyManagerError::InvalidLamportPrivateKey)
+            ));
+
+            key_manager.storage().set(
+                StorageKey::from_joined(&raw.storage_key)?,
+                format!("{prefix}:true:32:AA=="),
+                None,
+            )?;
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&vec![false; 32], &public_key),
+                Err(KeyManagerError::InvalidLamportPrivateKey)
+            ));
+            Ok(())
+        })
+    }
+
+    #[test]
+    #[cfg(feature = "lamport_idx_check")]
+    fn test_lamport_derived_replay_is_idempotent() -> Result<(), KeyManagerError> {
         run_test_with_key_manager(|key_manager| {
             let _lamport = Lamport::new();
 
             // Derive a key
             let _public_key = key_manager.next_lamport(256, LamportType::SHA256)?;
 
-            // Sign once - should succeed
             let message_bits = vec![false; 256];
-            let _signature =
+            let signature =
                 key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
+            let replay =
+                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0)?;
+            assert_eq!(signature, replay);
+            assert!(matches!(
+                key_manager
+                    .sign_lamport_message_by_index(&message_bits, LamportType::RIPEMD160, 0,),
+                Err(KeyManagerError::LamportIndexAlreadyUsed(0))
+            ));
 
-            // Try to sign again with the same key - should fail
-            let result =
-                key_manager.sign_lamport_message_by_index(&message_bits, LamportType::SHA256, 0);
+            let mut different_message = message_bits;
+            different_message[0] = true;
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_index(
+                    &different_message,
+                    LamportType::SHA256,
+                    0,
+                ),
+                Err(KeyManagerError::LamportIndexAlreadyUsed(0))
+            ));
 
-            assert!(
-                result.is_err(),
-                "Should not be able to reuse a derived Lamport key"
-            );
+            Ok(())
+        })
+    }
 
-            if let Err(KeyManagerError::LamportIndexAlreadyUsed(index)) = result {
-                assert_eq!(index, 0);
-            } else {
-                panic!("Expected LamportIndexAlreadyUsed error, got {:?}", result);
-            }
+    #[test]
+    #[cfg(feature = "lamport_idx_check")]
+    fn test_lamport_replay_persists_after_reopen() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let message = vec![true, false].repeat(64);
 
+        let (public_key, first_signature) = {
+            let key_manager = test_deterministic_key_manager(config.clone())?;
+            let public_key = key_manager.next_lamport(message.len(), LamportType::SHA256)?;
+            let signature = key_manager.sign_lamport_message_by_pubkey(&message, &public_key)?;
+            (public_key, signature)
+        };
+
+        {
+            let key_manager = test_deterministic_key_manager(config)?;
+            let replay = key_manager.sign_lamport_message_by_pubkey(&message, &public_key)?;
+            assert_eq!(first_signature, replay);
+
+            let mut different_message = message;
+            different_message[0] = !different_message[0];
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&different_message, &public_key),
+                Err(KeyManagerError::LamportIndexAlreadyUsed(0))
+            ));
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "lamport_idx_check")]
+    fn test_imported_lamport_replay_persists_after_reopen() -> Result<(), KeyManagerError> {
+        let keystore_path = temp_storage();
+        let config = database_keystore_config(&keystore_path)?;
+        let message = vec![true, false].repeat(32);
+
+        let (public_key, first_signature) = {
+            let key_manager = test_deterministic_key_manager(config.clone())?;
+            let private_key = Lamport::new().generate_private_key(
+                &[24u8; 32],
+                LamportType::SHA256,
+                message.len(),
+                0,
+            )?;
+            let (zeros, ones) = private_key.to_bytes_splitted();
+            let public_key = key_manager.import_lamport_private_key(
+                &zeros,
+                &ones,
+                message.len(),
+                LamportType::SHA256,
+            )?;
+            let signature = key_manager.sign_lamport_message_by_pubkey(&message, &public_key)?;
+            let exported = key_manager.export_keys()?;
+            assert_eq!(exported.lamport_imported_raw.len(), 1);
+            assert!(exported.lamport_imported_raw[0]
+                .encoded_private_key_and_spent_flag
+                .contains(":true:"));
+            (public_key, signature)
+        };
+
+        {
+            let key_manager = test_deterministic_key_manager(config)?;
+            let replay = key_manager.sign_lamport_message_by_pubkey(&message, &public_key)?;
+            assert_eq!(first_signature, replay);
+
+            let mut different_message = message;
+            different_message[0] = !different_message[0];
+            assert!(matches!(
+                key_manager.sign_lamport_message_by_pubkey(&different_message, &public_key),
+                Err(KeyManagerError::LamportImportedKeyAlreadyUsed)
+            ));
+        }
+
+        cleanup_storage(&keystore_path);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(all(not(feature = "wots_idx_check"), not(feature = "lamport_idx_check")))]
+    fn test_ots_reuse_checks_can_be_disabled() -> Result<(), KeyManagerError> {
+        run_test_with_key_manager(|key_manager| {
+            let first_wots_message = [1u8; 4];
+            let second_wots_message = [2u8; 4];
+            issue_winternitz_at(&key_manager, 4, WinternitzType::SHA256, 0)?;
+            key_manager.sign_winternitz_message_by_index(
+                &first_wots_message,
+                WinternitzType::SHA256,
+                0,
+            )?;
+            key_manager.sign_winternitz_message_by_index(
+                &second_wots_message,
+                WinternitzType::SHA256,
+                0,
+            )?;
+
+            let first_lamport_message = vec![false; 32];
+            let second_lamport_message = vec![true; 32];
+            key_manager.sign_lamport_message_by_index(
+                &first_lamport_message,
+                LamportType::SHA256,
+                0,
+            )?;
+            key_manager.sign_lamport_message_by_index(
+                &second_lamport_message,
+                LamportType::SHA256,
+                0,
+            )?;
             Ok(())
         })
     }
